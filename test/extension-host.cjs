@@ -26,6 +26,9 @@ exports.run = async function () {
   const extension = vscode.extensions.all.find(value => value.packageJSON.name === 'eska-explorer');
   assert.ok(extension);
   await vscode.workspace.getConfiguration('eska.explorer').update('executable', process.env.ESKA_TEST_BINARY, vscode.ConfigurationTarget.Workspace);
+  const xmlWithSynonym = (await fs.readFile(fixture.descriptor, 'utf8')).replace('<Name>Артикул</Name>',
+    '<Name>Артикул</Name><Synonym xmlns:v8="http://v8.1c.ru/8.1/data/core"><v8:item><v8:lang>ru</v8:lang><v8:content>Уникальный код товара</v8:content></v8:item></Synonym>');
+  await fs.writeFile(fixture.descriptor, xmlWithSynonym);
   const explorer = await extension.activate();
   await vscode.commands.executeCommand('eska.explorer.connect');
   await vscode.commands.executeCommand('eska.explorer.projects.focus');
@@ -35,6 +38,22 @@ exports.run = async function () {
   const goods = named(objects, 'Товары');
   const customers = named(objects, 'Покупатели');
   assert.equal(goods.children, undefined, 'listing does not expand descriptors');
+  // Synonym matching remains visible in native Quick Pick; Enter reveals an initially unopened branch.
+  await vscode.commands.executeCommand('eska.explorer.search');
+  const search = explorer.searchView;
+  search.picker.value = 'уНиКаЛьНыЙ код';
+  await until(() => search.picker.items.some(item => item.hit?.name === 'Артикул') && !search.picker.busy, 'synonym search');
+  const result = search.picker.items.find(item => item.hit);
+  assert.equal(result.hit.name, 'Артикул');
+  assert.ok(result.detail.includes('Товары'));
+  assert.ok(result.detail.includes('Уникальный код товара'));
+  await vscode.commands.executeCommand('workbench.action.acceptSelectedQuickOpenItem');
+  await until(() => !explorer.searchView && explorer.view.selection[0]?.node.label.text === 'Артикул', 'search Enter/reveal');
+  await vscode.commands.executeCommand('eska.explorer.search');
+  explorer.searchView.picker.value = 'нетТакогоОбъекта';
+  await until(() => !explorer.searchView.picker.busy && explorer.searchView.picker.items.some(item => /No matches|Совпадений нет/.test(item.label)), 'no matches');
+  await vscode.commands.executeCommand('workbench.action.closeQuickOpen');
+  await until(() => !explorer.searchView, 'search Escape');
   await explorer.view.reveal(goods, { expand: true, select: true, focus: true });
   const groups = await explorer.getChildren(goods);
   const modules = named(groups, 'Модули');
@@ -132,7 +151,9 @@ exports.run = async function () {
   const previousTree = explorer.tree;
   await fs.appendFile(path.join(fixture.root, 'eska.toml'), '\n# External manifest update\n');
   await until(() => explorer.tree && explorer.tree !== previousTree, 'manifest reconnect');
+  await vscode.commands.executeCommand('eska.explorer.search');
   await vscode.commands.executeCommand('eska.explorer.disconnect');
+  assert.equal(explorer.searchView, undefined, 'disconnect disposes search input');
   await fs.writeFile(path.join(fixture.root, 'host-result.json'), JSON.stringify({ passed: true, vscode: vscode.version, node: process.versions.node }));
   console.log('ESKA_TREE_HOST_PASSED', vscode.version);
 };

@@ -36,7 +36,7 @@
     "check": "tsc -p . --noEmit",
     "test": "bun run --bun compile && bun test",
     "test:node": "npm run compile && node --test test/*.test.mjs",
-    "test:integration": "bun run --bun compile && bun test test/integration.test.mjs test/tree.test.mjs",
+    "test:integration": "bun run --bun compile && bun test test/integration.test.mjs test/tree.test.mjs test/search.test.mjs",
     "test:host": "bun run --bun compile && bun test/run-host.mjs"
   },
   "devDependencies": {
@@ -86,6 +86,12 @@
         "command": "eska.explorer.openSource",
         "title": "%openSource%",
         "category": "eska Explorer"
+      },
+      {
+        "command": "eska.explorer.search",
+        "title": "%search%",
+        "category": "eska Explorer",
+        "icon": "$(search)"
       }
     ],
     "views": {
@@ -124,6 +130,11 @@
           "command": "eska.explorer.showLog",
           "when": "view == eska.explorer.projects",
           "group": "navigation@4"
+        },
+        {
+          "command": "eska.explorer.search",
+          "when": "view == eska.explorer.projects",
+          "group": "navigation@0"
         }
       ],
       "view/item/context": [

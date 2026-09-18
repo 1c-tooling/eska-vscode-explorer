@@ -12,5 +12,6 @@
   "treeLanguage": "Language of metadata groups and module roles. Auto follows the VS Code language (Russian or English). Applies immediately; object names and other UI text are unchanged.",
   "treeLanguageAuto": "Auto",
   "treeLanguageRussian": "Русский",
-  "treeLanguageEnglish": "English"
+  "treeLanguageEnglish": "English",
+  "search": "Search metadata"
 }

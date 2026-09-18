@@ -1,6 +1,11 @@
 import type { FailureCode } from "./protocol.js";
 
 const en = {
+  search: "Search metadata", searchPlaceholder: "Object or nested element name or synonym",
+  searchRetry: "Repeat search", searchLoading: "Searching…", searchEmpty: "No matches.",
+  searchIndexing: "Indexing: {0} objects, {1} files pending. Results are partial.",
+  searchIncomplete: "Partial index: {0} objects, {1} files pending, {2} errors. Correct the sources.",
+  searchLimited: "Showing the first {0} matches in this project. Refine your query.",
   cancelled: "The operation was cancelled.",
   refresh: "Refresh metadata", openSource: "Open source",
   obsolete: "The project connection changed. Select the item again.",
@@ -35,6 +40,11 @@ const en = {
 } as const;
 
 const ru: Record<keyof typeof en, string> = {
+  search: "Поиск метаданных", searchPlaceholder: "Имя или синоним объекта либо вложенного элемента",
+  searchRetry: "Повторить поиск", searchLoading: "Поиск…", searchEmpty: "Совпадений нет.",
+  searchIndexing: "Индексация: {0} объектов, осталось файлов: {1}. Выдача неполная.",
+  searchIncomplete: "Неполный индекс: {0} объектов, осталось файлов: {1}, ошибок: {2}. Исправьте исходники.",
+  searchLimited: "Первые {0} совпадений в этом проекте. Уточните запрос.",
   cancelled: "Операция отменена.",
   refresh: "Обновить метаданные", openSource: "Открыть исходник",
   obsolete: "Подключение к проекту изменилось. Выберите элемент повторно.",

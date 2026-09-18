@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { SearchView } from "./search-view.js";
 import { Connection, type ConnectionState } from "./connection.js";
 import { assertHost } from "./host.js";
 import { message, type MessageKey } from "./messages.js";
@@ -34,6 +35,7 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
   private readonly view: vscode.TreeView<Element>;
   private readonly disposables: vscode.Disposable[] = [];
   private tree: MetadataTree | undefined;
+  private searchView: SearchView | undefined;
   private watchers: vscode.Disposable[] = [];
   private readonly expanded = new Map<string, boolean>();
   private readonly recovering = new Set<ProjectTree>();
@@ -55,6 +57,7 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
       ["disconnect", () => this.connection.disconnect()],
       ["showLog", () => this.output.show(true)],
       ["refresh", () => this.refresh()],
+      ["search", () => this.search()],
     ] as const) {
       this.disposables.push(vscode.commands.registerCommand(`eska.explorer.${name}`, action));
     }
@@ -157,6 +160,22 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
     return "node" in entry ? this.tree?.parent(entry) : entry.parent;
   }
 
+  /** Search reuses the current backend context and reveals only the chosen branch. */
+  private async search(): Promise<void> {
+    if (!this.tree) await this.connect(false);
+    const tree = this.tree;
+    if (!tree || this.disposed) return;
+    if (this.searchView) { this.searchView.show(); return; }
+    this.searchView = new SearchView(tree, async (entry) => {
+      try {
+        if (this.tree !== tree) throw new ExplorerError("obsolete");
+        await vscode.commands.executeCommand("eska.explorer.projects.focus");
+        if (this.tree !== tree) throw new ExplorerError("obsolete");
+        await this.view.reveal(entry, { select: true, focus: true });
+      } catch (error) { this.showError(error instanceof ExplorerError ? error : new ExplorerError("sourceMissing")); }
+    }, () => { this.searchView = undefined; });
+  }
+
   /** A manual refresh can recover a single descriptor or all current projects. */
   private async refresh(entry?: Element): Promise<void> {
     const tree = this.tree;
@@ -242,6 +261,7 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
   /** Process logs never become the view's labels or user-facing error text. */
   private update(state: ConnectionState): void {
     if (this.disposed) return;
+    this.searchView?.dispose();
     this.tree?.dispose();
     this.tree = undefined;
     for (const watcher of this.watchers) watcher.dispose();
@@ -280,6 +300,7 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
     if (!this.stopping) {
       this.disposed = true;
       for (const disposable of this.disposables) disposable.dispose();
+      this.searchView?.dispose();
       this.tree?.dispose();
       for (const watcher of this.watchers) watcher.dispose();
       this.view.dispose();
