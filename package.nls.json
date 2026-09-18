@@ -1,8 +1,8 @@
 {
-  "hideEmptyGroups": "Hide Empty Root Groups",
-  "showEmptyGroups": "Show Empty Root Groups",
-  "resetRootFilter": "Use Default Root Filter",
-  "hideEmptyRootGroups": "Hide empty root groups in configurations and extensions by default. A saved project choice overrides this setting; use Use Default Root Filter to reset it.",
+  "hideEmptyGroups": "Hide Empty Groups",
+  "showEmptyGroups": "Show Empty Groups",
+  "resetRootFilter": "Use Default Filter",
+  "hideEmptyRootGroups": "Hide empty root sections and sections inside Common in configurations and extensions by default. Groups inside objects remain visible. A saved project choice overrides this setting; use Use Default Filter to reset it.",
   "openXml": "Open XML",
   "description": "Explore 1C metadata through eska.",
   "connect": "Choose Project and Connect",
@@ -18,5 +18,6 @@
   "treeLanguageAuto": "Auto",
   "treeLanguageRussian": "Русский",
   "treeLanguageEnglish": "English",
-  "search": "Search metadata"
+  "search": "Search metadata",
+  "revealActiveFile": "Reveal Active File in eska Tree"
 }

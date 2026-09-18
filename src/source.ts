@@ -62,26 +62,61 @@ export function isCommonModule(entry: TreeEntry): boolean {
     && parent.collection.kind === "metadata" && parent.collection.metadataKind === "common-module";
 }
 
+/** Object kinds come from the protocol; the parent fallback supports older common-module nodes. */
+export function directModuleRole(entry: TreeEntry): string | undefined {
+  if (entry.node.id.kind !== "object") return undefined;
+  if (isCommonModule(entry)) return "module";
+  switch (entry.node.metadataKind) {
+    case "common-module": case "bot": case "web-service": case "http-service":
+    case "web-socket-client": case "integration-service": return "module";
+    case "common-command": case "command": return "command";
+    case "recalculation": return "record-set";
+    default: return undefined;
+  }
+}
+
+/** Services and recalculations still expand their real metadata children while opening their code. */
+export function isModuleLeaf(entry: TreeEntry): boolean {
+  return directModuleRole(entry) !== undefined && !["web-service", "http-service", "integration-service", "recalculation"]
+    .includes(entry.node.metadataKind ?? "");
+}
+
+/** Managed and common forms share the same two source actions. */
+export function isForm(entry: TreeEntry): boolean {
+  return entry.node.id.kind === "object" && ["form", "common-form"].includes(entry.node.metadataKind ?? "");
+}
+
+/** A form XML payload is distinct from its metadata descriptor and from a binary form. */
+export function isFormPayload(source: unknown): boolean {
+  return isRecord(source) && isRecord(source.role) && source.role.kind === "payload"
+    && isWirePath(source.path) && nativePath(source.path).replaceAll("\\", "/").split("/").at(-1) === "Form.xml";
+}
+
+export type SourceTarget = "default" | "xml" | "form" | "form-module";
+
 /** Request exact source mappings; virtual groups intentionally do not open an editor. */
-export async function resolveSource(tree: MetadataTree, entry: TreeEntry, target: "default" | "xml" = "default"): Promise<OpenSource> {
+export async function resolveSource(tree: MetadataTree, entry: TreeEntry, target: SourceTarget = "default"): Promise<OpenSource> {
   const id = entry.node.id;
   if (id.kind === "collection") throw new ExplorerError("sourceMissing");
-  const moduleRole = id.kind === "module" ? id.role : target === "default" && isCommonModule(entry) ? "module" : undefined;
+  const moduleRole = id.kind === "module" ? id.role : target === "form-module" ? "module"
+    : target === "default" ? directModuleRole(entry) : undefined;
+  if ((target === "form" || target === "form-module") && !isForm(entry)) throw new ExplorerError("sourceMissing");
   const result = await tree.request(entry.project, "metadata/source", { node: id });
   const generation = entry.project.info.generation;
   const event = entry.project.info.eventSequence;
   if (!Array.isArray(result.sources)) throw new ExplorerError("protocolInvalid");
   const candidates = result.sources.filter((source) => isRecord(source) && isRecord(source.role)
-    && (moduleRole !== undefined ? source.role.kind === "module" && source.role.role === moduleRole : source.role.kind === "descriptor"));
+    && (target === "form" ? isFormPayload(source) : moduleRole !== undefined
+      ? source.role.kind === "module" && source.role.role === moduleRole : source.role.kind === "descriptor"));
   if (candidates.length !== 1 || !isWirePath(candidates[0].path)) throw new ExplorerError("sourceMissing");
   const path = await existingSource(entry.project.info.sourcePath, candidates[0].path);
-  if (moduleRole !== undefined || id.kind === "module") return { path };
+  if (moduleRole !== undefined || id.kind === "module" || target === "form") return { path };
   // Reading only the selected descriptor gives byte-exact positions without parsing XML in the client.
   const before = await readFile(path);
   const properties = await tree.request(entry.project, "metadata/properties", { objectId: id.objectId });
   if (!Array.isArray(properties.properties)) throw new ExplorerError("protocolInvalid");
   const names = properties.properties.filter((property) => isRecord(property) && isRecord(property.key)
-    && property.key.namespace === "http://v8.1c.ru/8.3/MDClasses" && property.key.name === "Name");
+    && property.key.namespace === (entry.node.metadataKind === "predefined-item" ? "http://v8.1c.ru/8.3/xcf/predef" : "http://v8.1c.ru/8.3/MDClasses") && property.key.name === "Name");
   if (names.length !== 1 || !isRecord(names[0].range)
     || typeof names[0].range.start !== "number" || typeof names[0].range.end !== "number") throw new ExplorerError("protocolInvalid");
   if (!before.equals(await readFile(path)) || generation !== entry.project.info.generation || event !== entry.project.info.eventSequence) {

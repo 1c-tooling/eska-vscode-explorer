@@ -31,3 +31,17 @@ test("all manifest localization references resolve in both languages", async () 
     assert.ok(ru[key]);
   }
 });
+
+
+test("keyboard overrides are scoped and have native macOS equivalents", async () => {
+  const manifest = await json("package.json");
+  const bindings = manifest.contributes.keybindings;
+  for (const binding of bindings) {
+    assert.ok(manifest.contributes.commands.some(command => command.command === binding.command));
+    if (binding.key.startsWith("ctrl+k")) {
+      assert.equal(binding.mac, binding.key.replace("ctrl", "cmd"));
+      assert.ok(binding.when.includes("eska.explorer.activeProject"));
+      assert.ok(binding.when.includes("editorTextFocus"));
+    } else assert.equal(binding.when, "focusedView == eska.explorer.projects");
+  }
+});

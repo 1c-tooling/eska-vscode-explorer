@@ -13,7 +13,7 @@ function node(kind) {
 test("all backend metadata kinds have local artwork in every supported theme", async () => {
   const vocabulary = await readFile(new URL("../src/kind-labels.ts", import.meta.url), "utf8");
   const kinds = [...vocabulary.matchAll(/^  "([a-z-]+)":/gm)].map(match => match[1]);
-  assert.equal(kinds.length, 67);
+  assert.equal(kinds.length, 68);
   assert.deepEqual(Object.keys(metadataIcons).sort(), kinds.sort());
   const names = new Set([...Object.values(metadataIcons), ...Object.values(moduleIcons), "unknown", "common", "modules"]);
   for (const theme of ["light", "dark", "contrast", "contrast-light"]) {

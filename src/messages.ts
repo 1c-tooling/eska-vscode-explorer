@@ -1,6 +1,10 @@
 import type { FailureCode } from "./protocol.js";
 
 const en = {
+  gitModified: "Modified", gitAdded: "Added or untracked", gitDeleted: "Deleted",
+  gitRenamed: "Renamed", gitConflict: "Merge conflict", gitDescendants: "Contains changed source files",
+  fileNotInTree: "This file has no matching item in the eska tree.",
+  formSource: "Form", formModule: "Module",
   filterSaveFailed: "Could not save the project filter setting. Try again.",
   search: "Search metadata", searchPlaceholder: "Object or nested element name or synonym",
   searchRetry: "Repeat search", searchLoading: "Searching…", searchEmpty: "No matches.",
@@ -17,7 +21,7 @@ const en = {
   disconnected: "Choose a project to connect.", connecting: "Connecting to eska…",
   stopping: "Disconnecting…", ready: "Connected to eska {0}",
   choose: "Select an eska project folder", select: "Choose project", retry: "Restart connection",
-  log: "Show log", initialization: "Open setup instructions", logName: "eska Explorer",
+  log: "Show log", initialization: "Open setup instructions", logName: "ESKA Explorer",
   configuration: "Configuration", extension: "Configuration extension", processing: "External processing", report: "External report",
   noFolder: "Open a folder containing an eska project.",
   untrusted: "Trust this workspace before starting eska.",
@@ -41,6 +45,10 @@ const en = {
 } as const;
 
 const ru: Record<keyof typeof en, string> = {
+  gitModified: "Изменён", gitAdded: "Добавлен или не отслеживается", gitDeleted: "Удалён",
+  gitRenamed: "Переименован", gitConflict: "Конфликт слияния", gitDescendants: "Есть изменённые исходники",
+  fileNotInTree: "Для этого файла нет соответствующего элемента в дереве eska.",
+  formSource: "Форма", formModule: "Модуль",
   filterSaveFailed: "Не удалось сохранить режим фильтра проекта. Повторите действие.",
   search: "Поиск метаданных", searchPlaceholder: "Имя или синоним объекта либо вложенного элемента",
   searchRetry: "Повторить поиск", searchLoading: "Поиск…", searchEmpty: "Совпадений нет.",
@@ -57,7 +65,7 @@ const ru: Record<keyof typeof en, string> = {
   disconnected: "Выберите проект для подключения.", connecting: "Подключение к eska…",
   stopping: "Отключение…", ready: "Подключено к eska {0}",
   choose: "Выберите папку проекта eska", select: "Выбрать проект", retry: "Перезапустить подключение",
-  log: "Показать журнал", initialization: "Открыть инструкцию настройки", logName: "eska Explorer",
+  log: "Показать журнал", initialization: "Открыть инструкцию настройки", logName: "ESKA Explorer",
   configuration: "Конфигурация", extension: "Расширение конфигурации", processing: "Внешняя обработка", report: "Внешний отчёт",
   noFolder: "Откройте папку с проектом eska.",
   untrusted: "Перед запуском eska предоставьте доверие рабочей области.",
