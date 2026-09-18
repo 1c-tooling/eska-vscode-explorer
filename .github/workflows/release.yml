@@ -57,6 +57,7 @@ jobs:
             knope release
             git fetch origin --tags
           fi
+          python3 scripts/release-vsix.py "$version"
       - name: Prepare the next release PR
         env:
           GITHUB_TOKEN: ${{ github.token }}

@@ -1,8 +1,7 @@
 # Версии и GitHub Release
 
-Автоматизация добавлена по запросу пользователя отдельно от T76. Она включится
-после попадания workflow в `main`; локальная разработка на `feat/explorer` ничего
-не публикует.
+Автоматизация добавлена по запросу пользователя отдельно от T76. Она работает
+в `main`; локальная разработка на `feat/explorer` ничего не публикует автоматически.
 
 ## Процесс
 
@@ -13,9 +12,11 @@
 3. Открывается release PR. После его слияния в `main` workflow повторяет проверки
    и создаёт тег `v<version>` и GitHub Release с соответствующим changelog.
 
-Сейчас релиз содержит исходники, автоматически прикрепляемые GitHub, и описание
-из changelog. Локальная [упаковка VSIX](packaging.md) подготовлена; publisher — `1c-tooling`.
-Прикрепление VSIX к GitHub Release требует отдельного изменения workflow. Публикации в Marketplace, npm и Open VSX в этих workflow нет.
+После создания релиза workflow собирает `eska-explorer-<version>.vsix` через Bun
+и прикрепляет его к Assets. Исходники берутся именно из тега `v<version>`, даже
+если в `main` уже есть новые изменения. Перед загрузкой проверяются содержимое
+архива, identity и версия. [Локальная упаковка VSIX](packaging.md); publisher — `1c-tooling`.
+Публикации в Marketplace, npm и Open VSX в этих workflow нет.
 
 Release PR использует новую ветку `release/eska-explorer-<version>-<base>-<tree>`.
 Эта область имён зарезервирована за автоматизацией. Новый PR заменяет предыдущие
@@ -55,7 +56,9 @@ release-ветки. Это позволяет использовать штат�
 от PAT. Branch protection и обязательные проверки автоматически не меняются.
 
 Повторить после сбоя можно workflow **Release** из `main`. Существующая
-опубликованная версия проверяется и повторно не создаётся. Если тег существует,
+опубликованная версия проверяется и повторно не создаётся. Если VSIX отсутствует,
+он собирается из тега и загружается; существующий завершённый asset сохраняется.
+Незавершённый или пустой asset вызывает ошибку, автоматической перезаписи нет. Если тег существует,
 но GitHub Release отсутствует или остался draft, workflow останавливается:
 такое состояние требует отдельного восстановления, теги не перемещаются.
 
@@ -65,6 +68,8 @@ release-ветки. Это позволяет использовать штат�
 проверяют допустимые файлы PR, запрет локальной публикации, согласованность
 версии с changelog, отсутствие изменений, реальное повышение версии через Knope
 и повторную подготовку release-ветки с локальным bare origin и подменёнными вызовами GitHub.
+Также проверяются сборка VSIX из тега вместо HEAD, запрет загрузки после ошибки
+сборки/проверки и сохранение уже опубликованного asset.
 Тестовые Git-репозитории создаются только в собственных временных каталогах
 `ESKA_TEST_ROOT` внутри соседнего `eska-playground`.
 
@@ -75,8 +80,8 @@ python3 -m unittest discover -s test -p '*_test.py'
 ```
 
 Создание PR и GitHub Release проверяются после push и слияния workflow; локальные
-тесты не выполняют публикацию. В `feat/explorer` ещё не было реального запуска
-GitHub Actions. Реальный IDE backend проверяется отдельно через `ESKA_TEST_BINARY`;
+тесты не выполняют публикацию. Первый релиз `v0.0.1` уже создан через GitHub Actions.
+Реальный IDE backend проверяется отдельно через `ESKA_TEST_BINARY`;
 CI расширения не собирает соседний Rust-репозиторий и не запускает 1С.
 
 Основания: [Knope: packages](https://knope.tech/reference/config-file/packages/),
@@ -84,3 +89,16 @@ CI расширения не собирает соседний Rust-репози
 [Knope: Release](https://knope.tech/reference/config-file/steps/release/),
 [Bun runtime](https://bun.sh/docs/runtime),
 [GitHub: triggering a workflow](https://docs.github.com/en/actions/how-tos/writing-workflows/choosing-when-your-workflow-runs/triggering-a-workflow).
+
+При необходимости добавить отсутствующий VSIX к уже опубликованной версии:
+
+```sh
+python3 scripts/release-vsix.py 0.0.1
+```
+
+Нужны локальный тег, Bun в PATH и авторизованный GitHub CLI с доступом к релизу.
+Команда загружает файл в `1c-tooling/eska-vscode-explorer`; она не создаёт релиз,
+не перемещает тег и не повышает версию.
+
+Загрузка выполняется через [GitHub CLI release upload](https://cli.github.com/manual/gh_release_upload)
+без `--clobber`.

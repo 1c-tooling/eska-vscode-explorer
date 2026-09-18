@@ -165,5 +165,94 @@ class ReleaseTests(unittest.TestCase):
         self.assertEqual(json.loads((self.root / "package.json").read_text())["version"], "0.2.0")
 
 
+
+class VsixReleaseTests(unittest.TestCase):
+    """Exercise tag provenance, retries and failure ordering without publishing fixtures."""
+
+    def setUp(self):
+        """Reuse the owned playground fixture without inheriting unrelated test methods."""
+        ReleaseTests.setUp(self)
+
+    def test_existing_asset_skips_build_and_upload(self):
+        """A rerun never replaces a successfully published VSIX."""
+        module = load('release-vsix')
+        release = {'isDraft': False, 'assets': [{'name': 'eska-explorer-0.0.1.vsix', 'state': 'uploaded', 'size': 123}]}
+        with patch.object(module, 'run', return_value=json.dumps(release)) as run:
+            module.publish('0.0.1')
+            self.assertEqual(run.call_count, 1)
+
+    def test_invalid_release_or_asset_stops(self):
+        """Drafts, partial uploads and invalid versions require explicit recovery."""
+        module = load('release-vsix')
+        for release in [{'isDraft': True, 'assets': []}, {'isDraft': False, 'assets': [
+                {'name': 'eska-explorer-0.0.1.vsix', 'state': 'starter', 'size': 0}]}]:
+            with patch.object(module, 'run', return_value=json.dumps(release)) as run:
+                with self.assertRaises(RuntimeError):
+                    module.publish('0.0.1')
+                self.assertEqual(run.call_count, 1)
+        with patch.object(module, 'run') as run:
+            for version in ['0.0.0', '../main', '0.1']:
+                with self.assertRaises(ValueError):
+                    module.publish(version)
+            run.assert_not_called()
+
+    def test_upload_follows_successful_build_and_verification(self):
+        """API/build/check failures propagate before any asset upload."""
+        module = load('release-vsix')
+        for failed_step in [None, 'install', 'package', 'scripts/check-vsix.py']:
+            calls = []
+
+            def fake_run(*args, cwd=None):
+                """Record tool order and inject a failure at a selected build stage."""
+                calls.append(args)
+                if failed_step and failed_step in args:
+                    raise subprocess.CalledProcessError(1, args)
+                return json.dumps({'isDraft': False, 'assets': []}) if args[:3] == ('gh', 'release', 'view') else ''
+
+            with patch.dict(os.environ, {'RUNNER_TEMP': str(self.root)}), \
+                    patch.object(module, 'stage_tag', return_value=self.root), patch.object(module, 'run', side_effect=fake_run):
+                if failed_step:
+                    with self.assertRaises(subprocess.CalledProcessError):
+                        module.publish('0.0.1')
+                    self.assertFalse(any(call[:3] == ('gh', 'release', 'upload') for call in calls))
+                else:
+                    module.publish('0.0.1')
+                    self.assertEqual(calls[-2], ('python3', 'scripts/check-vsix.py', 'eska-explorer-0.0.1.vsix'))
+                    self.assertEqual(calls[-1][:3], ('gh', 'release', 'upload'))
+                    self.assertNotIn('--clobber', calls[-1])
+
+    def test_export_uses_tag_instead_of_newer_head(self):
+        """A real Git archive keeps a published version independent of later main commits."""
+        module = load('release-vsix')
+        checkout = self.root / 'repository'
+        checkout.mkdir()
+
+        def git(*args):
+            """Modify only this test's temporary repository."""
+            return subprocess.check_output(['git', *args], cwd=checkout, text=True, stderr=subprocess.DEVNULL).strip()
+
+        git('init', '-q')
+        git('config', 'user.name', 'Release test')
+        git('config', 'user.email', 'test@example.invalid')
+        (checkout / 'package.json').write_text(json.dumps({'version': '0.0.1', 'name': 'eska-explorer', 'publisher': '1c-tooling'}))
+        (checkout / 'source.txt').write_text('tagged source')
+        git('add', '.')
+        git('commit', '-qm', 'feat: Первая версия')
+        git('tag', 'v0.0.1')
+        (checkout / 'source.txt').write_text('new main code')
+        git('add', '.')
+        git('commit', '-qm', 'feat: Следующая версия')
+        destination = self.root / 'export'
+        destination.mkdir()
+        original = module.run
+        with patch.object(module, 'run', side_effect=lambda *args: original(*args, cwd=checkout)):
+            source = module.stage_tag('0.0.1', destination)
+            self.assertEqual((source / 'source.txt').read_text(), 'tagged source')
+            self.assertFalse((source / '.git').exists())
+            git('tag', 'v0.0.2')
+            with self.assertRaises(RuntimeError):
+                module.stage_tag('0.0.2', self.root)
+
+
 if __name__ == "__main__":
     unittest.main()
