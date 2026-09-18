@@ -56,6 +56,7 @@ test("real backend lazy trees, source positions and local invalidation for all f
       assert.equal(object.children, undefined, "descriptors are not expanded by listing objects");
       await tree.children(sibling);
     }
+    assert.equal(object.node.metadataKind, type === "configuration" || type === "extension" ? "catalog" : type === "report" ? "report" : "data-processor");
     const groups = await tree.children(object);
     assert.equal(label(groups[0]), "Модули");
     assert.equal(groups[0].node.expandedByDefault, true);
@@ -64,12 +65,14 @@ test("real backend lazy trees, source positions and local invalidation for all f
     assert.equal((await resolveSource(tree, modules[0])).path, fixture.module);
     const attributeGroup = named(groups, "Реквизиты");
     const attribute = named(await tree.children(attributeGroup), "Артикул");
+    assert.equal(attribute.node.metadataKind, "attribute");
     const location = await resolveSource(tree, attribute);
     assert.equal(location.path, fixture.descriptor);
     assert.equal(location.position.text.slice(location.position.start, location.position.end), "<Name>Артикул</Name>");
     const sections = await tree.children(named(groups, "Табличные части"));
     const sectionChildren = await tree.children(named(sections, "Строки"));
     assert.ok(sectionChildren.length);
+    assert.equal(named(sectionChildren, "Количество").node.metadataKind, "attribute");
     const siblingChildren = sibling?.children;
     const oldKey = object.key;
     const original = await readFile(fixture.descriptor, "utf8");

@@ -7,6 +7,7 @@ export type NodeId = { kind: "object"; objectId: string }
     | { kind: "common" | "modules" | "unsupported" } };
 export interface MetadataNode {
   id: NodeId;
+  metadataKind?: string | null;
   parent: NodeId | null;
   label: { kind: "name"; text: string } | { kind: "key"; key: string; translations: Record<"ru-RU" | "en-US", string> };
   state: "empty" | "non_empty" | "unloaded" | "error";
@@ -51,7 +52,8 @@ export function isNodeId(value: unknown): value is NodeId {
 
 /** Accept backend-supplied labels and schemas without a duplicate metadata catalog. */
 export function parseNode(value: unknown): MetadataNode {
-  if (!isRecord(value) || !isNodeId(value.id) || !(value.parent === null || isNodeId(value.parent))
+  if (!isRecord(value) || (value.metadataKind !== undefined && value.metadataKind !== null && typeof value.metadataKind !== "string")
+    || !isNodeId(value.id) || !(value.parent === null || isNodeId(value.parent))
     || !isRecord(value.label) || typeof value.expandedByDefault !== "boolean"
     || typeof value.rootSection !== "boolean" || !["empty", "non_empty", "unloaded", "error"].includes(String(value.state))) {
     throw new ExplorerError("protocolInvalid");

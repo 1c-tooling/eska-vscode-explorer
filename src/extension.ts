@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { iconName } from "./icons.js";
 import { SearchView } from "./search-view.js";
 import { Connection, type ConnectionState } from "./connection.js";
 import { assertHost } from "./host.js";
@@ -38,6 +39,7 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
   private tree: MetadataTree | undefined;
   private searchView: SearchView | undefined;
   private watchers: vscode.Disposable[] = [];
+  private readonly iconPaths = new Map<string, vscode.Uri>();
   private readonly filters: ProjectFilters;
   private readonly expanded = new Map<string, boolean>();
   private readonly recovering = new Set<ProjectTree>();
@@ -72,6 +74,7 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
       this.disposables.push(vscode.commands.registerCommand(`eska.explorer.${name}`, (entry: Element) =>
         this.setRootFilter(entry, name === "resetRootFilter" ? undefined : name === "hideEmptyGroups")));
     }
+    this.disposables.push(vscode.window.onDidChangeActiveColorTheme(() => this.changed.fire(undefined)));
     this.disposables.push(this.view.onDidExpandElement(({ element }) => {
       if ("node" in element) this.expanded.set(element.key, true);
     }));
@@ -164,14 +167,26 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
       ? this.hideEmptyGroups(entry.project) ? "eskaRootFiltered" : "eskaRootUnfiltered"
       : commonModule ? "eskaCommonModule" : "eskaMetadata";
     item.accessibilityInformation = { label };
-    // The special folder icon makes VS Code omit leaf twistie space in file-only icon themes.
-    // A regular product icon keeps group and child indentation consistent without changing user settings.
-    item.iconPath = new vscode.ThemeIcon(node.state === "error" ? "warning"
-      : commonModule || node.id.kind === "module" ? "file-code" : node.id.kind === "collection" ? "symbol-namespace" : "symbol-class");
+    item.iconPath = node.state === "error" ? new vscode.ThemeIcon("warning") : this.metadataIcon(entry);
     if (!node.parent) item.description = entry.project.info.scope.kind === "member"
       ? `${entry.project.info.scope.name} · ${this.text(entry.project.info.type)}` : this.text(entry.project.info.type);
     if (node.id.kind !== "collection") item.command = { command: "eska.explorer.openSource", title: this.text("openSource"), arguments: [entry] };
     return item;
+  }
+
+  /** Resolve bundled SVGs once per theme/type without file IO or backend requests while painting. */
+  private metadataIcon(entry: TreeEntry): vscode.Uri {
+    const kind = vscode.window.activeColorTheme.kind;
+    const theme = kind === vscode.ColorThemeKind.HighContrast ? "contrast"
+      : kind === vscode.ColorThemeKind.HighContrastLight ? "contrast-light"
+      : kind === vscode.ColorThemeKind.Light ? "light" : "dark";
+    const key = `${theme}/${iconName(entry.node)}.svg`;
+    let uri = this.iconPaths.get(key);
+    if (!uri) {
+      uri = vscode.Uri.joinPath(this.context.extensionUri, "resources", "icons", key);
+      this.iconPaths.set(key, uri);
+    }
+    return uri;
   }
 
   /** Native reveal uses backend-provided ancestry already present in the lazy tree. */
