@@ -27,7 +27,7 @@ export type WatchDirectory = (path: string, changed: () => void) => { dispose():
 /** Assign only immediate scope files to categories; descendants retain their physical hierarchy. */
 export function fileCategory(name: string, directory: boolean): FileGroupKind {
   if (directory) return "other";
-  if (["eska.toml", ".gitignore"].includes(name)) return "settings";
+  if (["eska.toml", ".gitignore", ".gitattributes", "bsl-analyzer.toml", ".bsl-language-server.json"].includes(name)) return "settings";
   if (/^README(?:[.-][\w-]+)?\.md$/i.test(name)) return "documentation";
   return "other";
 }

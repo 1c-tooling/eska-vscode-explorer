@@ -37,8 +37,8 @@ async function populate(root, names) {
 
 test("settings ownership and README languages do not rename physical files", () => {
   for (const name of ["eska.toml", ".gitignore"]) assert.equal(fileCategory(name, false), "settings");
-  for (const name of [".gitattributes", "bsl-analyzer.toml"]) {
-    assert.equal(fileCategory(name, false), "other");
+  for (const name of [".gitattributes", "bsl-analyzer.toml", ".bsl-language-server.json"]) {
+    assert.equal(fileCategory(name, false), "settings");
   }
   for (const name of ["README.md", "README.ru.md", "README.en.md", "readme.pt-BR.md"]) {
     assert.equal(fileCategory(name, false), "documentation");
@@ -49,7 +49,7 @@ test("settings ownership and README languages do not rename physical files", () 
 
 test("standalone categories are lazy, files keep names, and source trees are excluded", async t => {
   const root = await fixture(t);
-  await populate(root, ["eska.toml", ".gitignore", ".gitattributes", "bsl-analyzer.toml", "README.md", "README.ru.md", "notes.txt"]);
+  await populate(root, ["eska.toml", ".gitignore", ".gitattributes", "bsl-analyzer.toml", ".bsl-language-server.json", "README.md", "README.ru.md", "notes.txt"]);
   for (const dir of ["src", "build", ".git", "assets"]) await mkdir(join(root, dir));
   await populate(join(root, "build"), ["demo.cf"]);
   await populate(join(root, ".git"), ["config"]);
@@ -61,7 +61,7 @@ test("standalone categories are lazy, files keep names, and source trees are exc
   assert.deepEqual(groups.map(group => group.kind), ["settings", "documentation", "other"]);
   assert.deepEqual([...watches.keys()], [root]);
   const settings = await files.children(groups[0]);
-  assert.equal(settings.length, 2);
+  assert.equal(settings.length, 5);
   assert.ok(settings.every(entry => entry.parent === groups[0]));
   const other = await files.children(groups[2]);
   assert.ok(!other.some(entry => entry.path === join(root, "src")));
@@ -79,9 +79,9 @@ test("workspace separates global settings and members, even when nested outside 
   const root = await fixture(t);
   const first = project(join(root, "src/first"), join(root, "src/first/xml"), true);
   const second = project(join(root, "tools/second"), join(root, "tools/second/src"), true);
-  await populate(root, ["eska.toml", ".gitattributes", "bsl-analyzer.toml", "README.md"]);
+  await populate(root, ["eska.toml", ".gitattributes", "bsl-analyzer.toml", ".bsl-language-server.json", "README.md"]);
   for (const p of [first, second]) {
-    await populate(p.info.rootPath.value, ["eska.toml", ".gitignore", ".gitattributes", "README.en.md"]);
+    await populate(p.info.rootPath.value, ["eska.toml", ".gitignore", ".gitattributes", "bsl-analyzer.toml", ".bsl-language-server.json", "README.en.md"]);
     await mkdir(p.info.sourcePath.value);
   }
   await populate(join(root, "src"), ["README.ru.md"]);
@@ -89,12 +89,17 @@ test("workspace separates global settings and members, even when nested outside 
   assert.ok(files.scopes.some(scope => scope.path === root && !scope.project));
   assert.equal((await files.groups()).some(group => group.kind === "structure"), false);
   const member = await files.groups(first);
-  assert.equal((await files.children(member.find(group => group.kind === "settings"))).length, 2);
+  assert.equal((await files.children(member.find(group => group.kind === "settings"))).length, 5);
   const attrs = await files.reveal(join(first.info.rootPath.value, ".gitattributes"));
-  assert.equal(attrs.parent.kind, "other");
+  assert.equal(attrs.parent.kind, "settings");
   assert.equal(attrs.parent.scope.project, first);
   const global = await files.reveal(join(root, "bsl-analyzer.toml"));
   assert.equal(global.parent.scope.project, undefined);
+  assert.equal(global.parent.kind, "settings");
+  for (const scope of [root, first.info.rootPath.value]) {
+    const lsp = await files.reveal(join(scope, ".bsl-language-server.json"));
+    assert.equal(lsp.parent.kind, "settings");
+  }
   const src = (await files.children((await files.groups()).find(group => group.kind === "other"))).find(entry => entry.path === join(root, "src"));
   assert.deepEqual((await files.children(src)).map(entry => entry.path), [join(root, "src/README.ru.md")]);
   assert.equal(await files.reveal(join(first.info.sourcePath.value, "Configuration.xml")), undefined);
