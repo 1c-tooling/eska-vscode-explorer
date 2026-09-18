@@ -1,6 +1,8 @@
 import type { FailureCode } from "./protocol.js";
 
 const en = {
+  gitModified: "Modified", gitAdded: "Added or untracked", gitDeleted: "Deleted",
+  gitRenamed: "Renamed", gitConflict: "Merge conflict", gitDescendants: "Contains changed source files",
   fileNotInTree: "This file has no matching item in the eska tree.",
   formSource: "Form", formModule: "Module",
   filterSaveFailed: "Could not save the project filter setting. Try again.",
@@ -43,6 +45,8 @@ const en = {
 } as const;
 
 const ru: Record<keyof typeof en, string> = {
+  gitModified: "Изменён", gitAdded: "Добавлен или не отслеживается", gitDeleted: "Удалён",
+  gitRenamed: "Переименован", gitConflict: "Конфликт слияния", gitDescendants: "Есть изменённые исходники",
   fileNotInTree: "Для этого файла нет соответствующего элемента в дереве eska.",
   formSource: "Форма", formModule: "Модуль",
   filterSaveFailed: "Не удалось сохранить режим фильтра проекта. Повторите действие.",

@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { GitDecorations } from "./decorations.js";
 import { revealFile, relativeFile } from "./reveal.js";
 import { iconName } from "./icons.js";
 import { SearchView } from "./search-view.js";
@@ -34,6 +35,7 @@ export async function deactivate(): Promise<void> {
 class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
   private readonly changed = new vscode.EventEmitter<Element | Element[] | undefined>();
   readonly onDidChangeTreeData = this.changed.event;
+  private readonly decorations = new GitDecorations();
   private readonly output = vscode.window.createOutputChannel("eska Explorer", { log: true });
   private readonly connection: Connection;
   private readonly view: vscode.TreeView<Element>;
@@ -57,7 +59,7 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
 
   constructor(private readonly context: vscode.ExtensionContext) {
     this.status.name = "eska Explorer";
-    this.disposables.push(this.status);
+    this.disposables.push(this.status, this.decorations);
     this.filters = new ProjectFilters(context.workspaceState);
     this.connection = new Connection(String(context.extension.packageJSON.version),
       (state) => this.update(state), (text, level) => this.output[level ?? "info"](text));
@@ -166,6 +168,8 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
       const item = new vscode.TreeItem(message(this.treeLanguage, entry.target === "form" ? "formSource" : "formModule"));
       item.id = `${entry.owner.key}:source:${entry.target}`;
       item.contextValue = "eskaFormSource";
+      item.resourceUri = this.decorations.resource(entry);
+      item.tooltip = message(this.treeLanguage, entry.target === "form" ? "formSource" : "formModule");
       item.iconPath = this.metadataIcon(entry.owner, entry.target === "form" ? "form" : "module");
       item.command = { command: "eska.explorer.openFormSource", title: this.text("openSource"), arguments: [entry] };
       return item;
@@ -186,6 +190,8 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
     const item = new vscode.TreeItem(label, isModuleLeaf(entry) || (node.state === "empty" && !isForm(entry)) ? vscode.TreeItemCollapsibleState.None
       : expanded ? vscode.TreeItemCollapsibleState.Expanded : vscode.TreeItemCollapsibleState.Collapsed);
     item.id = entry.key;
+    item.resourceUri = this.decorations.resource(entry);
+    item.tooltip = label;
     item.contextValue = !node.parent && supportsRootFilter(entry.project)
       ? this.hideEmptyGroups(entry.project) ? "eskaRootFiltered" : "eskaRootUnfiltered"
       : commonModule ? "eskaCommonModule" : directModuleRole(entry) ? "eskaModuleObject" : isForm(entry) ? "eskaForm" : "eskaMetadata";
@@ -415,7 +421,7 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
     this.opening++;
     if (state.kind === "ready") {
       const tree = new MetadataTree(this.connection, state.session,
-        (entries) => { void this.repaint(entries); }, (project, reopen) => this.recover(project, reopen));
+        (entries) => { this.decorations.invalidate(); void this.repaint(entries); }, (project, reopen) => this.recover(project, reopen));
       this.tree = tree;
       try {
         for (const project of tree.projects) this.watchers.push(new ProjectWatcher(tree, project,
@@ -423,6 +429,7 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
         this.watchers.push(watchManifests(state.target.path, tree.projects, () => { void this.connect(false); }));
       } catch (error) { this.showError(error instanceof ExplorerError ? error : new ExplorerError("unsupportedPath")); }
     }
+    this.decorations.setTree(this.tree);
     this.updateKeyboardContext();
     this.changed.fire(undefined);
     if (state.kind === "ready") {
