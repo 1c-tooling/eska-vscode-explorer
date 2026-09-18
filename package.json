@@ -1,6 +1,6 @@
 {
   "name": "eska-explorer",
-  "displayName": "eska: 1C Explorer",
+  "displayName": "ESKA: 1C Explorer",
   "description": "%description%",
   "version": "0.0.1",
   "private": true,
@@ -52,85 +52,85 @@
       {
         "command": "eska.explorer.connect",
         "title": "%connect%",
-        "category": "eska Explorer",
+        "category": "ESKA Explorer",
         "icon": "$(plug)"
       },
       {
         "command": "eska.explorer.restart",
         "title": "%restart%",
-        "category": "eska Explorer",
+        "category": "ESKA Explorer",
         "icon": "$(plug)"
       },
       {
         "command": "eska.explorer.disconnect",
         "title": "%disconnect%",
-        "category": "eska Explorer",
+        "category": "ESKA Explorer",
         "icon": "$(debug-disconnect)"
       },
       {
         "command": "eska.explorer.showLog",
         "title": "%showLog%",
-        "category": "eska Explorer",
+        "category": "ESKA Explorer",
         "icon": "$(output)"
       },
       {
         "command": "eska.explorer.refresh",
         "title": "%refresh%",
-        "category": "eska Explorer",
+        "category": "ESKA Explorer",
         "icon": "$(refresh)"
       },
       {
         "command": "eska.explorer.refreshNode",
         "title": "%refresh%",
-        "category": "eska Explorer",
+        "category": "ESKA Explorer",
         "icon": "$(refresh)"
       },
       {
         "command": "eska.explorer.openSource",
         "title": "%openSource%",
-        "category": "eska Explorer"
+        "category": "ESKA Explorer"
       },
       {
         "command": "eska.explorer.openXml",
         "title": "%openXml%",
-        "category": "eska Explorer"
+        "category": "ESKA Explorer"
       },
       {
         "command": "eska.explorer.search",
         "title": "%search%",
-        "category": "eska Explorer",
+        "category": "ESKA Explorer",
         "icon": "$(search)"
       },
       {
         "command": "eska.explorer.hideEmptyGroups",
         "title": "%hideEmptyGroups%",
-        "category": "eska Explorer",
+        "category": "ESKA Explorer",
         "icon": "$(filter)"
       },
       {
         "command": "eska.explorer.showEmptyGroups",
         "title": "%showEmptyGroups%",
-        "category": "eska Explorer",
+        "category": "ESKA Explorer",
         "icon": "$(filter-filled)"
       },
       {
         "command": "eska.explorer.resetRootFilter",
         "title": "%resetRootFilter%",
-        "category": "eska Explorer"
+        "category": "ESKA Explorer"
       },
       {
         "command": "eska.explorer.revealActiveFile",
         "title": "%revealActiveFile%",
-        "category": "eska Explorer"
+        "category": "ESKA Explorer"
       }
     ],
     "views": {
       "explorer": [
         {
           "id": "eska.explorer.projects",
-          "name": "eska: 1C Explorer",
+          "name": "ESKA: 1C Explorer",
           "visibility": "collapsed",
-          "contextualTitle": "eska: 1C Explorer"
+          "contextualTitle": "ESKA: 1C Explorer"
         }
       ]
     },
@@ -222,7 +222,7 @@
       ]
     },
     "configuration": {
-      "title": "eska: 1C Explorer",
+      "title": "ESKA: 1C Explorer",
       "properties": {
         "eska.explorer.executable": {
           "type": "string",

@@ -14,7 +14,7 @@
 2. В меню Extensions выберите **Install from VSIX…**, укажите файл
    `eska-explorer-0.0.1.vsix` и при необходимости перезагрузите окно.
 3. Укажите полный путь к backend в `eska.explorer.executable`, если он не в PATH.
-4. Откройте доверенную папку с `eska.toml` и Designer XML; раскройте **eska: 1C Explorer**.
+4. Откройте доверенную папку с `eska.toml` и Designer XML; раскройте **ESKA: 1C Explorer**.
    [Настройка проекта](setup.ru.md). bsl-analyzer необязателен.
 
 Также можно выполнить `code --install-extension /полный/путь/eska-explorer-0.0.1.vsix`.

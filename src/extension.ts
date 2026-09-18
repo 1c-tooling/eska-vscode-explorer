@@ -36,7 +36,7 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
   private readonly changed = new vscode.EventEmitter<Element | Element[] | undefined>();
   readonly onDidChangeTreeData = this.changed.event;
   private readonly decorations = new GitDecorations();
-  private readonly output = vscode.window.createOutputChannel("eska Explorer", { log: true });
+  private readonly output = vscode.window.createOutputChannel("ESKA Explorer", { log: true });
   private readonly connection: Connection;
   private readonly view: vscode.TreeView<Element>;
   private readonly status = vscode.window.createStatusBarItem("eska.explorer.connection", vscode.StatusBarAlignment.Right, 0);
@@ -58,7 +58,7 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
   private stopping: Promise<void> | undefined;
 
   constructor(private readonly context: vscode.ExtensionContext) {
-    this.status.name = "eska Explorer";
+    this.status.name = "ESKA Explorer";
     this.disposables.push(this.status, this.decorations);
     this.filters = new ProjectFilters(context.workspaceState);
     this.connection = new Connection(String(context.extension.packageJSON.version),
