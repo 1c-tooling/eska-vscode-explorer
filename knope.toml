@@ -1,0 +1,22 @@
+[package]
+versioned_files = ["package.json"]
+changelog = "CHANGELOG.md"
+
+[github]
+owner = "1c-tooling"
+repo = "eska-vscode-explorer"
+
+[[workflows]]
+name = "prepare-release"
+help_text = "Обновить версию и changelog по Conventional Commits без публикации"
+
+[[workflows.steps]]
+type = "PrepareRelease"
+allow_empty = true
+
+[[workflows]]
+name = "release"
+help_text = "Опубликовать уже подготовленную версию и changelog в GitHub Release"
+
+[[workflows.steps]]
+type = "Release"

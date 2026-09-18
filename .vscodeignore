@@ -1,0 +1,9 @@
+**
+!package.json
+!package.nls*.json
+!README.md
+!CHANGELOG.md
+!out/*.js
+!resources/icons/**/*.svg
+!docs/*.md
+!docs/measurements/*.json
