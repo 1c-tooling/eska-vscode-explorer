@@ -116,6 +116,11 @@
         "command": "eska.explorer.resetRootFilter",
         "title": "%resetRootFilter%",
         "category": "eska Explorer"
+      },
+      {
+        "command": "eska.explorer.revealActiveFile",
+        "title": "%revealActiveFile%",
+        "category": "eska Explorer"
       }
     ],
     "views": {
@@ -247,7 +252,26 @@
           "description": "%hideEmptyRootGroups%"
         }
       }
-    }
+    },
+    "keybindings": [
+      {
+        "command": "eska.explorer.revealActiveFile",
+        "key": "ctrl+k e",
+        "mac": "cmd+k e",
+        "when": "eska.explorer.activeProject && editorTextFocus"
+      },
+      {
+        "command": "eska.explorer.search",
+        "key": "ctrl+k f",
+        "mac": "cmd+k f",
+        "when": "eska.explorer.connected && (eska.explorer.activeProject && editorTextFocus || focusedView == eska.explorer.projects)"
+      },
+      {
+        "command": "eska.explorer.refresh",
+        "key": "f5",
+        "when": "focusedView == eska.explorer.projects"
+      }
+    ]
   },
   "publisher": "1c-tooling"
 }

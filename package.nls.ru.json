@@ -18,5 +18,6 @@
   "treeLanguageAuto": "Авто",
   "treeLanguageRussian": "Русский",
   "treeLanguageEnglish": "English",
-  "search": "Поиск метаданных"
+  "search": "Поиск метаданных",
+  "revealActiveFile": "Показать открытый файл в дереве eska"
 }

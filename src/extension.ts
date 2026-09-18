@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { revealFile, relativeFile } from "./reveal.js";
 import { iconName } from "./icons.js";
 import { SearchView } from "./search-view.js";
 import { Connection, type ConnectionState } from "./connection.js";
@@ -68,6 +69,7 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
       ["showLog", () => this.output.show(true)],
       ["refresh", () => this.refresh()],
       ["search", () => this.search()],
+      ["revealActiveFile", () => this.revealActiveFile()],
     ] as const) {
       this.disposables.push(vscode.commands.registerCommand(`eska.explorer.${name}`, action));
     }
@@ -111,6 +113,7 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
         this.changed.fire(undefined);
       }
     }));
+    this.disposables.push(vscode.window.onDidChangeActiveTextEditor(() => this.updateKeyboardContext()));
     if (this.view.visible) void this.connect(false);
   }
 
@@ -212,6 +215,33 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
   /** Native reveal uses backend-provided ancestry already present in the lazy tree. */
   getParent(entry: Element): Element | undefined {
     return "owner" in entry ? entry.owner : "node" in entry ? this.tree?.parent(entry) : entry.parent;
+  }
+
+  /** Limit shortcut overrides to files in the connected projects, including multi-root workspaces. */
+  private updateKeyboardContext(): void {
+    const uri = vscode.window.activeTextEditor?.document.uri;
+    const activeProject = uri?.scheme === "file" && !!this.tree?.projects.some(project =>
+      relativeFile(nativePath(project.info.rootPath), uri.fsPath) !== undefined);
+    void vscode.commands.executeCommand("setContext", "eska.explorer.activeProject", activeProject);
+    void vscode.commands.executeCommand("setContext", "eska.explorer.connected", !!this.tree);
+  }
+
+  /** Reveal the active source without replacing the document or changing unsaved text. */
+  private async revealActiveFile(): Promise<void> {
+    const uri = vscode.window.activeTextEditor?.document.uri;
+    if (!uri || uri.scheme !== "file") return;
+    if (!this.tree) await this.connect(false);
+    const tree = this.tree;
+    if (!tree) return;
+    try {
+      const entry = await revealFile(tree, uri.fsPath);
+      if (this.tree !== tree || this.disposed) return;
+      if (!entry) { void vscode.window.showInformationMessage(this.text("fileNotInTree")); return; }
+      await vscode.commands.executeCommand("eska.explorer.projects.focus");
+      if (this.tree === tree && !this.disposed) await this.view.reveal(entry, { select: true, focus: true });
+    } catch (error) {
+      if (this.tree === tree && !this.disposed) this.showError(error instanceof ExplorerError ? error : new ExplorerError("sourceMissing"));
+    }
   }
 
   /** Search reuses the current backend context and reveals only the chosen branch. */
@@ -393,6 +423,7 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
         this.watchers.push(watchManifests(state.target.path, tree.projects, () => { void this.connect(false); }));
       } catch (error) { this.showError(error instanceof ExplorerError ? error : new ExplorerError("unsupportedPath")); }
     }
+    this.updateKeyboardContext();
     this.changed.fire(undefined);
     if (state.kind === "ready") {
       this.status.text = `ESKA v${state.version}`;
@@ -423,6 +454,8 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
   shutdown(): Promise<void> {
     if (!this.stopping) {
       this.disposed = true;
+      void vscode.commands.executeCommand("setContext", "eska.explorer.activeProject", false);
+      void vscode.commands.executeCommand("setContext", "eska.explorer.connected", false);
       for (const disposable of this.disposables) disposable.dispose();
       this.searchView?.dispose();
       this.tree?.dispose();

@@ -18,5 +18,6 @@
   "treeLanguageAuto": "Auto",
   "treeLanguageRussian": "Русский",
   "treeLanguageEnglish": "English",
-  "search": "Search metadata"
+  "search": "Search metadata",
+  "revealActiveFile": "Reveal Active File in eska Tree"
 }
