@@ -34,6 +34,8 @@ exports.run = async function () {
   const explorer = await extension.activate();
   await vscode.commands.executeCommand('eska.explorer.connect');
   await vscode.commands.executeCommand('eska.explorer.projects.focus');
+  assert.equal(explorer.status.text, `ESKA v${explorer.connection.state.version}`);
+  assert.ok(!explorer.view.message, 'connection status does not occupy the tree');
   const [root] = await explorer.getChildren();
   const catalogs = named(await explorer.getChildren(root), 'Справочники');
   const objects = await explorer.getChildren(catalogs);
@@ -216,6 +218,7 @@ exports.run = async function () {
   await vscode.commands.executeCommand('eska.explorer.search');
   await vscode.commands.executeCommand('eska.explorer.disconnect');
   assert.equal(explorer.searchView, undefined, 'disconnect disposes search input');
+  assert.equal(explorer.status.text, '', 'disconnect clears the connected version');
   await fs.writeFile(path.join(fixture.root, 'host-result.json'), JSON.stringify({ passed: true, vscode: vscode.version, node: process.versions.node }));
   console.log('ESKA_TREE_HOST_PASSED', vscode.version);
 };

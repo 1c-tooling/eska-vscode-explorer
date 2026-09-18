@@ -36,6 +36,7 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
   private readonly output = vscode.window.createOutputChannel("eska Explorer", { log: true });
   private readonly connection: Connection;
   private readonly view: vscode.TreeView<Element>;
+  private readonly status = vscode.window.createStatusBarItem("eska.explorer.connection", vscode.StatusBarAlignment.Right, 0);
   private readonly disposables: vscode.Disposable[] = [];
   private tree: MetadataTree | undefined;
   private searchView: SearchView | undefined;
@@ -54,6 +55,8 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
   private stopping: Promise<void> | undefined;
 
   constructor(private readonly context: vscode.ExtensionContext) {
+    this.status.name = "eska Explorer";
+    this.disposables.push(this.status);
     this.filters = new ProjectFilters(context.workspaceState);
     this.connection = new Connection(String(context.extension.packageJSON.version),
       (state) => this.update(state), (text, level) => this.output[level ?? "info"](text));
@@ -391,7 +394,15 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
       } catch (error) { this.showError(error instanceof ExplorerError ? error : new ExplorerError("unsupportedPath")); }
     }
     this.changed.fire(undefined);
-    this.view.message = state.kind === "ready" ? this.text("ready", state.version) : "";
+    if (state.kind === "ready") {
+      this.status.text = `ESKA v${state.version}`;
+      this.status.tooltip = this.text("ready", state.version);
+      this.status.show();
+    } else {
+      // Never leave a successful connection indicator after disconnect or process failure.
+      this.status.hide();
+      this.status.text = "";
+    }
     if (state.kind === "error") this.showError(state.error);
   }
 

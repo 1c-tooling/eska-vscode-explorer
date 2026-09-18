@@ -133,7 +133,7 @@
         {
           "command": "eska.explorer.connect",
           "when": "view == eska.explorer.projects",
-          "group": "navigation@1"
+          "group": "connection@1"
         },
         {
           "command": "eska.explorer.refresh",
@@ -143,17 +143,17 @@
         {
           "command": "eska.explorer.restart",
           "when": "view == eska.explorer.projects",
-          "group": "connection@1"
+          "group": "navigation@1"
         },
         {
           "command": "eska.explorer.disconnect",
           "when": "view == eska.explorer.projects",
-          "group": "navigation@3"
+          "group": "connection@2"
         },
         {
           "command": "eska.explorer.showLog",
           "when": "view == eska.explorer.projects",
-          "group": "navigation@4"
+          "group": "connection@3"
         },
         {
           "command": "eska.explorer.search",
