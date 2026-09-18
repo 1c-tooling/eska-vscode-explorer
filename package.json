@@ -34,9 +34,9 @@
   "scripts": {
     "compile": "tsc -p .",
     "check": "tsc -p . --noEmit",
-    "test": "bun run compile && bun test",
+    "test": "bun run --bun compile && bun test",
     "test:node": "npm run compile && node --test test/*.test.mjs",
-    "test:integration": "bun run compile && bun test test/integration.test.mjs"
+    "test:integration": "bun run --bun compile && bun test test/integration.test.mjs"
   },
   "devDependencies": {
     "@types/node": "22.20.3",
