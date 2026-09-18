@@ -14,6 +14,7 @@ export interface ProcessOptions {
   timeoutMs?: number;
   log: (message: string) => void;
   failed: (error: ExplorerError) => void;
+  notification?: (method: string, params: unknown) => void;
 }
 
 /** Own one child and its pipes; every terminal condition settles all outstanding requests. */
@@ -72,6 +73,9 @@ export class BackendProcess {
   /** Useful for lifecycle tests and diagnostics, never for killing by process name. */
   get pid(): number | undefined { return this.child.pid; }
 
+  /** Notifications share the ordered, bounded transport with requests. */
+  notify(method: string, params: unknown): void { this.write({ jsonrpc: "2.0", method, params }); }
+
   /** Unique string IDs avoid precision loss and accidental reuse after cancellation. */
   request(method: string, params: unknown, timeoutMs = this.options.timeoutMs ?? 30_000): Promise<unknown> {
     if (this.failure || this.ended) return Promise.reject(this.failure ?? new ExplorerError("connectionLost"));
@@ -100,7 +104,10 @@ export class BackendProcess {
   /** Notifications are not responses; a foreign or duplicate response is a broken connection. */
   private receive(value: unknown): void {
     if (!isRecord(value) || value.jsonrpc !== "2.0") throw new ExplorerError("protocolInvalid");
-    if (typeof value.method === "string" && !("id" in value)) return;
+    if (typeof value.method === "string" && !("id" in value)) {
+      this.options.notification?.(value.method, value.params);
+      return;
+    }
     if (typeof value.id !== "string" || ("result" in value) === ("error" in value)) {
       throw new ExplorerError("protocolInvalid");
     }

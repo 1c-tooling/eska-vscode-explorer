@@ -9,11 +9,12 @@ export type FailureCode =
   | "handshakeFailed" | "timeout" | "resourceLimit" | "incompatible" | "manifestMissing"
   | "manifestInvalid" | "selectionInvalid" | "sourceInvalid" | "rootInvalid"
   | "requestFailed" | "cleanupFailed" | "unsupportedWorkspace" | "untrusted"
-  | "noFolder" | "invalidExecutable";
+  | "noFolder" | "invalidExecutable" | "obsolete" | "branchInvalid" | "sourceMissing"
+  | "unsupportedPath" | "sourceChanged";
 
 /** Only stable categories cross into the localized UI; raw protocol text stays private. */
 export class ExplorerError extends Error {
-  constructor(readonly code: FailureCode) {
+  constructor(readonly code: FailureCode, readonly domain?: string) {
     super(code);
     this.name = "ExplorerError";
   }
@@ -61,13 +62,13 @@ export function parseHandshake(value: unknown): string {
 }
 
 /** Keep u64 tokens as strings; JavaScript numbers would round large generations. */
-function isToken(value: unknown): value is string {
+export function isToken(value: unknown): value is string {
   return typeof value === "string" && /^(0|[1-9][0-9]{0,19})$/.test(value)
     && BigInt(value) <= 18_446_744_073_709_551_615n;
 }
 
 /** Paths remain tagged until an operation actually needs a native path. */
-function isWirePath(value: unknown): value is WirePath {
+export function isWirePath(value: unknown): value is WirePath {
   return isRecord(value) && typeof value.value === "string"
     && ["utf-8", "percent", "utf-16-percent"].includes(String(value.encoding));
 }
@@ -112,5 +113,9 @@ export function responseError(value: Record<string, unknown>): ExplorerError {
       case "root_invalid": return new ExplorerError("rootInvalid");
     }
   }
-  return new ExplorerError("requestFailed");
+  const kind = isRecord(data) && typeof data.kind === "string" ? data.kind : undefined;
+  const code = kind === "source_missing" || kind === "unknown_node" || kind === "unknown_object" ? "sourceMissing"
+    : kind === "xml_invalid" || kind === "source_invalid" ? "branchInvalid"
+    : kind === "source_changed" ? "sourceChanged" : "requestFailed";
+  return new ExplorerError(code, kind);
 }

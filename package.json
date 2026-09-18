@@ -36,7 +36,8 @@
     "check": "tsc -p . --noEmit",
     "test": "bun run --bun compile && bun test",
     "test:node": "npm run compile && node --test test/*.test.mjs",
-    "test:integration": "bun run --bun compile && bun test test/integration.test.mjs"
+    "test:integration": "bun run --bun compile && bun test test/integration.test.mjs test/tree.test.mjs",
+    "test:host": "bun run --bun compile && bun test/run-host.mjs"
   },
   "devDependencies": {
     "@types/node": "22.20.3",
@@ -68,6 +69,23 @@
         "title": "%showLog%",
         "category": "eska Explorer",
         "icon": "$(output)"
+      },
+      {
+        "command": "eska.explorer.refresh",
+        "title": "%refresh%",
+        "category": "eska Explorer",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "eska.explorer.refreshNode",
+        "title": "%refresh%",
+        "category": "eska Explorer",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "eska.explorer.openSource",
+        "title": "%openSource%",
+        "category": "eska Explorer"
       }
     ],
     "views": {
@@ -88,9 +106,14 @@
           "group": "navigation@1"
         },
         {
-          "command": "eska.explorer.restart",
+          "command": "eska.explorer.refresh",
           "when": "view == eska.explorer.projects",
           "group": "navigation@2"
+        },
+        {
+          "command": "eska.explorer.restart",
+          "when": "view == eska.explorer.projects",
+          "group": "connection@1"
         },
         {
           "command": "eska.explorer.disconnect",
@@ -101,6 +124,23 @@
           "command": "eska.explorer.showLog",
           "when": "view == eska.explorer.projects",
           "group": "navigation@4"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "eska.explorer.refreshNode",
+          "when": "view == eska.explorer.projects && viewItem == eskaMetadata",
+          "group": "inline"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "eska.explorer.refreshNode",
+          "when": "false"
+        },
+        {
+          "command": "eska.explorer.openSource",
+          "when": "false"
         }
       ]
     },

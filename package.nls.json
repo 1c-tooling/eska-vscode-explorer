@@ -6,5 +6,7 @@
   "showLog": "Show Connection Log",
   "executable": "eska executable name in PATH or absolute path on the workspace host. Arguments are not accepted.",
   "trust": "eska runs a local executable and requires a trusted workspace.",
-  "virtual": "Explorer requires project files on the extension host filesystem."
+  "virtual": "Explorer requires project files on the extension host filesystem.",
+  "refresh": "Refresh metadata",
+  "openSource": "Open source"
 }

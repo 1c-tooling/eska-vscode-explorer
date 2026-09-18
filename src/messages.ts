@@ -1,6 +1,12 @@
 import type { FailureCode } from "./protocol.js";
 
 const en = {
+  refresh: "Refresh metadata", openSource: "Open source",
+  obsolete: "The project connection changed. Select the item again.",
+  branchInvalid: "Could not read this metadata branch. Correct its XML and refresh.",
+  sourceMissing: "The source file is missing or is outside the project. Refresh the tree.",
+  unsupportedPath: "This native path cannot be represented without loss in VS Code.",
+  sourceChanged: "The source changed or has unsaved edits. Save it and refresh before navigating.",
   disconnected: "Choose a project to connect.", connecting: "Connecting to eska…",
   stopping: "Disconnecting…", ready: "Connected to eska {0}",
   choose: "Select an eska project folder", select: "Choose project", retry: "Restart connection",
@@ -28,6 +34,12 @@ const en = {
 } as const;
 
 const ru: Record<keyof typeof en, string> = {
+  refresh: "Обновить метаданные", openSource: "Открыть исходник",
+  obsolete: "Подключение к проекту изменилось. Выберите элемент повторно.",
+  branchInvalid: "Не удалось прочитать эту ветку метаданных. Исправьте XML и обновите её.",
+  sourceMissing: "Исходник отсутствует или находится вне проекта. Обновите дерево.",
+  unsupportedPath: "Этот путь невозможно представить в VS Code без потери символов.",
+  sourceChanged: "Исходник изменился или содержит несохранённые правки. Сохраните его и обновите дерево перед переходом.",
   disconnected: "Выберите проект для подключения.", connecting: "Подключение к eska…",
   stopping: "Отключение…", ready: "Подключено к eska {0}",
   choose: "Выберите папку проекта eska", select: "Выбрать проект", retry: "Перезапустить подключение",

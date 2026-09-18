@@ -16,6 +16,7 @@ export class Connection {
   private disposed = false;
   private current: ConnectionState = { kind: "disconnected" };
   private lastTarget: ConnectionTarget | undefined;
+  private readonly listeners = new Set<(method: string, params: unknown) => void>();
 
   constructor(
     private readonly version: string,
@@ -27,6 +28,33 @@ export class Connection {
   /** Read immutable snapshots; failed or obsolete sessions are never exposed as ready. */
   get state(): ConnectionState { return this.current; }
   get target(): ConnectionTarget | undefined { return this.lastTarget; }
+
+  /** A replaced session cannot publish responses into the replacement tree. */
+  async request(sessionId: string, method: string, params: Record<string, unknown> = {}): Promise<unknown> {
+    const child = this.sessionChild(sessionId);
+    const result = await child.request(method, { ...params, sessionId });
+    if (child !== this.sessionChild(sessionId)) throw new ExplorerError("obsolete");
+    return result;
+  }
+
+  /** The caller owns file sequence numbers; the connection owns session authority. */
+  notify(sessionId: string, method: string, params: Record<string, unknown>): void {
+    this.sessionChild(sessionId).notify(method, { ...params, sessionId });
+  }
+
+  /** Subscribe before opening a tree, and dispose with that tree's owner. */
+  onNotification(listener: (method: string, params: unknown) => void): { dispose(): void } {
+    this.listeners.add(listener);
+    return { dispose: () => { this.listeners.delete(listener); } };
+  }
+
+  /** Validate both lifecycle state and session identity before any metadata operation. */
+  private sessionChild(sessionId: string): BackendProcess {
+    if (this.current.kind !== "ready" || this.current.session.sessionId !== sessionId || !this.child) {
+      throw new ExplorerError("obsolete");
+    }
+    return this.child;
+  }
 
   /** Serialize replacements while invalidating the old in-flight result immediately. */
   connect(target: ConnectionTarget): Promise<void> {
@@ -47,6 +75,9 @@ export class Connection {
           throw new ExplorerError("invalidExecutable");
         }
         const child = this.create({ executable: target.executable, cwd: target.path, log: this.log,
+          notification: (method, params) => {
+            if (revision === this.revision) for (const listener of this.listeners) listener(method, params);
+          },
           failed: (error) => {
             if (negotiated && revision === this.revision) this.set({ kind: "error", error });
           },
