@@ -49,7 +49,7 @@ exports.run = async function () {
   const explorer = await extension.activate();
   await vscode.commands.executeCommand('eska.explorer.connect');
   const [root] = await explorer.getChildren();
-  const catalogs = (await explorer.getChildren(root)).find(entry => entry.node?.id.collection?.metadataKind === 'catalog');
+  const catalogs = (await explorer.getChildren(explorer.files.structure(root.project))).find(entry => entry.node?.id.collection?.metadataKind === 'catalog');
   const goods = (await explorer.getChildren(catalogs)).find(entry => entry.node.label.text === 'Товары');
   const modules = (await explorer.getChildren(goods)).find(entry => entry.node?.id.collection?.kind === 'modules');
   const [module] = await explorer.getChildren(modules);

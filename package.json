@@ -175,7 +175,7 @@
         },
         {
           "command": "eska.explorer.refreshNode",
-          "when": "view == eska.explorer.projects && (viewItem == eskaMetadata || viewItem == eskaCommonModule || viewItem == eskaModuleObject || viewItem == eskaForm || viewItem == eskaRootFiltered || viewItem == eskaRootUnfiltered)",
+          "when": "view == eska.explorer.projects && (viewItem == eskaFiles || viewItem == eskaMetadata || viewItem == eskaCommonModule || viewItem == eskaModuleObject || viewItem == eskaForm || viewItem == eskaRootFiltered || viewItem == eskaRootUnfiltered)",
           "group": "inline@2"
         },
         {

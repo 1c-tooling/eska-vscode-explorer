@@ -45,7 +45,7 @@ exports.run = async function () {
     const pid = explorer.connection.child.pid;
     const [[root], rootMs] = await timed(() => explorer.getChildren());
     await vscode.commands.executeCommand('eska.explorer.projects.focus');
-    const [sections, sectionsMs] = await timed(() => explorer.getChildren(root));
+    const [sections, sectionsMs] = await timed(() => explorer.getChildren(explorer.files.structure(root.project)));
     const common = group(sections, 'common');
     const modules = group(await explorer.getChildren(common), 'common-module');
     const [moduleRows, modulesMs] = await timed(async () => {
@@ -68,7 +68,7 @@ exports.run = async function () {
     assert.equal(templateRows.length, 636);
     const warmRoot = [], selections = [], filters = [], source = [];
     for (let i = 0; i < 20; i++) {
-      warmRoot.push((await timed(() => explorer.getChildren(root)))[1]);
+      warmRoot.push((await timed(() => explorer.getChildren(explorer.files.structure(root.project))))[1]);
       selections.push((await timed(() => explorer.view.reveal(moduleRows[i], { select: true, focus: false })))[1]);
       assert.equal(explorer.view.selection[0], moduleRows[i]);
     }
@@ -79,7 +79,7 @@ exports.run = async function () {
     for (let i = 0; i < 20; i++) {
       filters.push((await timed(async () => {
         await vscode.commands.executeCommand(`eska.explorer.${i % 2 ? 'hideEmptyGroups' : 'showEmptyGroups'}`, root);
-        await explorer.getChildren(root);
+        await explorer.getChildren(explorer.files.structure(root.project));
       }))[1]);
     }
     const [, indexMs] = await timed(async () => {

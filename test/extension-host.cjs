@@ -37,7 +37,7 @@ exports.run = async function () {
   assert.equal(explorer.status.text, `ESKA v${explorer.connection.state.version}`);
   assert.ok(!explorer.view.message, 'connection status does not occupy the tree');
   const [root] = await explorer.getChildren();
-  const catalogs = named(await explorer.getChildren(root), 'Справочники');
+  const catalogs = named(await explorer.getChildren(explorer.files.structure(root.project)), 'Справочники');
   const objects = await explorer.getChildren(catalogs);
   const goods = named(objects, 'Товары');
   const customers = named(objects, 'Покупатели');
@@ -89,7 +89,7 @@ exports.run = async function () {
   await vscode.commands.executeCommand('eska.explorer.openSource', scripts[0]);
   assert.equal(vscode.window.activeTextEditor.document.uri.fsPath, fixture.module);
 
-  const common = named(await explorer.getChildren(root), 'Общие');
+  const common = named(await explorer.getChildren(explorer.files.structure(root.project)), 'Общие');
   const commonGroup = named(await explorer.getChildren(common), 'Общие модули');
   const commonModule = named(await explorer.getChildren(commonGroup), 'Обмен');
   const commonItem = explorer.getTreeItem(commonModule);
@@ -169,9 +169,9 @@ exports.run = async function () {
   const filterGeneration = root.project.info.generation;
   const filterChildren = root.children;
   assert.equal(explorer.getTreeItem(root).contextValue, 'eskaRootFiltered');
-  assert.ok(!(await explorer.getChildren(root)).some(entry => entry.node?.label.translations?.['ru-RU'] === 'Константы'));
+  assert.ok(!(await explorer.getChildren(explorer.files.structure(root.project))).some(entry => entry.node?.label.translations?.['ru-RU'] === 'Константы'));
   await vscode.commands.executeCommand('eska.explorer.showEmptyGroups', root);
-  const constants = named(await explorer.getChildren(root), 'Константы');
+  const constants = named(await explorer.getChildren(explorer.files.structure(root.project)), 'Константы');
   // TreeDataProvider refresh is asynchronous; await native visibility after the filter command.
   await until(async () => {
     try { await explorer.view.reveal(constants, { select: true, focus: true }); return true; }
@@ -186,7 +186,7 @@ exports.run = async function () {
   assert.equal(explorer.getTreeItem(root).contextValue, 'eskaRootFiltered', 'saved project choice overrides default');
   await vscode.commands.executeCommand('eska.explorer.resetRootFilter', root);
   assert.equal(explorer.getTreeItem(root).contextValue, 'eskaRootUnfiltered', 'reset uses workspace setting');
-  named(await explorer.getChildren(root), 'Константы');
+  named(await explorer.getChildren(explorer.files.structure(root.project)), 'Константы');
   await vscode.workspace.getConfiguration('eska.explorer').update('hideEmptyRootGroups', true, vscode.ConfigurationTarget.Workspace);
   await until(() => explorer.getTreeItem(root).contextValue === 'eskaRootFiltered', 'default setting updates inherited filter');
   await vscode.commands.executeCommand('eska.explorer.showEmptyGroups', root);
@@ -214,7 +214,7 @@ exports.run = async function () {
   await until(() => explorer.tree && explorer.tree !== previousTree, 'manifest reconnect');
   const [reconnectedRoot] = await explorer.getChildren();
   assert.equal(explorer.getTreeItem(reconnectedRoot).contextValue, 'eskaRootUnfiltered', 'project filter survives reconnect');
-  named(await explorer.getChildren(reconnectedRoot), 'Константы');
+  named(await explorer.getChildren(explorer.files.structure(reconnectedRoot.project)), 'Константы');
   await vscode.commands.executeCommand('eska.explorer.search');
   await vscode.commands.executeCommand('eska.explorer.disconnect');
   assert.equal(explorer.searchView, undefined, 'disconnect disposes search input');

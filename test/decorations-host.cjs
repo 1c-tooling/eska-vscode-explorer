@@ -43,7 +43,7 @@ exports.run = async function () {
   /** Resolve a status through the same provider used by the native renderer. */
   const decoration = entry => explorer.decorations.provideFileDecoration(explorer.getTreeItem(entry).resourceUri);
   const [root] = await explorer.getChildren();
-  const catalogs = (await explorer.getChildren(root)).find(entry => entry.node.id.collection?.metadataKind === "catalog");
+  const catalogs = (await explorer.getChildren(explorer.files.structure(root.project))).find(entry => entry.node.id.collection?.metadataKind === "catalog");
   const objects = await explorer.getChildren(catalogs);
   const owner = objects.find(entry => entry.node.label.text === "Товары");
   const clean = objects.find(entry => entry.node.label.text === "Покупатели");

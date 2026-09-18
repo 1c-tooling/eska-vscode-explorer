@@ -116,3 +116,17 @@ ESKA_TEST_BINARY="$(realpath ../eska/target/debug/eska)" \
 ESKA_TEST_ROOT="$(realpath ../eska-playground)" \
 VSCODE_EXECUTABLE=codium node test/run-host.mjs test/predefined-host.cjs
 ```
+
+## Проверка файлов рабочей области
+
+`test/workspace-files.test.mjs` проверяет разделение общих/проектных файлов,
+исключение исходников, ленивое чтение, инвалидацию снимков и циклы ссылок.
+Нативный сценарий использует собственный workspace с двумя проектами:
+
+```sh
+ESKA_TEST_BINARY="$(realpath ../eska/target/debug/eska)" \
+VSCODE_EXECUTABLE=codium node test/run-host.mjs test/workspace-host.cjs
+```
+
+Он проверяет открытие файлов, переход по горячей клавише, появление/удаление
+README, язык групп, ancestry метаданных и переподключение. Сборка 1С не нужна.

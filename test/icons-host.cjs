@@ -31,7 +31,7 @@ exports.run = async function () {
   await vscode.commands.executeCommand('eska.explorer.connect');
   await vscode.commands.executeCommand('eska.explorer.projects.focus');
   const [root] = await explorer.getChildren();
-  const groups = await explorer.getChildren(root);
+  const groups = await explorer.getChildren(explorer.files.structure(root.project));
   const catalog = named(groups, 'Справочники');
   const goods = named(await explorer.getChildren(catalog), 'Товары');
   const children = await explorer.getChildren(goods);

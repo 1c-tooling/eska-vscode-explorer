@@ -109,3 +109,18 @@ export function watchManifests(start: string, projects: readonly ProjectTree[], 
   });
   return { dispose: () => { clearTimeout(timer); for (const watcher of watchers) watcher.dispose(); } };
 }
+
+/** Observe one expanded filesystem directory and coalesce changes without traversing descendants. */
+export function watchDirectory(path: string, changed: () => void): vscode.Disposable {
+  const watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(vscode.Uri.file(path), "*"));
+  let timer: NodeJS.Timeout | undefined;
+  /** A burst invalidates one shallow directory snapshot. */
+  const update = (): void => {
+    clearTimeout(timer);
+    timer = setTimeout(changed, 100);
+  };
+  // Content edits do not change a directory listing. Directory mtime events can come
+  // from backend cache writes and must not repaint unrelated metadata branches.
+  watcher.onDidCreate(update); watcher.onDidDelete(update);
+  return { dispose: () => { clearTimeout(timer); watcher.dispose(); } };
+}
