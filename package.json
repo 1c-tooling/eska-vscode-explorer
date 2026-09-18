@@ -164,12 +164,12 @@
       "view/item/context": [
         {
           "command": "eska.explorer.openXml",
-          "when": "view == eska.explorer.projects && viewItem == eskaCommonModule",
+          "when": "view == eska.explorer.projects && (viewItem == eskaCommonModule || viewItem == eskaModuleObject || viewItem == eskaForm)",
           "group": "navigation"
         },
         {
           "command": "eska.explorer.refreshNode",
-          "when": "view == eska.explorer.projects && (viewItem == eskaMetadata || viewItem == eskaCommonModule || viewItem == eskaRootFiltered || viewItem == eskaRootUnfiltered)",
+          "when": "view == eska.explorer.projects && (viewItem == eskaMetadata || viewItem == eskaCommonModule || viewItem == eskaModuleObject || viewItem == eskaForm || viewItem == eskaRootFiltered || viewItem == eskaRootUnfiltered)",
           "group": "inline@2"
         },
         {

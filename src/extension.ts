@@ -7,11 +7,12 @@ import { message, type MessageKey } from "./messages.js";
 import { ExplorerError } from "./protocol.js";
 import { MetadataTree, type TreeEntry, type ProjectTree } from "./tree.js";
 import { ProjectFilters, isHiddenSection, supportsRootFilter } from "./filter.js";
-import { nativePath, isCommonModule, resolveSource } from "./source.js";
+import { nativePath, isCommonModule, directModuleRole, isModuleLeaf, isForm, resolveSource, type SourceTarget } from "./source.js";
+import { FormSources, type FormSource } from "./forms.js";
 import { ProjectWatcher, watchManifests } from "./watch.js";
 
 interface Notice { label: string; project?: ProjectTree; parent?: TreeEntry }
-type Element = TreeEntry | Notice;
+type Element = TreeEntry | Notice | FormSource;
 
 let active: Explorer | undefined;
 
@@ -42,6 +43,7 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
   private readonly iconPaths = new Map<string, vscode.Uri>();
   private readonly filters: ProjectFilters;
   private readonly expanded = new Map<string, boolean>();
+  private readonly forms = new FormSources();
   private readonly recovering = new Set<ProjectTree>();
   private treeLanguage = this.resolveTreeLanguage();
   private opening = 0;
@@ -70,6 +72,8 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
     this.disposables.push(vscode.commands.registerCommand("eska.explorer.refreshNode", (entry: Element) => this.refresh(entry)));
     this.disposables.push(vscode.commands.registerCommand("eska.explorer.openSource", (entry: TreeEntry) => this.open(entry)));
     this.disposables.push(vscode.commands.registerCommand("eska.explorer.openXml", (entry: TreeEntry) => this.open(entry, "xml")));
+    this.disposables.push(vscode.commands.registerCommand("eska.explorer.openFormSource", (entry: FormSource) =>
+      this.open(entry.owner, entry.target)));
     for (const name of ["hideEmptyGroups", "showEmptyGroups", "resetRootFilter"] as const) {
       this.disposables.push(vscode.commands.registerCommand(`eska.explorer.${name}`, (entry: Element) =>
         this.setRootFilter(entry, name === "resetRootFilter" ? undefined : name === "hideEmptyGroups")));
@@ -122,12 +126,17 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
     const tree = this.tree;
     if (tree) {
       try {
-        if (entry && (!("node" in entry) || isCommonModule(entry))) return [];
+        if (entry && (!("node" in entry) || isModuleLeaf(entry))) return [];
+        if (entry && isForm(entry)) {
+          const rows = await this.forms.children(tree, entry);
+          return tree === this.tree ? rows : [];
+        }
         const children: Element[] = [];
         if (entry) {
           const all = await tree.children(entry);
           const hide = this.hideEmptyGroups(entry.project);
-          children.push(...all.filter((child) => !isHiddenSection(child, hide)));
+          children.push(...all.filter((child) => !isHiddenSection(child, hide)
+            && !(directModuleRole(entry) && child.node.id.kind === "collection" && child.node.id.collection.kind === "modules")));
         }
         else for (const project of tree.projects) {
           try { children.push(await tree.root(project)); }
@@ -147,6 +156,14 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
 
   /** Native TreeItems inherit zoom, keyboard navigation, themes and accessible text from VS Code. */
   getTreeItem(entry: Element): vscode.TreeItem {
+    if ("owner" in entry) {
+      const item = new vscode.TreeItem(message(this.treeLanguage, entry.target === "form" ? "formSource" : "formModule"));
+      item.id = `${entry.owner.key}:source:${entry.target}`;
+      item.contextValue = "eskaFormSource";
+      item.iconPath = this.metadataIcon(entry.owner, entry.target === "form" ? "form" : "module");
+      item.command = { command: "eska.explorer.openFormSource", title: this.text("openSource"), arguments: [entry] };
+      return item;
+    }
     if (!("node" in entry)) {
       const item = new vscode.TreeItem(entry.label);
       item.id = `${entry.parent?.key ?? entry.project?.key ?? "connection"}:notice`;
@@ -160,12 +177,12 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
       : node.label.translations[this.treeLanguage];
     const commonModule = isCommonModule(entry);
     const expanded = this.expanded.get(entry.key) ?? node.expandedByDefault;
-    const item = new vscode.TreeItem(label, commonModule || node.state === "empty" ? vscode.TreeItemCollapsibleState.None
+    const item = new vscode.TreeItem(label, isModuleLeaf(entry) || (node.state === "empty" && !isForm(entry)) ? vscode.TreeItemCollapsibleState.None
       : expanded ? vscode.TreeItemCollapsibleState.Expanded : vscode.TreeItemCollapsibleState.Collapsed);
     item.id = entry.key;
     item.contextValue = !node.parent && supportsRootFilter(entry.project)
       ? this.hideEmptyGroups(entry.project) ? "eskaRootFiltered" : "eskaRootUnfiltered"
-      : commonModule ? "eskaCommonModule" : "eskaMetadata";
+      : commonModule ? "eskaCommonModule" : directModuleRole(entry) ? "eskaModuleObject" : isForm(entry) ? "eskaForm" : "eskaMetadata";
     item.accessibilityInformation = { label };
     item.iconPath = node.state === "error" ? new vscode.ThemeIcon("warning") : this.metadataIcon(entry);
     if (!node.parent) item.description = entry.project.info.scope.kind === "member"
@@ -175,12 +192,12 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
   }
 
   /** Resolve bundled SVGs once per theme/type without file IO or backend requests while painting. */
-  private metadataIcon(entry: TreeEntry): vscode.Uri {
+  private metadataIcon(entry: TreeEntry, sourceIcon?: "form" | "module"): vscode.Uri {
     const kind = vscode.window.activeColorTheme.kind;
     const theme = kind === vscode.ColorThemeKind.HighContrast ? "contrast"
       : kind === vscode.ColorThemeKind.HighContrastLight ? "contrast-light"
       : kind === vscode.ColorThemeKind.Light ? "light" : "dark";
-    const key = `${theme}/${iconName(entry.node)}.svg`;
+    const key = `${theme}/${sourceIcon ?? iconName(entry.node)}.svg`;
     let uri = this.iconPaths.get(key);
     if (!uri) {
       uri = vscode.Uri.joinPath(this.context.extensionUri, "resources", "icons", key);
@@ -191,7 +208,7 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
 
   /** Native reveal uses backend-provided ancestry already present in the lazy tree. */
   getParent(entry: Element): Element | undefined {
-    return "node" in entry ? this.tree?.parent(entry) : entry.parent;
+    return "owner" in entry ? entry.owner : "node" in entry ? this.tree?.parent(entry) : entry.parent;
   }
 
   /** Search reuses the current backend context and reveals only the chosen branch. */
@@ -275,8 +292,9 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
   private async refresh(entry?: Element): Promise<void> {
     const tree = this.tree;
     if (!tree) return;
-    const node = entry && "node" in entry ? entry : entry?.parent;
-    const projects = entry?.project ? [entry.project] : tree.projects;
+    const node = entry && "owner" in entry ? entry.owner : entry && "node" in entry ? entry : entry?.parent;
+    const project = entry && "owner" in entry ? entry.owner.project : entry?.project;
+    const projects = project ? [project] : tree.projects;
     for (const project of projects) {
       this.recovering.add(project);
       try { await tree.refresh(project, project.info.requiresRefresh ? undefined : node); }
@@ -298,7 +316,7 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
   }
 
   /** Open only resolved existing sources, preserving unsaved buffers and rejecting stale positions. */
-  private async open(entry: TreeEntry, target: "default" | "xml" = "default"): Promise<void> {
+  private async open(entry: TreeEntry, target: SourceTarget = "default"): Promise<void> {
     const tree = this.tree;
     if (!tree || !entry || !("node" in entry) || !tree.projects.includes(entry.project)) return;
     const opening = ++this.opening;

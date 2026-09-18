@@ -1,6 +1,7 @@
 import type { FailureCode } from "./protocol.js";
 
 const en = {
+  formSource: "Form", formModule: "Module",
   filterSaveFailed: "Could not save the project filter setting. Try again.",
   search: "Search metadata", searchPlaceholder: "Object or nested element name or synonym",
   searchRetry: "Repeat search", searchLoading: "Searching…", searchEmpty: "No matches.",
@@ -41,6 +42,7 @@ const en = {
 } as const;
 
 const ru: Record<keyof typeof en, string> = {
+  formSource: "Форма", formModule: "Модуль",
   filterSaveFailed: "Не удалось сохранить режим фильтра проекта. Повторите действие.",
   search: "Поиск метаданных", searchPlaceholder: "Имя или синоним объекта либо вложенного элемента",
   searchRetry: "Повторить поиск", searchLoading: "Поиск…", searchEmpty: "Совпадений нет.",
