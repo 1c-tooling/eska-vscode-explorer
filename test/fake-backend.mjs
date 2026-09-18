@@ -42,6 +42,15 @@ function handle(request) {
     if (mode !== "ignore-shutdown") ok(null);
   } else if (request.method === "exit") process.exit(0);
   else if (request.method === "test/crash") process.exit(9);
+  else if (request.method === "test/noisy-crash") {
+    process.stderr.write('n'.repeat(20000), () => process.stderr.write('LATE_PANIC_REASON', () => process.exit(17)));
+  } else if (request.method === "test/error") {
+    send({ jsonrpc: "2.0", id: request.id, error: { code: -32000, message: "PRIVATE_RESPONSE_BODY",
+      data: { kind: "xml_invalid", details: { reason: "malformed", path: { value: "Catalogs/Товары.xml", encoding: "utf-8" },
+        body: "PRIVATE_RESPONSE_BODY" } } } });
+  } else if (request.method === "test/truncated") {
+    process.stdout.write('Content-Length: 100\r\n\r\n{}', () => process.exit(19));
+  }
 }
 
 process.stdin.on("data", (chunk) => {

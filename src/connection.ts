@@ -1,4 +1,5 @@
 import { isAbsolute } from "node:path";
+import { diagnostic, errorContext, type DiagnosticLog } from "./diagnostics.js";
 import { BackendProcess, type ProcessOptions } from "./process.js";
 import { API_VERSION, ExplorerError, parseHandshake, parseWorkspace, type WorkspaceSession } from "./protocol.js";
 
@@ -21,7 +22,7 @@ export class Connection {
   constructor(
     private readonly version: string,
     private readonly changed: (state: ConnectionState) => void,
-    private readonly log: (message: string) => void,
+    private readonly log: DiagnosticLog,
     private readonly create: (options: ProcessOptions) => BackendProcess = (options) => new BackendProcess(options),
   ) {}
 
@@ -61,9 +62,10 @@ export class Connection {
     if (this.disposed) return Promise.resolve();
     const revision = ++this.revision;
     this.lastTarget = target;
+    diagnostic(this.log, "connection_connect", { clientVersion: this.version, executable: target.executable, cwd: target.path, locale: target.locale });
     this.set({ kind: "connecting" });
     // Interrupt a slow open instead of waiting its full timeout before switching folders.
-    void this.child?.stop().catch(() => this.log("process_cleanup_failed"));
+    void this.child?.stop("restart").catch(() => this.log("process_cleanup_failed"));
     this.queue = this.queue.then(async () => {
       let negotiated = false;
       try {
@@ -92,7 +94,12 @@ export class Connection {
         const session = parseWorkspace(await child.request("workspace/open", {
           start: { value: target.path, encoding: "utf-8" }, selection: { kind: "current" }, diskCache: true,
         }));
-        if (revision === this.revision) this.set({ kind: "ready", session, version, target });
+        if (revision === this.revision) {
+          diagnostic(this.log, "connection_ready", { backendVersion: version, sessionId: session.sessionId,
+            projects: session.projects.map((project) => ({ projectId: project.projectId, type: project.type,
+              rootPath: project.rootPath, sourcePath: project.sourcePath, generation: project.generation })) });
+          this.set({ kind: "ready", session, version, target });
+        }
       } catch (error) {
         if (!negotiated && error instanceof ExplorerError
           && ["connectionLost", "protocolInvalid"].includes(error.code)) {
@@ -112,7 +119,7 @@ export class Connection {
   disconnect(): Promise<void> {
     const revision = ++this.revision;
     this.set({ kind: "stopping" });
-    void this.child?.stop().catch(() => this.log("process_cleanup_failed"));
+    void this.child?.stop("disconnect").catch(() => this.log("process_cleanup_failed"));
     this.queue = this.queue.then(async () => {
       try {
         await this.stopChild();
@@ -136,6 +143,7 @@ export class Connection {
   /** Publish one state transition to the adapter. */
   private set(state: ConnectionState): void {
     if (state.kind === "error" && this.current.kind === "error" && state.error.code === this.current.error.code) return;
+    diagnostic(this.log, "connection_state", { state: state.kind, ...(state.kind === "error" ? errorContext(state.error) : {}) });
     this.current = state;
     this.changed(state);
   }

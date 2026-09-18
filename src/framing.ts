@@ -8,6 +8,12 @@ export class FrameReader {
   private offset = 0;
   private readonly decoder = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
 
+  /** Expose lengths only, never partial protocol bodies, when diagnosing a stalled or truncated response. */
+  get progress(): { phase: string; receivedBytes: number; expectedBytes?: number } {
+    return this.body ? { phase: "body", receivedBytes: this.offset, expectedBytes: this.body.length }
+      : { phase: "header", receivedBytes: this.header.length };
+  }
+
   /** Deliver complete JSON values in wire order and retain only the incomplete frame. */
   push(chunk: Buffer, accept: (value: unknown) => void): void {
     let position = 0;
@@ -15,7 +21,7 @@ export class FrameReader {
       if (!this.body) {
         const byte = chunk[position++];
         if (byte === undefined || byte > 127 || this.header.length === MAX_HEADER) {
-          throw new ExplorerError("protocolInvalid");
+          throw new ExplorerError("protocolInvalid", "invalid_header");
         }
         this.header.push(byte);
         const end = this.header.length;
@@ -25,14 +31,14 @@ export class FrameReader {
         let size: number | undefined;
         for (const line of lines) {
           const separator = line.indexOf(":");
-          if (separator < 1) throw new ExplorerError("protocolInvalid");
+          if (separator < 1) throw new ExplorerError("protocolInvalid", "invalid_header_line");
           if (line.slice(0, separator).toLowerCase() !== "content-length") continue;
           const text = line.slice(separator + 1).trim();
-          if (size !== undefined || !/^[0-9]+$/.test(text)) throw new ExplorerError("protocolInvalid");
+          if (size !== undefined || !/^[0-9]+$/.test(text)) throw new ExplorerError("protocolInvalid", "invalid_content_length");
           size = Number(text);
         }
         if (size === undefined || !Number.isSafeInteger(size) || size < 1 || size > MAX_RESPONSE) {
-          throw new ExplorerError("protocolInvalid");
+          throw new ExplorerError("protocolInvalid", "body_size_limit");
         }
         this.body = Buffer.allocUnsafe(size);
         this.offset = 0;
@@ -48,7 +54,7 @@ export class FrameReader {
         this.offset = 0;
         let value: unknown;
         try { value = JSON.parse(this.decoder.decode(complete)) as unknown; }
-        catch { throw new ExplorerError("protocolInvalid"); }
+        catch { throw new ExplorerError("protocolInvalid", "invalid_utf8_or_json"); }
         accept(value);
       }
     }
@@ -56,7 +62,7 @@ export class FrameReader {
 
   /** A truncated frame is a protocol error, including during orderly shutdown. */
   finish(): void {
-    if (this.body || this.header.length) throw new ExplorerError("protocolInvalid");
+    if (this.body || this.header.length) throw new ExplorerError("protocolInvalid", "truncated_frame");
   }
 }
 

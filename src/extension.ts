@@ -29,7 +29,7 @@ export async function deactivate(): Promise<void> {
 class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
   private readonly changed = new vscode.EventEmitter<Element | Element[] | undefined>();
   readonly onDidChangeTreeData = this.changed.event;
-  private readonly output = vscode.window.createOutputChannel("eska Explorer");
+  private readonly output = vscode.window.createOutputChannel("eska Explorer", { log: true });
   private readonly connection: Connection;
   private readonly view: vscode.TreeView<Element>;
   private readonly disposables: vscode.Disposable[] = [];
@@ -46,7 +46,7 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
 
   constructor(private readonly context: vscode.ExtensionContext) {
     this.connection = new Connection(String(context.extension.packageJSON.version),
-      (state) => this.update(state), (text) => this.output.appendLine(text));
+      (state) => this.update(state), (text, level) => this.output[level ?? "info"](text));
     this.view = vscode.window.createTreeView("eska.explorer.projects", { treeDataProvider: this });
     for (const [name, action] of [
       ["connect", () => this.connect(true)],
@@ -102,7 +102,7 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
       } catch (error) {
         if (tree !== this.tree) return [];
         const failure = error instanceof ExplorerError ? error : new ExplorerError("branchInvalid");
-        this.output.appendLine(`tree_error code=${failure.code} kind=${failure.domain ?? "none"}`);
+        this.output.info(`tree_error code=${failure.code} kind=${failure.domain ?? "none"}`);
         return [{ label: this.text(failure.code), ...(entry && "node" in entry ? { parent: entry, project: entry.project } : {}) }];
       }
     }
@@ -166,7 +166,7 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
     if (reopen) { void this.connect(false); return; }
     this.recovering.add(project);
     void tree.refresh(project).catch((error: unknown) => {
-      this.output.appendLine(`refresh_error code=${error instanceof ExplorerError ? error.code : "requestFailed"}`);
+      this.output.info(`refresh_error code=${error instanceof ExplorerError ? error.code : "requestFailed"}`);
     }).finally(() => this.recovering.delete(project));
   }
 
@@ -240,7 +240,7 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
       this.tree = tree;
       try {
         for (const project of tree.projects) this.watchers.push(new ProjectWatcher(tree, project,
-          (error) => { this.output.appendLine(`watch_error code=${error instanceof ExplorerError ? error.code : "requestFailed"}`); }));
+          (error) => { this.output.info(`watch_error code=${error instanceof ExplorerError ? error.code : "requestFailed"}`); }));
         this.watchers.push(watchManifests(state.target.path, tree.projects, () => { void this.connect(false); }));
       } catch (error) { this.showError(error instanceof ExplorerError ? error : new ExplorerError("unsupportedPath")); }
     }
