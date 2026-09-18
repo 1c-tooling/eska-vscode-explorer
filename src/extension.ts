@@ -85,6 +85,7 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
       }
       if (event.affectsConfiguration("eska.explorer.treeLanguage")) {
         this.treeLanguage = this.resolveTreeLanguage();
+        this.searchView?.refreshLabels();
         // Labels already contain both translations; reuse nodes and their expansion state.
         this.changed.fire(undefined);
       }
@@ -166,7 +167,7 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
     const tree = this.tree;
     if (!tree || this.disposed) return;
     if (this.searchView) { this.searchView.show(); return; }
-    this.searchView = new SearchView(tree, async (entry) => {
+    this.searchView = new SearchView(tree, () => this.treeLanguage, async (entry) => {
       try {
         if (this.tree !== tree) throw new ExplorerError("obsolete");
         await vscode.commands.executeCommand("eska.explorer.projects.focus");

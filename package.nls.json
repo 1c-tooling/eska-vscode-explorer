@@ -9,7 +9,7 @@
   "virtual": "Explorer requires project files on the extension host filesystem.",
   "refresh": "Refresh metadata",
   "openSource": "Open source",
-  "treeLanguage": "Language of metadata groups and module roles. Auto follows the VS Code language (Russian or English). Applies immediately; object names and other UI text are unchanged.",
+  "treeLanguage": "Language of metadata groups, module roles and search result types. Auto follows the VS Code language (Russian or English). Applies immediately; object names and other UI text are unchanged.",
   "treeLanguageAuto": "Auto",
   "treeLanguageRussian": "Русский",
   "treeLanguageEnglish": "English",

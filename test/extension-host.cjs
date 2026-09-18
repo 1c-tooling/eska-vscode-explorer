@@ -43,6 +43,13 @@ exports.run = async function () {
   const search = explorer.searchView;
   search.picker.value = 'уНиКаЛьНыЙ код';
   await until(() => search.picker.items.some(item => item.hit?.name === 'Артикул') && !search.picker.busy, 'synonym search');
+  const searchSession = explorer.connection.state.session.sessionId;
+  for (const language of ['ru-RU', 'en-US', 'auto']) {
+    await vscode.workspace.getConfiguration('eska.explorer').update('treeLanguage', language, vscode.ConfigurationTarget.Workspace);
+    const russian = language === 'ru-RU' || (language === 'auto' && vscode.env.language.toLowerCase().startsWith('ru'));
+    await until(() => search.picker.items.find(item => item.hit)?.description.startsWith(russian ? 'Реквизит ·' : 'Attribute ·'), 'localized search kind');
+    assert.equal(explorer.connection.state.session.sessionId, searchSession, 'locale keeps search connection');
+  }
   const result = search.picker.items.find(item => item.hit);
   assert.equal(result.hit.name, 'Артикул');
   assert.ok(result.detail.includes('Товары'));

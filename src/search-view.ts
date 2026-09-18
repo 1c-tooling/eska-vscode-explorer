@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { kindLabel } from "./kind-labels.js";
 import { ExplorerError } from "./protocol.js";
 import { message } from "./messages.js";
 import { revealHit, SearchSession, type SearchHit, type SearchSnapshot } from "./search.js";
@@ -16,7 +17,8 @@ export class SearchView implements vscode.Disposable {
   private accepting = false;
   private failure: ExplorerError | undefined;
 
-  constructor(private readonly tree: MetadataTree, private readonly reveal: (entry: TreeEntry) => Promise<void>,
+  constructor(private readonly tree: MetadataTree, private readonly language: () => "ru-RU" | "en-US",
+    private readonly reveal: (entry: TreeEntry) => Promise<void>,
     private readonly closed: () => void) {
     this.picker.title = message(vscode.env.language, "search");
     this.picker.placeholder = message(vscode.env.language, "searchPlaceholder");
@@ -34,6 +36,9 @@ export class SearchView implements vscode.Disposable {
   /** Reopening the command focuses the same query instead of starting another index/search loop. */
   show(): void { this.picker.show(); }
 
+  /** Repaint cached results when the tree language changes, without querying or reindexing. */
+  refreshLabels(): void { this.render(this.session.snapshot); }
+
   /** Backend matches always stay visible, including synonym-only matches absent from the item label. */
   private render(snapshot: SearchSnapshot): void {
     if (this.disposed || this.accepting) return;
@@ -48,7 +53,7 @@ export class SearchView implements vscode.Disposable {
       for (const hit of row.hits) {
         const owner = hit.ancestry.slice(0, -1).reverse().find((node) => node.kind === "object");
         const synonyms = hit.synonyms.filter((value) => value.content.toLowerCase().includes(snapshot.text.toLowerCase()));
-        picks.push({ label: hit.name, description: `${hit.metadataKind} · ${name}`,
+        picks.push({ label: hit.name, description: `${kindLabel(hit.metadataKind, this.language())} · ${name}`,
           detail: [owner?.kind === "object" ? owner.objectId : "", ...synonyms.slice(0, 2).map((value) => value.content)].filter(Boolean).join(" — "),
           alwaysShow: true, hit, project: row.project, identity: JSON.stringify([row.project.key, hit.objectId]) });
       }
