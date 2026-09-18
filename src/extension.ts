@@ -143,25 +143,11 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
     const tree = this.tree;
     if (tree) {
       try {
-        if (!entry && this.files?.root) return [this.files.root];
         if (entry && "fileKind" in entry) {
-          if (entry.fileKind === "workspace") {
-            const roots: Element[] = [];
-            for (const project of tree.projects) {
-              try { roots.push(await tree.root(project)); }
-              catch { roots.push({ label: this.text("branchInvalid"), project, parent: entry }); }
-            }
-            return [...roots, ...await this.files?.groups() ?? []];
-          }
-          if (entry.fileKind === "group" && entry.kind === "structure" && entry.scope.project) {
-            const root = await tree.root(entry.scope.project);
-            return (await tree.children(root)).filter(child => !isHiddenSection(child, this.hideEmptyGroups(root.project)));
-          }
           const children = await this.files?.children(entry) ?? [];
           return tree === this.tree ? children : [];
         }
         if (entry && (!("node" in entry) || isModuleLeaf(entry))) return [];
-        if (entry && !entry.node.parent && this.files) return await this.files.groups(entry.project);
         if (entry && isForm(entry)) {
           const rows = await this.forms.children(tree, entry);
           return tree === this.tree ? rows : [];
@@ -177,13 +163,13 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
           try { children.push(await tree.root(project)); }
           catch (error) { children.push({ label: this.text(error instanceof ExplorerError ? error.code : "branchInvalid"), project }); }
         }
+        if (!entry || !entry.node.parent) children.push(...await this.files?.groups(entry?.project) ?? []);
         return tree === this.tree ? children : [];
       } catch (error) {
         if (tree !== this.tree) return [];
         const failure = error instanceof ExplorerError ? error : new ExplorerError("branchInvalid");
         this.output.info(`tree_error code=${failure.code} kind=${failure.domain ?? "none"}`);
-        const fileBranch = entry && (("fileKind" in entry && !(entry.fileKind === "group" && entry.kind === "structure"))
-          || ("node" in entry && !entry.node.parent));
+        const fileBranch = entry && "fileKind" in entry;
         if (fileBranch) this.output.warn(`file_tree_error ${error instanceof Error ? error.message : String(error)}`);
         return [{ label: this.text(fileBranch ? "filesUnavailable" : failure.code),
           ...(entry ? { parent: entry } : {}), ...(entry && "node" in entry ? { project: entry.project } : {}) }];
@@ -198,7 +184,7 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
     if ("fileKind" in entry) {
       const label = entry.fileKind === "group" ? message(this.treeLanguage, entry.kind) : fileName(entry);
       const item = new vscode.TreeItem(label, entry.fileKind === "entry" && !entry.directory ? vscode.TreeItemCollapsibleState.None
-        : (this.expanded.get(entry.key) ?? entry.fileKind === "workspace")
+        : this.expanded.get(entry.key)
           ? vscode.TreeItemCollapsibleState.Expanded : vscode.TreeItemCollapsibleState.Collapsed);
       item.id = entry.key;
       item.contextValue = "eskaFiles";
@@ -208,10 +194,9 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
         item.iconPath = entry.directory ? vscode.ThemeIcon.Folder : vscode.ThemeIcon.File;
         if (!entry.directory) item.command = { command: "vscode.open", title: this.text("openSource"), arguments: [item.resourceUri] };
       } else {
-        const icons = { structure: "symbol-namespace", settings: "settings-gear", documentation: "book", builds: "package", other: "folder" };
-        item.iconPath = new vscode.ThemeIcon(entry.fileKind === "group" ? icons[entry.kind] : "root-folder");
-        item.tooltip = entry.fileKind === "group" ? entry.scope.path : entry.path;
-        if (entry.fileKind === "workspace") item.description = message(this.treeLanguage, "workspace");
+        const icons = { settings: "settings-gear", documentation: "book", other: "folder" };
+        item.iconPath = new vscode.ThemeIcon(icons[entry.kind]);
+        item.tooltip = entry.scope.path;
       }
       return item;
     }
@@ -272,14 +257,12 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
   /** Native reveal uses backend-provided ancestry already present in the lazy tree. */
   getParent(entry: Element): Element | undefined {
     if ("fileKind" in entry) {
-      if (entry.fileKind === "workspace") return undefined;
       if (entry.fileKind === "entry") return entry.parent;
-      return entry.scope.project?.root ?? this.files?.root;
+      return entry.scope.project?.info.scope.kind === "member" ? entry.scope.project.root : undefined;
     }
     if ("owner" in entry) return entry.owner;
     if (!("node" in entry)) return entry.parent;
-    const parent = this.tree?.parent(entry);
-    return parent ? parent.node.parent ? parent : this.files?.structure(parent.project) ?? parent : this.files?.root;
+    return this.tree?.parent(entry);
   }
 
   /** Limit shortcut overrides to files in the connected projects, including multi-root workspaces. */
@@ -392,12 +375,7 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
     if (!tree) return;
     this.files?.refresh();
     this.changed.fire(undefined);
-    if (entry && "fileKind" in entry) {
-      if (entry.fileKind === "group" && entry.kind === "structure" && entry.scope.project) {
-        await this.refresh(entry.scope.project.root);
-      }
-      return;
-    }
+    if (entry && "fileKind" in entry) return;
     if (entry && "parent" in entry && entry.parent && "fileKind" in entry.parent) {
       await this.refresh(entry.parent);
       return;
@@ -500,7 +478,7 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
       this.tree = tree;
       this.files = new WorkspaceFiles(tree.projects, state.target.path, watchDirectory, entry => {
         if (this.tree !== tree) return;
-        this.changed.fire("fileKind" in entry ? entry : entry.root);
+        this.changed.fire(entry && ("fileKind" in entry ? entry : entry.root));
       });
       try {
         for (const project of tree.projects) this.watchers.push(new ProjectWatcher(tree, project,

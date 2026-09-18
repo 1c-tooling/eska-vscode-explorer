@@ -39,9 +39,8 @@ exports.run = async function () {
   const explorer = await vscode.extensions.all.find(value => value.packageJSON.name === "eska-explorer").activate();
   await vscode.commands.executeCommand("eska.explorer.connect");
   await vscode.commands.executeCommand("eska.explorer.projects.focus");
-  const [workspace] = await explorer.getChildren();
-  assert.equal(workspace.fileKind, "workspace", JSON.stringify(explorer.connection.state));
-  const rows = await explorer.getChildren(workspace);
+  const rows = await explorer.getChildren();
+  assert.ok(rows.every(row => row.fileKind !== "workspace"), "no synthetic workspace parent");
   const projects = rows.filter(row => row.node);
   assert.equal(projects.length, 2);
   assert.ok(rows.some(row => row.kind === "settings"));
@@ -49,16 +48,18 @@ exports.run = async function () {
   // Match members by their authoritative physical paths.
   const firstRoot = projects.find(row => row.project.info.rootPath.value === first.root);
   assert.ok(firstRoot);
-  assert.equal(explorer.getParent(firstRoot), workspace);
-  const groups = await explorer.getChildren(firstRoot);
-  assert.deepEqual(groups.map(row => row.kind), ["structure", "settings", "documentation", "other"]);
-  assert.equal(explorer.getTreeItem(groups[0]).label, "Структура проекта 1С");
-  const sections = await explorer.getChildren(groups[0]);
-  const catalogs = sections.find(row => row.node.id.collection?.metadataKind === "catalog");
-  assert.equal(explorer.getParent(catalogs), groups[0]);
+  assert.equal(explorer.getParent(firstRoot), undefined);
+  const sections = await explorer.getChildren(firstRoot);
+  const groups = sections.filter(row => row.fileKind === "group");
+  assert.deepEqual(groups.map(row => row.kind), ["settings", "documentation", "other"]);
+  assert.equal(explorer.getTreeItem(groups[0]).label, "Настройки проекта");
+  const catalogs = sections.find(row => row.node?.id.collection?.metadataKind === "catalog");
+  assert.equal(explorer.getParent(catalogs), firstRoot);
   assert.equal(explorer.getParent(groups[0]), firstRoot);
+  assert.ok(sections.indexOf(catalogs) < sections.indexOf(groups[0]), "metadata precedes file groups");
+  for (const group of rows.filter(row => row.fileKind === "group")) assert.equal(explorer.getParent(group), undefined);
   await explorer.view.reveal(catalogs, { select: true, focus: true });
-  try { await until(() => explorer.view.selection[0]?.key === catalogs.key, "metadata ancestry includes structure group"); }
+  try { await until(() => explorer.view.selection[0]?.key === catalogs.key, "metadata is directly inside the configuration"); }
   catch (error) { throw new Error(`${error.message}: ${JSON.stringify({ selected: explorer.view.selection.map(row => row.key),
     expected: catalogs.key, expanded: [...explorer.expanded.entries()], session: explorer.connection.state.kind })}`); }
   for (const file of [path.join(first.root, "eska.toml"), path.join(first.root, ".gitignore"),
@@ -85,13 +86,13 @@ exports.run = async function () {
   await until(async () => !(await explorer.getChildren(secondRoot)).some(row => row.kind === "documentation"), "deleted README removes group");
   assert.equal(explorer.tree, tree, "ordinary file changes do not restart metadata backend");
   await config.update("treeLanguage", "en-US", vscode.ConfigurationTarget.Workspace);
-  await until(() => explorer.getTreeItem(groups[0]).label === "1C project structure", "file groups use tree language");
+  await until(() => explorer.getTreeItem(groups[0]).label === "Project settings", "file groups use tree language");
   await vscode.commands.executeCommand("eska.explorer.showEmptyGroups", root);
   await vscode.commands.executeCommand("eska.explorer.hideEmptyGroups", root);
   await vscode.commands.executeCommand("eska.explorer.refresh");
   await vscode.commands.executeCommand("eska.explorer.restart");
-  const [freshWorkspace] = await explorer.getChildren();
-  assert.equal(freshWorkspace.key, workspace.key);
+  const freshRows = await explorer.getChildren();
+  assert.deepEqual(freshRows.map(row => row.key), rows.map(row => row.key));
   await vscode.commands.executeCommand("eska.explorer.disconnect");
   assert.equal(explorer.files, undefined);
   await fs.writeFile(path.join(fixture.root, "host-result.json"), JSON.stringify({ passed: true, vscode: vscode.version, suite: "workspace" }));

@@ -36,16 +36,15 @@ async function populate(root, names) {
 }
 
 test("settings ownership and README languages do not rename physical files", () => {
-  for (const name of ["eska.toml", ".gitignore"]) assert.equal(fileCategory(name, false, true), "settings");
+  for (const name of ["eska.toml", ".gitignore"]) assert.equal(fileCategory(name, false), "settings");
   for (const name of [".gitattributes", "bsl-analyzer.toml"]) {
-    assert.equal(fileCategory(name, false, false), "settings");
-    assert.equal(fileCategory(name, false, true), "other");
+    assert.equal(fileCategory(name, false), "other");
   }
   for (const name of ["README.md", "README.ru.md", "README.en.md", "readme.pt-BR.md"]) {
-    assert.equal(fileCategory(name, false, false), "documentation");
+    assert.equal(fileCategory(name, false), "documentation");
   }
-  assert.equal(fileCategory("README.md.bak", false, false), "other");
-  assert.equal(fileCategory("README.md", true, false), "other");
+  assert.equal(fileCategory("README.md.bak", false), "other");
+  assert.equal(fileCategory("README.md", true), "other");
 });
 
 test("standalone categories are lazy, files keep names, and source trees are excluded", async t => {
@@ -56,21 +55,21 @@ test("standalone categories are lazy, files keep names, and source trees are exc
   await populate(join(root, ".git"), ["config"]);
   const info = project(root);
   const { files, watches } = model(t, [info], root);
-  assert.equal(files.root, undefined);
+  assert.deepEqual(await files.groups(info), [], "standalone files belong beside the configuration");
   assert.equal(watches.size, 0);
-  const groups = await files.groups(info);
-  assert.deepEqual(groups.map(group => group.kind), ["structure", "settings", "documentation", "builds", "other"]);
+  const groups = await files.groups();
+  assert.deepEqual(groups.map(group => group.kind), ["settings", "documentation", "other"]);
   assert.deepEqual([...watches.keys()], [root]);
-  const settings = await files.children(groups[1]);
-  assert.equal(settings.length, 4);
-  assert.ok(settings.every(entry => entry.parent === groups[1]));
-  const other = await files.children(groups[4]);
+  const settings = await files.children(groups[0]);
+  assert.equal(settings.length, 2);
+  assert.ok(settings.every(entry => entry.parent === groups[0]));
+  const other = await files.children(groups[2]);
   assert.ok(!other.some(entry => entry.path === join(root, "src")));
   assert.ok(other.some(entry => entry.path === join(root, ".git")));
   assert.equal(watches.size, 1, "collapsed Git and build directories are not watched or scanned");
   const build = await files.reveal(join(root, "build/demo.cf"));
   assert.equal(build.path, join(root, "build/demo.cf"));
-  assert.equal(build.parent.parent.kind, "builds");
+  assert.equal(build.parent.parent.kind, "other");
   const git = await files.reveal(join(root, ".git/config"));
   assert.equal(git.parent.parent.kind, "other");
   assert.equal(await files.reveal(join(root + "-other", "notes.txt")), undefined);
@@ -87,7 +86,7 @@ test("workspace separates global settings and members, even when nested outside 
   }
   await populate(join(root, "src"), ["README.ru.md"]);
   const { files } = model(t, [first, second], root);
-  assert.equal(files.root.path, root);
+  assert.ok(files.scopes.some(scope => scope.path === root && !scope.project));
   assert.equal((await files.groups()).some(group => group.kind === "structure"), false);
   const member = await files.groups(first);
   assert.equal((await files.children(member.find(group => group.kind === "settings"))).length, 2);
@@ -100,7 +99,7 @@ test("workspace separates global settings and members, even when nested outside 
   assert.deepEqual((await files.children(src)).map(entry => entry.path), [join(root, "src/README.ru.md")]);
   assert.equal(await files.reveal(join(first.info.sourcePath.value, "Configuration.xml")), undefined);
   const direct = model(t, [first], first.info.rootPath.value).files;
-  assert.equal(direct.root, undefined, "opening one member does not expose its parent workspace");
+  assert.deepEqual(await direct.groups(), [], "opening one member does not expose its parent workspace");
 });
 
 test("watch invalidation reveals new groups and removal; manual refresh recovers unwatched events", async t => {
@@ -108,17 +107,17 @@ test("watch invalidation reveals new groups and removal; manual refresh recovers
   await populate(root, ["eska.toml"]);
   const p = project(root);
   const { files, watches, changes } = model(t, [p], root);
-  assert.deepEqual((await files.groups(p)).map(group => group.kind), ["structure", "settings"]);
+  assert.deepEqual((await files.groups()).map(group => group.kind), ["settings"]);
   await populate(root, ["README.md"]);
-  assert.equal((await files.groups(p)).length, 2, "reuse the shallow snapshot until invalidation");
+  assert.equal((await files.groups()).length, 1, "reuse the shallow snapshot until invalidation");
   await watches.get(root)();
-  assert.deepEqual(changes, [p]);
-  assert.equal((await files.groups(p)).length, 3);
+  assert.deepEqual(changes, [undefined]);
+  assert.equal((await files.groups()).length, 2);
   await watches.get(root)();
   assert.equal(changes.length, 1, "late events with unchanged names do not reset native selection");
   await rm(join(root, "README.md"));
   files.refresh();
-  assert.equal((await files.groups(p)).length, 2);
+  assert.equal((await files.groups()).length, 1);
   files.dispose();
   assert.equal(watches.size, 0);
 });
@@ -130,7 +129,7 @@ test("directory links remain navigable but ancestor cycles terminate", { skip: p
   await symlink(root, join(root, "assets/back"));
   const p = project(root);
   const { files } = model(t, [p], root);
-  const other = (await files.groups(p)).find(group => group.kind === "other");
+  const other = (await files.groups()).find(group => group.kind === "other");
   const [assets] = await files.children(other);
   const [back] = await files.children(assets);
   assert.equal(back.link, true);

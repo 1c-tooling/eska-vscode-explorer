@@ -15,7 +15,7 @@ async function until(predicate, message) {
 /** Backend labels identify fixture nodes independently of the configured display language. */
 function named(entries, label) {
   const entry = entries.find(entry => entry.node && (entry.node.label.kind === 'name'
-    ? entry.node.label.text : entry.node.label.translations['ru-RU']) === label);
+    ? entry.node.label.text : entry.node?.label.translations['ru-RU']) === label);
   assert.ok(entry, `Missing ${label}`);
   return entry;
 }
@@ -31,7 +31,7 @@ exports.run = async function () {
   await vscode.commands.executeCommand('eska.explorer.connect');
   await vscode.commands.executeCommand('eska.explorer.projects.focus');
   const [root] = await explorer.getChildren();
-  const groups = await explorer.getChildren(explorer.files.structure(root.project));
+  const groups = await explorer.getChildren(root);
   const catalog = named(groups, 'Справочники');
   const goods = named(await explorer.getChildren(catalog), 'Товары');
   const children = await explorer.getChildren(goods);

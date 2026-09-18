@@ -4,13 +4,12 @@ import { relativeFile } from "./reveal.js";
 import { nativePath } from "./source.js";
 import type { ProjectTree } from "./tree.js";
 
-export type FileGroupKind = "structure" | "settings" | "documentation" | "builds" | "other";
+export type FileGroupKind = "settings" | "documentation" | "other";
 export interface FileScope {
   path: string;
   project: ProjectTree | undefined;
   groups: FileGroup[];
 }
-export interface WorkspaceRoot { fileKind: "workspace"; key: string; path: string }
 export interface FileGroup { fileKind: "group"; key: string; kind: FileGroupKind; scope: FileScope }
 export interface FileEntry {
   fileKind: "entry";
@@ -20,22 +19,21 @@ export interface FileEntry {
   link: boolean;
   parent: FileGroup | FileEntry;
 }
-export type WorkspaceEntry = WorkspaceRoot | FileGroup | FileEntry;
+export type WorkspaceEntry = FileGroup | FileEntry;
 interface DirectoryEntry { name: string; directory: boolean; link: boolean }
 interface DirectorySnapshot { real: string; entries: DirectoryEntry[] }
 export type WatchDirectory = (path: string, changed: () => void) => { dispose(): void };
 
 /** Assign only immediate scope files to categories; descendants retain their physical hierarchy. */
-export function fileCategory(name: string, directory: boolean, member: boolean): Exclude<FileGroupKind, "structure"> {
-  if (directory) return name === "build" ? "builds" : "other";
-  if (["eska.toml", ".gitignore", ...member ? [] : [".gitattributes", "bsl-analyzer.toml"]].includes(name)) return "settings";
+export function fileCategory(name: string, directory: boolean): FileGroupKind {
+  if (directory) return "other";
+  if (["eska.toml", ".gitignore"].includes(name)) return "settings";
   if (/^README(?:[.-][\w-]+)?\.md$/i.test(name)) return "documentation";
   return "other";
 }
 
 /** Overlay filesystem navigation on backend-owned project paths without parsing TOML or XML. */
 export class WorkspaceFiles {
-  readonly root: WorkspaceRoot | undefined;
   readonly scopes: FileScope[];
   private readonly listings = new Map<string, Promise<DirectorySnapshot>>();
   private readonly watchers = new Map<string, { dispose(): void }>();
@@ -43,27 +41,20 @@ export class WorkspaceFiles {
 
   constructor(projects: readonly ProjectTree[], selectedPath: string,
     private readonly watch: WatchDirectory,
-    private readonly changed: (entry: WorkspaceEntry | ProjectTree) => void) {
+    private readonly changed: (entry: WorkspaceEntry | ProjectTree | undefined) => void) {
     const selected = resolve(selectedPath);
     const shared = projects.some(project => project.info.scope.kind === "member")
       && projects.every(project => relativeFile(selected, nativePath(project.info.rootPath)) !== undefined);
-    this.root = shared ? { fileKind: "workspace", key: `workspace:${selected}`, path: selected } : undefined;
     this.scopes = projects.map(project => this.scope(nativePath(project.info.rootPath), project));
-    if (this.root) this.scopes.push(this.scope(selected, undefined));
+    if (shared) this.scopes.push(this.scope(selected, undefined));
   }
 
   /** Stable synthetic IDs are independent of translated labels and metadata generations. */
   private scope(path: string, project: ProjectTree | undefined): FileScope {
     const scope: FileScope = { path, project, groups: [] };
-    const kinds: FileGroupKind[] = project ? ["structure", "settings", "documentation", "builds", "other"]
-      : ["settings", "documentation", "builds", "other"];
+    const kinds: FileGroupKind[] = ["settings", "documentation", "other"];
     scope.groups = kinds.map(kind => ({ fileKind: "group", key: `files:${path}:${kind}`, kind, scope }));
     return scope;
-  }
-
-  /** The metadata section exists even when all optional filesystem groups are empty. */
-  structure(project: ProjectTree): FileGroup | undefined {
-    return this.scopes.find(scope => scope.project === project)?.groups.find(group => group.kind === "structure");
   }
 
   /** Never list a connected project's source directory or another member twice. */
@@ -74,7 +65,7 @@ export class WorkspaceFiles {
   }
 
   /** Watch only directories requested by the user, avoiding recursive watchers over build and Git internals. */
-  private listing(path: string, owner: WorkspaceEntry | ProjectTree): Promise<DirectorySnapshot> {
+  private listing(path: string, owner: WorkspaceEntry | ProjectTree | undefined): Promise<DirectorySnapshot> {
     if (this.disposed) return Promise.reject(new Error("Disposed workspace files"));
     const cached = this.listings.get(path);
     if (cached) return cached;
@@ -86,7 +77,7 @@ export class WorkspaceFiles {
   }
 
   /** Ignore delayed create events already reflected in a snapshot, preserving selection on unrelated branches. */
-  private async invalidate(path: string, owner: WorkspaceEntry | ProjectTree): Promise<void> {
+  private async invalidate(path: string, owner: WorkspaceEntry | ProjectTree | undefined): Promise<void> {
     const previous = this.listings.get(path);
     try {
       const [before, after] = await Promise.all([previous, this.readDirectory(path)]);
@@ -121,30 +112,31 @@ export class WorkspaceFiles {
     return { real, entries: children };
   }
 
-  /** Reuse one shallow root snapshot for settings, documentation, builds and other files. */
+  /** Reuse one shallow root snapshot for settings, documentation and other files. */
   private async scopeFiles(scope: FileScope): Promise<DirectoryEntry[]> {
-    const snapshot = await this.listing(scope.path, scope.project ?? this.root!);
+    const snapshot = await this.listing(scope.path, scope.project?.info.scope.kind === "member" ? scope.project : undefined);
     return snapshot.entries.filter(entry => !this.excluded(join(scope.path, entry.name), scope));
   }
 
-  /** Omit absent categories independently of the metadata empty-section filter. */
+  /** Keep standalone files at view level and member files below their configuration; hide absent categories. */
   async groups(project?: ProjectTree): Promise<FileGroup[]> {
-    const scope = this.scopes.find(scope => scope.project === project);
+    if (project?.info.scope.kind === "standalone") return [];
+    const scope = this.scopes.find(scope => scope.project === project)
+      ?? (!project ? this.scopes.find(scope => scope.project?.info.scope.kind === "standalone") : undefined);
     if (!scope) return [];
     const files = await this.scopeFiles(scope);
-    const categories = new Set(files.map(entry => fileCategory(entry.name, entry.directory, project?.info.scope.kind === "member")));
-    return scope.groups.filter(group => group.kind === "structure" || categories.has(group.kind));
+    const categories = new Set(files.map(entry => fileCategory(entry.name, entry.directory)));
+    return scope.groups.filter(group => categories.has(group.kind));
   }
 
   /** Materialize physical children lazily, leaving source and member exclusions active at every depth. */
   async children(parent: FileGroup | FileEntry): Promise<FileEntry[]> {
-    if (parent.fileKind === "group" && parent.kind === "structure") return [];
     let group = parent;
     while (group.fileKind === "entry") group = group.parent;
     const scope = group.scope;
     const path = parent.fileKind === "entry" ? parent.path : scope.path;
     if (parent.fileKind === "entry" && !parent.directory) return [];
-    const snapshot = await this.listing(path, parent.fileKind === "group" ? scope.project ?? this.root! : parent);
+    const snapshot = await this.listing(path, parent.fileKind === "group" ? scope.project?.info.scope.kind === "member" ? scope.project : undefined : parent);
     // A link may point back to any physical ancestor. Stop that branch without hiding the link itself.
     if (parent.fileKind === "entry") {
       let ancestor = parent.parent;
@@ -152,12 +144,11 @@ export class WorkspaceFiles {
         if ((await this.listing(ancestor.path, ancestor)).real === snapshot.real) return [];
         ancestor = ancestor.parent;
       }
-      if ((await this.listing(scope.path, scope.project ?? this.root!)).real === snapshot.real) return [];
+      if ((await this.listing(scope.path, scope.project?.info.scope.kind === "member" ? scope.project : undefined)).real === snapshot.real) return [];
     }
     return snapshot.entries.filter(entry => {
       if (this.excluded(join(path, entry.name), scope)) return false;
-      return parent.fileKind === "entry" || fileCategory(entry.name, entry.directory,
-        scope.project?.info.scope.kind === "member") === parent.kind;
+      return parent.fileKind === "entry" || fileCategory(entry.name, entry.directory) === parent.kind;
     }).map(entry => ({ fileKind: "entry", key: `file:${join(path, entry.name)}`, path: join(path, entry.name),
       directory: entry.directory, link: entry.link, parent }));
   }
@@ -167,8 +158,7 @@ export class WorkspaceFiles {
     const scopes = [...this.scopes].sort((a, b) => b.path.length - a.path.length);
     for (const scope of scopes) {
       if (!relativeFile(scope.path, path)) continue;
-      for (const group of await this.groups(scope.project)) {
-        if (group.kind === "structure") continue;
+      for (const group of await this.groups(scope.project?.info.scope.kind === "member" ? scope.project : undefined)) {
         let children = await this.children(group);
         for (let depth = 0; depth < 128; depth++) {
           const entry = children.find(entry => entry.path === path || (entry.directory && relativeFile(entry.path, path)));
@@ -194,4 +184,4 @@ export class WorkspaceFiles {
 }
 
 /** Keep file names literal; only synthetic groups have translated labels. */
-export function fileName(entry: FileEntry | WorkspaceRoot): string { return basename(entry.path); }
+export function fileName(entry: FileEntry): string { return basename(entry.path); }

@@ -15,7 +15,7 @@ async function until(predicate, message) {
 /** Match backend-provided Russian labels regardless of the editor locale. */
 function named(entries, label) {
   const entry = entries.find(entry => entry.node && (entry.node.label.kind === 'name'
-    ? entry.node.label.text : entry.node.label.translations['ru-RU']) === label);
+    ? entry.node.label.text : entry.node?.label.translations['ru-RU']) === label);
   assert.ok(entry, `Missing ${label}`);
   return entry;
 }
@@ -39,11 +39,11 @@ exports.run = async function () {
   await vscode.commands.executeCommand('eska.explorer.projects.focus');
   let [root] = await explorer.getChildren();
   assert.equal(explorer.getTreeItem(root).contextValue, 'eskaRootFiltered');
-  const shown = await explorer.getChildren(explorer.files.structure(root.project));
-  assert.ok(!shown.some(entry => entry.node.label.translations?.['ru-RU'] === 'Константы'));
+  const shown = await explorer.getChildren(root);
+  assert.ok(!shown.some(entry => entry.node?.label.translations?.['ru-RU'] === 'Константы'));
   const common = named(shown, 'Общие');
   const commonShown = await explorer.getChildren(common);
-  assert.deepEqual(commonShown.map(entry => entry.node.label.translations['ru-RU']), ['Общие модули', 'Роли']);
+  assert.deepEqual(commonShown.map(entry => entry.node?.label.translations['ru-RU']), ['Общие модули', 'Роли']);
   const commonChildren = common.children;
   const catalog = named(shown, 'Справочники');
   const goods = named(await explorer.getChildren(catalog), 'Товары');
@@ -53,7 +53,7 @@ exports.run = async function () {
   const children = root.children;
   const generation = root.project.info.generation;
   await vscode.commands.executeCommand('eska.explorer.showEmptyGroups', root);
-  const constants = named(await explorer.getChildren(explorer.files.structure(root.project)), 'Константы');
+  const constants = named(await explorer.getChildren(root), 'Константы');
   await explorer.view.reveal(constants, { select: true, focus: true });
   await vscode.commands.executeCommand('eska.explorer.hideEmptyGroups', root);
   await until(() => explorer.view.selection[0] === root, 'hidden selection moves to root');
@@ -77,35 +77,35 @@ exports.run = async function () {
   await vscode.commands.executeCommand('eska.explorer.restart');
   [root] = await explorer.getChildren();
   assert.equal(explorer.getTreeItem(root).contextValue, 'eskaRootUnfiltered', 'explicit choice survives backend restart');
-  named(await explorer.getChildren(explorer.files.structure(root.project)), 'Константы');
-  named(await explorer.getChildren(named(await explorer.getChildren(explorer.files.structure(root.project)), 'Общие')), 'Общие формы');
+  named(await explorer.getChildren(root), 'Константы');
+  named(await explorer.getChildren(named(await explorer.getChildren(root), 'Общие')), 'Общие формы');
   await vscode.commands.executeCommand('eska.explorer.hideEmptyGroups', root);
-  const currentCatalog = named(await explorer.getChildren(explorer.files.structure(root.project)), 'Справочники');
+  const currentCatalog = named(await explorer.getChildren(root), 'Справочники');
   await explorer.view.reveal(currentCatalog, { select: true, focus: true });
   const original = await fs.readFile(rootFile, 'utf8');
   const before = root.project.info.generation;
   await fs.writeFile(rootFile, original.replace(/<Catalog>.*?<\/Catalog>/g, ''));
   await until(() => root.project.info.generation !== before, 'root watcher');
-  await until(async () => !(await explorer.getChildren(explorer.files.structure(root.project))).some(entry => entry.node.label.translations?.['ru-RU'] === 'Справочники'), 'last object hides section');
+  await until(async () => !(await explorer.getChildren(root)).some(entry => entry.node?.label.translations?.['ru-RU'] === 'Справочники'), 'last object hides section');
   await until(() => explorer.view.selection[0] === root, 'file change moves hidden selection');
   await fs.writeFile(rootFile, original);
-  await until(async () => (await explorer.getChildren(explorer.files.structure(root.project))).some(entry => entry.node.label.translations?.['ru-RU'] === 'Справочники'), 'added object restores section');
-  const currentCommon = named(await explorer.getChildren(explorer.files.structure(root.project)), 'Общие');
+  await until(async () => (await explorer.getChildren(root)).some(entry => entry.node?.label.translations?.['ru-RU'] === 'Справочники'), 'added object restores section');
+  const currentCommon = named(await explorer.getChildren(root), 'Общие');
   const modules = named(await explorer.getChildren(currentCommon), 'Общие модули');
   const module = named(await explorer.getChildren(modules), 'Обмен');
   await explorer.view.reveal(module, { select: true, focus: true });
   await fs.writeFile(rootFile, original.replace(/<CommonModule>.*?<\/CommonModule>/g, ''));
   // Do not reload Common from the test: repaint must refresh its summaries before dropping selection.
   await until(() => explorer.view.selection[0] === root, 'last Common object moves descendant selection');
-  assert.deepEqual((await explorer.getChildren(currentCommon)).map(entry => entry.node.label.translations['ru-RU']), ['Роли']);
+  assert.deepEqual((await explorer.getChildren(currentCommon)).map(entry => entry.node?.label.translations['ru-RU']), ['Роли']);
   await fs.writeFile(rootFile, original);
-  await until(async () => (await explorer.getChildren(currentCommon)).some(entry => entry.node.label.translations?.['ru-RU'] === 'Общие модули'), 'added Common object restores section');
+  await until(async () => (await explorer.getChildren(currentCommon)).some(entry => entry.node?.label.translations?.['ru-RU'] === 'Общие модули'), 'added Common object restores section');
   await explorer.view.reveal(named(await explorer.getChildren(currentCommon), 'Роли'), { select: true, focus: true });
   await fs.writeFile(rootFile, original.replace(/<(CommonModule|Role)>.*?<\/\1>/g, ''));
   await until(() => explorer.view.selection[0] === root, 'empty Common moves descendant selection');
-  assert.ok(!(await explorer.getChildren(explorer.files.structure(root.project))).some(entry => entry.node.label.translations?.['ru-RU'] === 'Общие'));
+  assert.ok(!(await explorer.getChildren(root)).some(entry => entry.node?.label.translations?.['ru-RU'] === 'Общие'));
   await fs.writeFile(rootFile, original);
-  await until(async () => (await explorer.getChildren(explorer.files.structure(root.project))).some(entry => entry.node.label.translations?.['ru-RU'] === 'Общие'), 'first Common object restores parent');
+  await until(async () => (await explorer.getChildren(root)).some(entry => entry.node?.label.translations?.['ru-RU'] === 'Общие'), 'first Common object restores parent');
   await vscode.commands.executeCommand('eska.explorer.disconnect');
   await fs.writeFile(path.join(fixture.root, 'host-result.json'), JSON.stringify({ passed: true, suite: 'filter', vscode: vscode.version, node: process.versions.node }));
 };

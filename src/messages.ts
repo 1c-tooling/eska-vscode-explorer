@@ -1,8 +1,7 @@
 import type { FailureCode } from "./protocol.js";
 
 const en = {
-  workspace: "Workspace", structure: "1C project structure", settings: "Project settings",
-  documentation: "Documentation", builds: "Builds", other: "Other files",
+  settings: "Project settings", documentation: "Documentation", other: "Other files",
   filesUnavailable: "Could not read this folder. Check access permissions and refresh the tree.",
   gitModified: "Modified", gitAdded: "Added or untracked", gitDeleted: "Deleted",
   gitRenamed: "Renamed", gitConflict: "Merge conflict", gitDescendants: "Contains changed source files",
@@ -48,8 +47,7 @@ const en = {
 } as const;
 
 const ru: Record<keyof typeof en, string> = {
-  workspace: "Рабочая область", structure: "Структура проекта 1С", settings: "Настройки проекта",
-  documentation: "Документация", builds: "Сборки", other: "Прочие файлы",
+  settings: "Настройки проекта", documentation: "Документация", other: "Прочие файлы",
   filesUnavailable: "Не удалось прочитать папку. Проверьте права доступа и обновите дерево.",
   gitModified: "Изменён", gitAdded: "Добавлен или не отслеживается", gitDeleted: "Удалён",
   gitRenamed: "Переименован", gitConflict: "Конфликт слияния", gitDescendants: "Есть изменённые исходники",
