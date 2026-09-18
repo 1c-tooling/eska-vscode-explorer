@@ -29,6 +29,8 @@ exports.run = async function () {
   const xmlWithSynonym = (await fs.readFile(fixture.descriptor, 'utf8')).replace('<Name>Артикул</Name>',
     '<Name>Артикул</Name><Synonym xmlns:v8="http://v8.1c.ru/8.1/data/core"><v8:item><v8:lang>ru</v8:lang><v8:content>Уникальный код товара</v8:content></v8:item></Synonym>');
   await fs.writeFile(fixture.descriptor, xmlWithSynonym);
+  const { addCommonModules } = await import("./fixture.mjs");
+  await addCommonModules(fixture);
   const explorer = await extension.activate();
   await vscode.commands.executeCommand('eska.explorer.connect');
   await vscode.commands.executeCommand('eska.explorer.projects.focus');
@@ -76,6 +78,20 @@ exports.run = async function () {
   assert.equal(vscode.window.activeTextEditor.document.getText(vscode.window.activeTextEditor.selection), '<Name>Артикул</Name>');
   await vscode.commands.executeCommand('eska.explorer.openSource', scripts[0]);
   assert.equal(vscode.window.activeTextEditor.document.uri.fsPath, fixture.module);
+
+  const common = named(await explorer.getChildren(root), 'Общие');
+  const commonGroup = named(await explorer.getChildren(common), 'Общие модули');
+  const commonModule = named(await explorer.getChildren(commonGroup), 'Обмен');
+  const commonItem = explorer.getTreeItem(commonModule);
+  assert.equal(commonItem.collapsibleState, vscode.TreeItemCollapsibleState.None);
+  assert.equal(commonItem.contextValue, 'eskaCommonModule');
+  assert.deepEqual(await explorer.getChildren(commonModule), []);
+  await explorer.view.reveal(commonModule, { select: true, focus: true });
+  await vscode.commands.executeCommand(commonItem.command.command, ...commonItem.command.arguments);
+  assert.equal(vscode.window.activeTextEditor.document.uri.fsPath, path.join(fixture.source, 'CommonModules', 'Обмен', 'Ext', 'Module.bsl'));
+  await vscode.commands.executeCommand('eska.explorer.openXml', commonModule);
+  assert.equal(vscode.window.activeTextEditor.document.uri.fsPath, path.join(fixture.source, 'CommonModules', 'Обмен.xml'));
+  assert.equal(vscode.window.activeTextEditor.document.getText(vscode.window.activeTextEditor.selection), '<Name>Обмен</Name>');
 
   // A user collapse must survive a branch refresh, despite expandedByDefault on the backend.
   await vscode.commands.executeCommand('eska.explorer.projects.focus');

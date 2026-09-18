@@ -1,4 +1,5 @@
 {
+  "openXml": "Open XML",
   "description": "Explore 1C metadata through eska.",
   "connect": "Choose Project and Connect",
   "restart": "Restart Connection",

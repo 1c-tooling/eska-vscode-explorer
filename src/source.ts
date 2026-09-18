@@ -55,19 +55,27 @@ export function editorRange(bytes: Buffer, start: number, end: number): { text: 
 
 export interface OpenSource { path: string; position?: { text: string; start: number; end: number } }
 
+/** Identify common modules by the backend's typed parent, never by parsing opaque object IDs. */
+export function isCommonModule(entry: TreeEntry): boolean {
+  const parent = entry.node.parent;
+  return entry.node.id.kind === "object" && parent?.kind === "collection"
+    && parent.collection.kind === "metadata" && parent.collection.metadataKind === "common-module";
+}
+
 /** Request exact source mappings; virtual groups intentionally do not open an editor. */
-export async function resolveSource(tree: MetadataTree, entry: TreeEntry): Promise<OpenSource> {
+export async function resolveSource(tree: MetadataTree, entry: TreeEntry, target: "default" | "xml" = "default"): Promise<OpenSource> {
   const id = entry.node.id;
   if (id.kind === "collection") throw new ExplorerError("sourceMissing");
+  const moduleRole = id.kind === "module" ? id.role : target === "default" && isCommonModule(entry) ? "module" : undefined;
   const result = await tree.request(entry.project, "metadata/source", { node: id });
   const generation = entry.project.info.generation;
   const event = entry.project.info.eventSequence;
   if (!Array.isArray(result.sources)) throw new ExplorerError("protocolInvalid");
   const candidates = result.sources.filter((source) => isRecord(source) && isRecord(source.role)
-    && (id.kind === "module" ? source.role.kind === "module" && source.role.role === id.role : source.role.kind === "descriptor"));
+    && (moduleRole !== undefined ? source.role.kind === "module" && source.role.role === moduleRole : source.role.kind === "descriptor"));
   if (candidates.length !== 1 || !isWirePath(candidates[0].path)) throw new ExplorerError("sourceMissing");
   const path = await existingSource(entry.project.info.sourcePath, candidates[0].path);
-  if (id.kind === "module") return { path };
+  if (moduleRole !== undefined || id.kind === "module") return { path };
   // Reading only the selected descriptor gives byte-exact positions without parsing XML in the client.
   const before = await readFile(path);
   const properties = await tree.request(entry.project, "metadata/properties", { objectId: id.objectId });

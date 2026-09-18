@@ -5,7 +5,7 @@ import { assertHost } from "./host.js";
 import { message, type MessageKey } from "./messages.js";
 import { ExplorerError } from "./protocol.js";
 import { MetadataTree, type TreeEntry, type ProjectTree } from "./tree.js";
-import { resolveSource } from "./source.js";
+import { isCommonModule, resolveSource } from "./source.js";
 import { ProjectWatcher, watchManifests } from "./watch.js";
 
 interface Notice { label: string; project?: ProjectTree; parent?: TreeEntry }
@@ -64,6 +64,7 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
     // Context actions accept the native tree element; palette refresh has no argument.
     this.disposables.push(vscode.commands.registerCommand("eska.explorer.refreshNode", (entry: Element) => this.refresh(entry)));
     this.disposables.push(vscode.commands.registerCommand("eska.explorer.openSource", (entry: TreeEntry) => this.open(entry)));
+    this.disposables.push(vscode.commands.registerCommand("eska.explorer.openXml", (entry: TreeEntry) => this.open(entry, "xml")));
     this.disposables.push(this.view.onDidExpandElement(({ element }) => {
       if ("node" in element) this.expanded.set(element.key, true);
     }));
@@ -108,7 +109,7 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
     const tree = this.tree;
     if (tree) {
       try {
-        if (entry && !("node" in entry)) return [];
+        if (entry && (!("node" in entry) || isCommonModule(entry))) return [];
         const children: Element[] = [];
         if (entry) children.push(...await tree.children(entry));
         else for (const project of tree.projects) {
@@ -140,16 +141,17 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
     const node = entry.node;
     const label = node.label.kind === "name" ? node.label.text
       : node.label.translations[this.treeLanguage];
+    const commonModule = isCommonModule(entry);
     const expanded = this.expanded.get(entry.key) ?? node.expandedByDefault;
-    const item = new vscode.TreeItem(label, node.state === "empty" ? vscode.TreeItemCollapsibleState.None
+    const item = new vscode.TreeItem(label, commonModule || node.state === "empty" ? vscode.TreeItemCollapsibleState.None
       : expanded ? vscode.TreeItemCollapsibleState.Expanded : vscode.TreeItemCollapsibleState.Collapsed);
     item.id = entry.key;
-    item.contextValue = "eskaMetadata";
+    item.contextValue = commonModule ? "eskaCommonModule" : "eskaMetadata";
     item.accessibilityInformation = { label };
     // The special folder icon makes VS Code omit leaf twistie space in file-only icon themes.
     // A regular product icon keeps group and child indentation consistent without changing user settings.
     item.iconPath = new vscode.ThemeIcon(node.state === "error" ? "warning"
-      : node.id.kind === "module" ? "file-code" : node.id.kind === "collection" ? "symbol-namespace" : "symbol-class");
+      : commonModule || node.id.kind === "module" ? "file-code" : node.id.kind === "collection" ? "symbol-namespace" : "symbol-class");
     if (!node.parent) item.description = entry.project.info.scope.kind === "member"
       ? `${entry.project.info.scope.name} · ${this.text(entry.project.info.type)}` : this.text(entry.project.info.type);
     if (node.id.kind !== "collection") item.command = { command: "eska.explorer.openSource", title: this.text("openSource"), arguments: [entry] };
@@ -204,12 +206,12 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
   }
 
   /** Open only resolved existing sources, preserving unsaved buffers and rejecting stale positions. */
-  private async open(entry: TreeEntry): Promise<void> {
+  private async open(entry: TreeEntry, target: "default" | "xml" = "default"): Promise<void> {
     const tree = this.tree;
     if (!tree || !entry || !("node" in entry) || !tree.projects.includes(entry.project)) return;
     const opening = ++this.opening;
     try {
-      const source = await resolveSource(tree, entry);
+      const source = await resolveSource(tree, entry, target);
       if (opening !== this.opening || tree !== this.tree) return;
       const document = await vscode.workspace.openTextDocument(vscode.Uri.file(source.path));
       if (opening !== this.opening || tree !== this.tree) return;

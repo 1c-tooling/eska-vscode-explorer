@@ -36,3 +36,17 @@ export async function createTreeProject(root, type = "configuration") {
   await writeFile(join(source, "Тест", "Ext", "ObjectModule.bsl"), "// Внешний объект\r\n");
   return { root, source, descriptor: join(source, "Тест.xml"), module: join(source, "Тест", "Ext", "ObjectModule.bsl") };
 }
+
+/** Add common modules only to tests exercising their direct source navigation. */
+export async function addCommonModules(fixture) {
+  const { readFile } = await import("node:fs/promises");
+  const rootFile = join(fixture.source, "Configuration.xml");
+  const names = ["Обмен", "Защищенный"];
+  await writeFile(rootFile, (await readFile(rootFile, "utf8")).replace("<ChildObjects>",
+    "<ChildObjects>" + names.map(name => `<CommonModule>${name}</CommonModule>`).join("")));
+  for (const name of names) {
+    await mkdir(join(fixture.source, "CommonModules", name, "Ext"), { recursive: true });
+    await writeFile(join(fixture.source, "CommonModules", `${name}.xml`), descriptor("CommonModule", name));
+    await writeFile(join(fixture.source, "CommonModules", name, "Ext", name === "Обмен" ? "Module.bsl" : "Module.bin"), "// Common module\r\n");
+  }
+}

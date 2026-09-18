@@ -88,6 +88,11 @@
         "category": "eska Explorer"
       },
       {
+        "command": "eska.explorer.openXml",
+        "title": "%openXml%",
+        "category": "eska Explorer"
+      },
+      {
         "command": "eska.explorer.search",
         "title": "%search%",
         "category": "eska Explorer",
@@ -139,12 +144,21 @@
       ],
       "view/item/context": [
         {
+          "command": "eska.explorer.openXml",
+          "when": "view == eska.explorer.projects && viewItem == eskaCommonModule",
+          "group": "navigation"
+        },
+        {
           "command": "eska.explorer.refreshNode",
-          "when": "view == eska.explorer.projects && viewItem == eskaMetadata",
+          "when": "view == eska.explorer.projects && (viewItem == eskaMetadata || viewItem == eskaCommonModule)",
           "group": "inline"
         }
       ],
       "commandPalette": [
+        {
+          "command": "eska.explorer.openXml",
+          "when": "false"
+        },
         {
           "command": "eska.explorer.refreshNode",
           "when": "false"

@@ -4,8 +4,8 @@ import { mkdtemp, writeFile, rm, readFile, symlink } from "node:fs/promises";
 import { resolve, join, isAbsolute } from "node:path";
 import { Connection } from "../out/connection.js";
 import { MetadataTree, nodeKey, parseNode } from "../out/tree.js";
-import { nativePath, editorRange, existingSource, resolveSource } from "../out/source.js";
-import { createTreeProject, descriptor, inline } from "./fixture.mjs";
+import { nativePath, editorRange, existingSource, resolveSource, isCommonModule } from "../out/source.js";
+import { createTreeProject, descriptor, inline, addCommonModules } from "./fixture.mjs";
 
 const executable = process.env.ESKA_TEST_BINARY;
 /** Get a backend label without imposing a client-side kind catalog. */
@@ -134,4 +134,32 @@ test("an invalidated in-flight expansion retries; older and gapped notifications
   assert.equal(root.children, undefined, 'event gap invalidates even at the same generation');
   assert.equal(recoveries.length, 1);
   tree.dispose();
+});
+
+test("common modules open existing BSL directly and retain explicit XML access", { skip: !executable }, async (t) => {
+  const root = await mkdtemp(join(process.env.ESKA_TEST_ROOT ?? resolve("../eska-playground"), "explorer-common-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const fixture = await createTreeProject(root);
+  await addCommonModules(fixture);
+  const connection = new Connection("0.0.0", () => {}, () => {});
+  t.after(() => connection.dispose());
+  await connection.connect({ executable, path: root, name: "test", locale: "ru-RU" });
+  assert.equal(connection.state.kind, "ready");
+  const tree = new MetadataTree(connection, connection.state.session, () => {}, () => {});
+  t.after(() => tree.dispose());
+  const [top] = await tree.roots();
+  const common = named(await tree.children(top), "Общие");
+  const group = named(await tree.children(common), "Общие модули");
+  const entries = await tree.children(group);
+  const module = named(entries, "Обмен");
+  assert.ok(isCommonModule(module));
+  assert.equal(isCommonModule(group), false);
+  assert.equal((await resolveSource(tree, module)).path, join(fixture.source, "CommonModules", "Обмен", "Ext", "Module.bsl"));
+  assert.equal(module.children, undefined, "opening BSL does not load hidden module groups");
+  const xml = await resolveSource(tree, module, "xml");
+  assert.equal(xml.path, join(fixture.source, "CommonModules", "Обмен.xml"));
+  assert.equal(xml.position.text.slice(xml.position.start, xml.position.end), "<Name>Обмен</Name>");
+  const binary = named(entries, "Защищенный");
+  await assert.rejects(resolveSource(tree, binary), { code: "sourceMissing" });
+  assert.equal((await resolveSource(tree, binary, "xml")).path, join(fixture.source, "CommonModules", "Защищенный.xml"));
 });
