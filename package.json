@@ -97,6 +97,23 @@
         "title": "%search%",
         "category": "eska Explorer",
         "icon": "$(search)"
+      },
+      {
+        "command": "eska.explorer.hideEmptyGroups",
+        "title": "%hideEmptyGroups%",
+        "category": "eska Explorer",
+        "icon": "$(filter)"
+      },
+      {
+        "command": "eska.explorer.showEmptyGroups",
+        "title": "%showEmptyGroups%",
+        "category": "eska Explorer",
+        "icon": "$(filter-filled)"
+      },
+      {
+        "command": "eska.explorer.resetRootFilter",
+        "title": "%resetRootFilter%",
+        "category": "eska Explorer"
       }
     ],
     "views": {
@@ -150,8 +167,23 @@
         },
         {
           "command": "eska.explorer.refreshNode",
-          "when": "view == eska.explorer.projects && (viewItem == eskaMetadata || viewItem == eskaCommonModule)",
+          "when": "view == eska.explorer.projects && (viewItem == eskaMetadata || viewItem == eskaCommonModule || viewItem == eskaRootFiltered || viewItem == eskaRootUnfiltered)",
           "group": "inline"
+        },
+        {
+          "command": "eska.explorer.hideEmptyGroups",
+          "when": "view == eska.explorer.projects && viewItem == eskaRootUnfiltered",
+          "group": "inline@0"
+        },
+        {
+          "command": "eska.explorer.showEmptyGroups",
+          "when": "view == eska.explorer.projects && viewItem == eskaRootFiltered",
+          "group": "inline@0"
+        },
+        {
+          "command": "eska.explorer.resetRootFilter",
+          "when": "view == eska.explorer.projects && (viewItem == eskaRootFiltered || viewItem == eskaRootUnfiltered)",
+          "group": "filter@1"
         }
       ],
       "commandPalette": [
@@ -165,6 +197,18 @@
         },
         {
           "command": "eska.explorer.openSource",
+          "when": "false"
+        },
+        {
+          "command": "eska.explorer.hideEmptyGroups",
+          "when": "false"
+        },
+        {
+          "command": "eska.explorer.showEmptyGroups",
+          "when": "false"
+        },
+        {
+          "command": "eska.explorer.resetRootFilter",
           "when": "false"
         }
       ]
@@ -185,6 +229,12 @@
           "default": "auto",
           "scope": "window",
           "description": "%treeLanguage%"
+        },
+        "eska.explorer.hideEmptyRootGroups": {
+          "type": "boolean",
+          "default": true,
+          "scope": "resource",
+          "description": "%hideEmptyRootGroups%"
         }
       }
     }

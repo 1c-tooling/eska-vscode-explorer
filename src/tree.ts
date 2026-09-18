@@ -68,7 +68,7 @@ export function parseNode(value: unknown): MetadataNode {
 /** Read only the stable owner field; separators inside ObjectId have no client semantics. */
 function owner(id: NodeId): string { return id.kind === "object" ? id.objectId : id.owner; }
 
-/** Lazily cache visible branches, retaining object references and IDs across local invalidations. */
+/** Lazily cache unfiltered branches, retaining object references and IDs across local invalidations. */
 export class MetadataTree {
   readonly projects: ProjectTree[];
   private disposed = false;
@@ -114,7 +114,7 @@ export class MetadataTree {
 
   /** Preserve server ordering and parent relationships, rejecting malformed sibling lists. */
   private async loadChildren(entry: TreeEntry): Promise<TreeEntry[]> {
-    const result = await this.request(entry.project, "metadata/children", { node: entry.node.id });
+    const result = await this.request(entry.project, "metadata/children", { node: entry.node.id, hideEmptyRootSections: false });
     if (!Array.isArray(result.nodes)) throw new ExplorerError("protocolInvalid");
     const nodes = result.nodes.map(parseNode);
     const keys = new Set<string>();

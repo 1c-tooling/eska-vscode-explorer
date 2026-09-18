@@ -13,7 +13,7 @@ const root = await mkdtemp(join(playground, "explorer-host-"));
 try {
   const fixture = await createTreeProject(join(root, "project"));
   const child = spawn(process.env.VSCODE_EXECUTABLE ?? "code", ["--verbose", "--wait",
-    `--extensionDevelopmentPath=${repository}`, `--extensionTestsPath=${join(repository, "test/extension-host.cjs")}`,
+    `--extensionDevelopmentPath=${repository}`, `--extensionTestsPath=${resolve(repository, process.argv[2] ?? "test/extension-host.cjs")}`,
     `--user-data-dir=${join(root, "profile")}`, `--extensions-dir=${join(root, "extensions")}`,
     "--disable-workspace-trust", "--disable-extensions", "--disable-gpu", "--new-window", fixture.root],
   { env: { ...process.env, ESKA_HOST_FIXTURE: JSON.stringify(fixture) }, stdio: ["ignore", "pipe", "pipe"] });

@@ -1,6 +1,7 @@
 import type { FailureCode } from "./protocol.js";
 
 const en = {
+  filterSaveFailed: "Could not save the project filter setting. Try again.",
   search: "Search metadata", searchPlaceholder: "Object or nested element name or synonym",
   searchRetry: "Repeat search", searchLoading: "Searching…", searchEmpty: "No matches.",
   searchIndexing: "Indexing: {0} objects, {1} files pending. Results are partial.",
@@ -40,6 +41,7 @@ const en = {
 } as const;
 
 const ru: Record<keyof typeof en, string> = {
+  filterSaveFailed: "Не удалось сохранить режим фильтра проекта. Повторите действие.",
   search: "Поиск метаданных", searchPlaceholder: "Имя или синоним объекта либо вложенного элемента",
   searchRetry: "Повторить поиск", searchLoading: "Поиск…", searchEmpty: "Совпадений нет.",
   searchIndexing: "Индексация: {0} объектов, осталось файлов: {1}. Выдача неполная.",

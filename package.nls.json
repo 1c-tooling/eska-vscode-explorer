@@ -1,4 +1,8 @@
 {
+  "hideEmptyGroups": "Hide Empty Root Groups",
+  "showEmptyGroups": "Show Empty Root Groups",
+  "resetRootFilter": "Use Default Root Filter",
+  "hideEmptyRootGroups": "Hide empty root groups in configurations and extensions by default. A saved project choice overrides this setting; use Use Default Root Filter to reset it.",
   "openXml": "Open XML",
   "description": "Explore 1C metadata through eska.",
   "connect": "Choose Project and Connect",

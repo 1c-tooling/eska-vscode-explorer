@@ -154,6 +154,30 @@ exports.run = async function () {
   await vscode.commands.executeCommand('workbench.action.zoomReset');
   await vscode.commands.executeCommand('eska.explorer.refreshNode', goods);
   assert.equal(explorer.getTreeItem(named(await explorer.getChildren(goods), 'Модули')).collapsibleState, vscode.TreeItemCollapsibleState.Collapsed);
+  // Filter toggles reuse loaded nodes; a selected hidden descendant falls back to the root.
+  const filterTree = explorer.tree;
+  const filterGeneration = root.project.info.generation;
+  const filterChildren = root.children;
+  assert.equal(explorer.getTreeItem(root).contextValue, 'eskaRootFiltered');
+  assert.ok(!(await explorer.getChildren(root)).some(entry => entry.node?.label.translations?.['ru-RU'] === 'Константы'));
+  await vscode.commands.executeCommand('eska.explorer.showEmptyGroups', root);
+  const constants = named(await explorer.getChildren(root), 'Константы');
+  await explorer.view.reveal(constants, { select: true, focus: true });
+  await vscode.commands.executeCommand('eska.explorer.hideEmptyGroups', root);
+  await until(() => explorer.view.selection[0] === root, 'hidden section selection moves to root');
+  assert.equal(explorer.tree, filterTree);
+  assert.equal(root.children, filterChildren, 'toggling does not reload root children');
+  assert.equal(root.project.info.generation, filterGeneration);
+  await vscode.workspace.getConfiguration('eska.explorer').update('hideEmptyRootGroups', false, vscode.ConfigurationTarget.Workspace);
+  assert.equal(explorer.getTreeItem(root).contextValue, 'eskaRootFiltered', 'saved project choice overrides default');
+  await vscode.commands.executeCommand('eska.explorer.resetRootFilter', root);
+  assert.equal(explorer.getTreeItem(root).contextValue, 'eskaRootUnfiltered', 'reset uses workspace setting');
+  named(await explorer.getChildren(root), 'Константы');
+  await vscode.workspace.getConfiguration('eska.explorer').update('hideEmptyRootGroups', true, vscode.ConfigurationTarget.Workspace);
+  await until(() => explorer.getTreeItem(root).contextValue === 'eskaRootFiltered', 'default setting updates inherited filter');
+  await vscode.commands.executeCommand('eska.explorer.showEmptyGroups', root);
+
+  assert.equal(explorer.getTreeItem(modules).collapsibleState, vscode.TreeItemCollapsibleState.Collapsed, 'filter keeps explicit collapse');
   console.log("ESKA_HOST_BASE_SCENARIOS_PASSED");
   // A broken root must settle on an error, not keep retrying on every tree repaint.
   const rootFile = path.join(fixture.source, 'Configuration.xml');
@@ -174,6 +198,9 @@ exports.run = async function () {
   const previousTree = explorer.tree;
   await fs.appendFile(path.join(fixture.root, 'eska.toml'), '\n# External manifest update\n');
   await until(() => explorer.tree && explorer.tree !== previousTree, 'manifest reconnect');
+  const [reconnectedRoot] = await explorer.getChildren();
+  assert.equal(explorer.getTreeItem(reconnectedRoot).contextValue, 'eskaRootUnfiltered', 'project filter survives reconnect');
+  named(await explorer.getChildren(reconnectedRoot), 'Константы');
   await vscode.commands.executeCommand('eska.explorer.search');
   await vscode.commands.executeCommand('eska.explorer.disconnect');
   assert.equal(explorer.searchView, undefined, 'disconnect disposes search input');
