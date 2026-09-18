@@ -6,9 +6,13 @@ export function supportsRootFilter(project: ProjectTree): boolean {
   return project.info.type === "configuration" || project.info.type === "extension";
 }
 
-/** Only authoritative empty root sections may disappear; unknown and error states remain visible. */
-export function isHiddenRootSection(entry: TreeEntry, hideEmpty: boolean): boolean {
-  return hideEmpty && supportsRootFilter(entry.project) && entry.node.rootSection && entry.node.state === "empty";
+/** Hide proven empty root sections and immediate Common sections, never object internals. */
+export function isHiddenSection(entry: TreeEntry, hideEmpty: boolean): boolean {
+  if (!hideEmpty || !supportsRootFilter(entry.project) || entry.node.state !== "empty") return false;
+  const { id, parent, rootSection } = entry.node;
+  const commonSection = id.kind === "collection" && id.collection.kind === "metadata"
+    && parent?.kind === "collection" && parent.collection.kind === "common" && id.owner === parent.owner;
+  return rootSection || commonSection;
 }
 
 /** Persist explicit project choices in this editor workspace, separately from the configured default. */

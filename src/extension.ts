@@ -6,7 +6,7 @@ import { assertHost } from "./host.js";
 import { message, type MessageKey } from "./messages.js";
 import { ExplorerError } from "./protocol.js";
 import { MetadataTree, type TreeEntry, type ProjectTree } from "./tree.js";
-import { ProjectFilters, isHiddenRootSection, supportsRootFilter } from "./filter.js";
+import { ProjectFilters, isHiddenSection, supportsRootFilter } from "./filter.js";
 import { nativePath, isCommonModule, resolveSource } from "./source.js";
 import { ProjectWatcher, watchManifests } from "./watch.js";
 
@@ -127,7 +127,7 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
         if (entry) {
           const all = await tree.children(entry);
           const hide = this.hideEmptyGroups(entry.project);
-          children.push(...all.filter((child) => !isHiddenRootSection(child, hide)));
+          children.push(...all.filter((child) => !isHiddenSection(child, hide)));
         }
         else for (const project of tree.projects) {
           try { children.push(await tree.root(project)); }
@@ -220,7 +220,7 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
   /** A descendant of a hidden section also needs its selection moved to the project root. */
   private hiddenAncestor(entry: TreeEntry, tree: MetadataTree, hide: boolean): boolean {
     for (let current: TreeEntry | undefined = entry; current; current = tree.parent(current)) {
-      if (isHiddenRootSection(current, hide)) return true;
+      if (isHiddenSection(current, hide)) return true;
     }
     return false;
   }
@@ -234,6 +234,14 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
       try {
         const root = await tree.root(selected.project);
         await tree.children(root);
+        // Common child summaries can be invalidated while Common itself remains non-empty.
+        // Refresh only the selected ancestry before deciding whether selection will disappear.
+        for (let ancestor = tree.parent(selected); ancestor; ancestor = tree.parent(ancestor)) {
+          if (ancestor.node.id.kind === "collection" && ancestor.node.id.collection.kind === "common") {
+            if (ancestor.node.state !== "empty") await tree.children(ancestor);
+            break;
+          }
+        }
         if (this.hiddenAncestor(selected, tree, true)) await this.selectRoot(selected.project, tree, selected);
       } catch { /* A broken branch still needs its normal error row rendered. */ }
     }

@@ -170,7 +170,11 @@ exports.run = async function () {
   assert.ok(!(await explorer.getChildren(root)).some(entry => entry.node?.label.translations?.['ru-RU'] === 'Константы'));
   await vscode.commands.executeCommand('eska.explorer.showEmptyGroups', root);
   const constants = named(await explorer.getChildren(root), 'Константы');
-  await explorer.view.reveal(constants, { select: true, focus: true });
+  // TreeDataProvider refresh is asynchronous; await native visibility after the filter command.
+  await until(async () => {
+    try { await explorer.view.reveal(constants, { select: true, focus: true }); return true; }
+    catch { return false; }
+  }, 'native filter redraw');
   await vscode.commands.executeCommand('eska.explorer.hideEmptyGroups', root);
   await until(() => explorer.view.selection[0] === root, 'hidden section selection moves to root');
   assert.equal(explorer.tree, filterTree);
