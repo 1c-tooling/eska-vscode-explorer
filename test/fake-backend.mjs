@@ -4,6 +4,7 @@ const mode = process.argv[2] ?? "ok";
 let input = Buffer.alloc(0);
 let initialized = false;
 let opening = 0;
+const cancellable = new Map();
 
 /** Independent writer prevents transport tests from sharing the encoder under test. */
 function send(value) {
@@ -15,6 +16,20 @@ function send(value) {
 /** A deliberately small peer exposes crash, timeout and protocol incompatibility paths. */
 function handle(request) {
   const ok = (result) => send({ jsonrpc: "2.0", id: request.id, result });
+  if (request.method === '$/cancelRequest') {
+    const pending = cancellable.get(request.params.id);
+    if (pending) {
+      clearTimeout(pending);
+      cancellable.delete(request.params.id);
+      send({ jsonrpc: '2.0', id: request.params.id, error: { code: -32000, message: 'Request failed', data: { kind: 'cancelled' } } });
+    }
+    return;
+  }
+  if (request.method === 'test/cancellable') {
+    cancellable.set(request.id, setTimeout(() => { cancellable.delete(request.id); ok('done'); }, 200));
+    return;
+  }
+  if (request.method === 'test/late') { setTimeout(() => ok('late'), 100); return; }
   if (mode === "hang") return;
   if (mode === "crash") process.exit(7);
   if (mode === "garbage") { process.stdout.write("ordinary command help\r\n\r\n"); return; }

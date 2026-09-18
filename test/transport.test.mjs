@@ -158,3 +158,19 @@ test("a CLI exiting before initialize gives one actionable compatibility error",
   assert.equal(value.state.error.code, "handshakeFailed");
   assert.equal(states.filter((state) => state.kind === "error").length, 1);
 });
+
+test('cancelled requests are acknowledged without poisoning the next response', async t => {
+  const peer = child(t);
+  for (const method of ['test/cancellable', 'test/late']) {
+    const controller = new AbortController();
+    const pending = peer.request(method, {}, 2000, controller.signal);
+    controller.abort();
+    await assert.rejects(pending, { code: 'cancelled' });
+    assert.equal((await peer.request('initialize', hello)).apiVersion.major, 1);
+  }
+  const controller = new AbortController();
+  controller.abort();
+  await assert.rejects(peer.request('test/wait', {}, 2000, controller.signal), { code: 'cancelled' });
+  await peer.stop();
+  exited(peer.pid);
+});

@@ -38,7 +38,7 @@ export function nodeKey(id: NodeId): string {
 }
 
 /** Validate the discriminant before using untrusted identities as tree keys. */
-function isNodeId(value: unknown): value is NodeId {
+export function isNodeId(value: unknown): value is NodeId {
   if (!isRecord(value)) return false;
   if (value.kind === "object") return typeof value.objectId === "string";
   if (typeof value.owner !== "string") return false;
@@ -135,14 +135,15 @@ export class MetadataTree {
   }
 
   /** Read requests may retry after an intervening change, but never loop indefinitely. */
-  async request(project: ProjectTree, method: string, params: Record<string, unknown> = {}): Promise<Record<string, unknown>> {
+  async request(project: ProjectTree, method: string, params: Record<string, unknown> = {}, signal?: AbortSignal): Promise<Record<string, unknown>> {
     for (let attempt = 0; attempt < 3; attempt++) {
+      if (signal?.aborted) throw new ExplorerError("cancelled");
       if (this.disposed) throw new ExplorerError("obsolete");
       if (project.info.requiresReopen) throw new ExplorerError("obsolete");
       if (project.info.requiresRefresh && method !== "metadata/refresh") throw new ExplorerError("branchInvalid");
       try {
         const result = await this.connection.request(this.session.sessionId, method,
-          { ...params, projectId: project.info.projectId, generation: project.info.generation });
+          { ...params, projectId: project.info.projectId, generation: project.info.generation }, signal);
         if (this.disposed) throw new ExplorerError("obsolete");
         if (!isRecord(result) || result.sessionId !== this.session.sessionId || result.projectId !== project.info.projectId
           || !isToken(result.generation) || !isToken(result.eventSequence)) throw new ExplorerError("protocolInvalid");

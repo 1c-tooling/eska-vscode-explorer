@@ -10,6 +10,8 @@ interface Pending {
   method: string;
   started: number;
   context: Record<string, unknown>;
+  cancelled: boolean;
+  dispose: () => void;
 }
 export interface ProcessOptions {
   executable: string;
@@ -105,7 +107,8 @@ export class BackendProcess {
   }
 
   /** Unique string IDs avoid precision loss and accidental reuse after cancellation. */
-  request(method: string, params: unknown, timeoutMs = this.options.timeoutMs ?? 30_000): Promise<unknown> {
+  request(method: string, params: unknown, timeoutMs = this.options.timeoutMs ?? 30_000, signal?: AbortSignal): Promise<unknown> {
+    if (signal?.aborted) return Promise.reject(new ExplorerError("cancelled"));
     if (this.failure || this.ended) return Promise.reject(this.failure ?? new ExplorerError("connectionLost"));
     if (this.pending.size >= 64) return Promise.reject(new ExplorerError("resourceLimit"));
     const id = String(++this.serial);
@@ -117,7 +120,17 @@ export class BackendProcess {
           sinceLastOutputMs: Math.round(performance.now() - this.lastOutput), frame: this.reader.progress });
         this.fail(new ExplorerError("timeout"));
       }, timeoutMs);
-      this.pending.set(id, { resolve, reject, timer, method, started, context });
+      // Retain the slot until acknowledgement so late responses remain valid and queues stay bounded.
+      const cancel = (): void => {
+        const pending = this.pending.get(id);
+        if (!pending || pending.cancelled) return;
+        pending.cancelled = true;
+        try { this.notify("$/cancelRequest", { id }); }
+        catch (error) { this.fail(error instanceof ExplorerError ? error : new ExplorerError("connectionLost")); }
+      };
+      signal?.addEventListener("abort", cancel, { once: true });
+      this.pending.set(id, { resolve, reject, timer, method, started, context, cancelled: false,
+        dispose: () => signal?.removeEventListener("abort", cancel) });
       try {
         this.write({ jsonrpc: "2.0", id, method, params });
         this.log("request_sent", { id, method, timeoutMs, pending: this.pending.size,
@@ -125,6 +138,7 @@ export class BackendProcess {
       }
       catch (error) {
         clearTimeout(timer);
+        this.pending.get(id)?.dispose();
         this.pending.delete(id);
         this.log("request_write_error", { id, method, ...context, ...errorContext(error) });
         reject(error);
@@ -157,7 +171,11 @@ export class BackendProcess {
       || typeof value.error.message !== "string")) throw new ExplorerError("protocolInvalid", "invalid_error");
     this.pending.delete(value.id);
     clearTimeout(pending.timer);
-    if (isRecord(value.error)) {
+    pending.dispose();
+    if (pending.cancelled) {
+      this.log("request_cancelled", { id: value.id, method: pending.method });
+      pending.reject(new ExplorerError("cancelled"));
+    } else if (isRecord(value.error)) {
       this.log("request_error", { id: value.id, method: pending.method, elapsedMs: Math.round(performance.now() - pending.started),
         request: pending.context, ...serverErrorContext(value.error) });
       pending.reject(responseError(value.error));
@@ -177,6 +195,7 @@ export class BackendProcess {
         elapsedMs: Math.round(performance.now() - pending.started), ...pending.context })) });
     for (const pending of this.pending.values()) {
       clearTimeout(pending.timer);
+      pending.dispose();
       pending.reject(error);
     }
     this.pending.clear();

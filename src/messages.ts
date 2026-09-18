@@ -1,6 +1,7 @@
 import type { FailureCode } from "./protocol.js";
 
 const en = {
+  cancelled: "The operation was cancelled.",
   refresh: "Refresh metadata", openSource: "Open source",
   obsolete: "The project connection changed. Select the item again.",
   branchInvalid: "Could not read this metadata branch. Correct its XML and refresh.",
@@ -34,6 +35,7 @@ const en = {
 } as const;
 
 const ru: Record<keyof typeof en, string> = {
+  cancelled: "Операция отменена.",
   refresh: "Обновить метаданные", openSource: "Открыть исходник",
   obsolete: "Подключение к проекту изменилось. Выберите элемент повторно.",
   branchInvalid: "Не удалось прочитать эту ветку метаданных. Исправьте XML и обновите её.",

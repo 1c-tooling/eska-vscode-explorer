@@ -10,7 +10,7 @@ export type FailureCode =
   | "manifestInvalid" | "selectionInvalid" | "sourceInvalid" | "rootInvalid"
   | "requestFailed" | "cleanupFailed" | "unsupportedWorkspace" | "untrusted"
   | "noFolder" | "invalidExecutable" | "obsolete" | "branchInvalid" | "sourceMissing"
-  | "unsupportedPath" | "sourceChanged";
+  | "unsupportedPath" | "sourceChanged" | "cancelled";
 
 /** Only stable categories cross into the localized UI; raw protocol text stays private. */
 export class ExplorerError extends Error {
@@ -114,7 +114,8 @@ export function responseError(value: Record<string, unknown>): ExplorerError {
     }
   }
   const kind = isRecord(data) && typeof data.kind === "string" ? data.kind : undefined;
-  const code = kind === "source_missing" || kind === "unknown_node" || kind === "unknown_object" ? "sourceMissing"
+  const code = kind === "cancelled" ? "cancelled"
+    : kind === "source_missing" || kind === "unknown_node" || kind === "unknown_object" ? "sourceMissing"
     : kind === "xml_invalid" || kind === "source_invalid" ? "branchInvalid"
     : kind === "source_changed" ? "sourceChanged" : "requestFailed";
   return new ExplorerError(code, kind);

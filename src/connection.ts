@@ -31,9 +31,9 @@ export class Connection {
   get target(): ConnectionTarget | undefined { return this.lastTarget; }
 
   /** A replaced session cannot publish responses into the replacement tree. */
-  async request(sessionId: string, method: string, params: Record<string, unknown> = {}): Promise<unknown> {
+  async request(sessionId: string, method: string, params: Record<string, unknown> = {}, signal?: AbortSignal): Promise<unknown> {
     const child = this.sessionChild(sessionId);
-    const result = await child.request(method, { ...params, sessionId });
+    const result = await child.request(method, { ...params, sessionId }, undefined, signal);
     if (child !== this.sessionChild(sessionId)) throw new ExplorerError("obsolete");
     return result;
   }

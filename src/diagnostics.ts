@@ -23,7 +23,7 @@ function scalar(value: unknown): string | number | boolean | undefined {
 export function requestContext(value: unknown): Record<string, unknown> {
   if (!isRecord(value)) return {};
   const result: Record<string, unknown> = {};
-  for (const key of ["sessionId", "projectId", "generation", "eventSequence", "sequence", "objectId", "action", "manifestChanged", "resetFileSequence"]) {
+  for (const key of ["id", "sessionId", "projectId", "generation", "eventSequence", "sequence", "objectId", "action", "manifestChanged", "resetFileSequence"]) {
     if (scalar(value[key]) !== undefined) result[key] = scalar(value[key]);
   }
   if (isRecord(value.node)) {
