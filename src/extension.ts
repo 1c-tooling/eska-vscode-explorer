@@ -132,7 +132,7 @@ class Explorer implements vscode.TreeDataProvider<vscode.TreeItem>, vscode.Dispo
 
   /** Setup instructions are a packaged document, not an automatic init or executable installer. */
   private showError(error: ExplorerError): void {
-    const setup = error.code === "manifestMissing" || error.code === "executableMissing" || error.code === "incompatible";
+    const setup = error.code === "manifestMissing" || error.code === "executableMissing" || error.code === "incompatible" || error.code === "handshakeFailed";
     void vscode.window.showErrorMessage(this.text(error.code), this.text(setup ? "initialization" : "log"))
       .then((choice) => {
         if (!choice || this.disposed) return;

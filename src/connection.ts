@@ -37,6 +37,7 @@ export class Connection {
     // Interrupt a slow open instead of waiting its full timeout before switching folders.
     void this.child?.stop().catch(() => this.log("process_cleanup_failed"));
     this.queue = this.queue.then(async () => {
+      let negotiated = false;
       try {
         await this.stopChild();
         if (revision !== this.revision) return;
@@ -47,7 +48,7 @@ export class Connection {
         }
         const child = this.create({ executable: target.executable, cwd: target.path, log: this.log,
           failed: (error) => {
-            if (revision === this.revision) this.set({ kind: "error", error });
+            if (negotiated && revision === this.revision) this.set({ kind: "error", error });
           },
         });
         this.child = child;
@@ -55,12 +56,17 @@ export class Connection {
           apiVersion: API_VERSION, client: { name: "eska-explorer", version: this.version }, locale: target.locale,
         }, 10_000);
         const version = parseHandshake(response);
+        negotiated = true;
         if (revision !== this.revision) return;
         const session = parseWorkspace(await child.request("workspace/open", {
           start: { value: target.path, encoding: "utf-8" }, selection: { kind: "current" }, diskCache: true,
         }));
         if (revision === this.revision) this.set({ kind: "ready", session, version, target });
       } catch (error) {
+        if (!negotiated && error instanceof ExplorerError
+          && ["connectionLost", "protocolInvalid"].includes(error.code)) {
+          error = new ExplorerError("handshakeFailed");
+        }
         try { await this.stopChild(); }
         catch { error = new ExplorerError("cleanupFailed"); }
         if (revision === this.revision) {

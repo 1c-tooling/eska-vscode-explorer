@@ -6,7 +6,7 @@ export const MAX_RESPONSE = 67_108_864;
 
 export type FailureCode =
   | "executableMissing" | "spawnFailed" | "connectionLost" | "protocolInvalid"
-  | "timeout" | "resourceLimit" | "incompatible" | "manifestMissing"
+  | "handshakeFailed" | "timeout" | "resourceLimit" | "incompatible" | "manifestMissing"
   | "manifestInvalid" | "selectionInvalid" | "sourceInvalid" | "rootInvalid"
   | "requestFailed" | "cleanupFailed" | "unsupportedWorkspace" | "untrusted"
   | "noFolder" | "invalidExecutable";

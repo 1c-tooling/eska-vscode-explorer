@@ -151,3 +151,10 @@ test("virtual and untrusted workspaces never become native paths", () => {
   assert.throws(() => assertHost(true, "vscode-remote", undefined), { code: "unsupportedWorkspace" });
   assert.throws(() => assertHost(true, "github", "ssh-remote"), { code: "unsupportedWorkspace" });
 });
+
+test("a CLI exiting before initialize gives one actionable compatibility error", async (t) => {
+  const { value, states } = connection(t, "crash");
+  await value.connect(target);
+  assert.equal(value.state.error.code, "handshakeFailed");
+  assert.equal(states.filter((state) => state.kind === "error").length, 1);
+});
