@@ -24,10 +24,19 @@ interface DirectoryEntry { name: string; directory: boolean; link: boolean }
 interface DirectorySnapshot { real: string; entries: DirectoryEntry[] }
 export type WatchDirectory = (path: string, changed: () => void) => { dispose(): void };
 
-/** Assign only immediate scope files to categories; descendants retain their physical hierarchy. */
+const settingsDirectories = new Set([
+  ".codex", ".agents", ".claude", ".cursor", ".vscode", ".github", ".gitlab", ".gitea", ".forgejo",
+]);
+const settingsFiles = new Set([
+  "eska.toml", "bsl-analyzer.toml", ".bsl-language-server.json",
+  ".gitignore", ".gitattributes", ".gitmodules", ".lfsconfig", ".mailmap",
+  "AGENTS.md", "AGENTS.override.md", "CLAUDE.md", ".cursorrules", ".editorconfig", ".gitlab-ci.yml",
+]);
+
+/** Categorize immediate scope entries only; recognized folders keep their physical descendants. */
 export function fileCategory(name: string, directory: boolean): FileGroupKind {
-  if (directory) return "other";
-  if (["eska.toml", ".gitignore", ".gitattributes", "bsl-analyzer.toml", ".bsl-language-server.json"].includes(name)) return "settings";
+  if (directory) return settingsDirectories.has(name) ? "settings" : "other";
+  if (settingsFiles.has(name) || /^.+\.code-workspace$/.test(name)) return "settings";
   if (/^README(?:[.-][\w-]+)?\.md$/i.test(name)) return "documentation";
   return "other";
 }

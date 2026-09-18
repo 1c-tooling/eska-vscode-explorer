@@ -37,8 +37,19 @@ async function populate(root, names) {
 
 test("settings ownership and README languages do not rename physical files", () => {
   for (const name of ["eska.toml", ".gitignore"]) assert.equal(fileCategory(name, false), "settings");
-  for (const name of [".gitattributes", "bsl-analyzer.toml", ".bsl-language-server.json"]) {
+  for (const name of [".gitattributes", "bsl-analyzer.toml", ".bsl-language-server.json",
+    ".gitmodules", ".lfsconfig", ".mailmap", "AGENTS.md", "AGENTS.override.md", "CLAUDE.md",
+    ".cursorrules", ".editorconfig", ".gitlab-ci.yml", "demo.code-workspace"]) {
     assert.equal(fileCategory(name, false), "settings");
+    assert.equal(fileCategory(name, true), "other");
+  }
+  for (const name of [".codex", ".agents", ".claude", ".cursor", ".vscode", ".github", ".gitlab", ".gitea", ".forgejo"]) {
+    assert.equal(fileCategory(name, true), "settings");
+    assert.equal(fileCategory(name, false), "other");
+  }
+  for (const name of [".git", ".eska", ".unknown", "notes.md", "demo.code-workspace.bak"]) {
+    assert.equal(fileCategory(name, false), "other");
+    assert.equal(fileCategory(name, true), "other");
   }
   for (const name of ["README.md", "README.ru.md", "README.en.md", "readme.pt-BR.md"]) {
     assert.equal(fileCategory(name, false), "documentation");
@@ -84,12 +95,17 @@ test("workspace separates global settings and members, even when nested outside 
     await populate(p.info.rootPath.value, ["eska.toml", ".gitignore", ".gitattributes", "bsl-analyzer.toml", ".bsl-language-server.json", "README.en.md"]);
     await mkdir(p.info.sourcePath.value);
   }
+  for (const scope of [root, first.info.rootPath.value]) {
+    await populate(scope, ["AGENTS.md", "demo.code-workspace"]);
+    await populate(join(scope, ".codex"), ["config.toml", "README.md"]);
+    await populate(join(scope, ".github/workflows"), ["check.yml"]);
+  }
   await populate(join(root, "src"), ["README.ru.md"]);
   const { files } = model(t, [first, second], root);
   assert.ok(files.scopes.some(scope => scope.path === root && !scope.project));
   assert.equal((await files.groups()).some(group => group.kind === "structure"), false);
   const member = await files.groups(first);
-  assert.equal((await files.children(member.find(group => group.kind === "settings"))).length, 5);
+  assert.equal((await files.children(member.find(group => group.kind === "settings"))).length, 9);
   const attrs = await files.reveal(join(first.info.rootPath.value, ".gitattributes"));
   assert.equal(attrs.parent.kind, "settings");
   assert.equal(attrs.parent.scope.project, first);
@@ -99,6 +115,18 @@ test("workspace separates global settings and members, even when nested outside 
   for (const scope of [root, first.info.rootPath.value]) {
     const lsp = await files.reveal(join(scope, ".bsl-language-server.json"));
     assert.equal(lsp.parent.kind, "settings");
+  }
+  for (const [scope, owner] of [[root, undefined], [first.info.rootPath.value, first]]) {
+    for (const name of ["AGENTS.md", "demo.code-workspace", ".codex/README.md", ".github/workflows/check.yml"]) {
+      const entry = await files.reveal(join(scope, name));
+      assert.equal(entry.path, join(scope, name));
+      let parent = entry.parent;
+      while (parent.fileKind === "entry") parent = parent.parent;
+      assert.equal(parent.kind, "settings");
+      assert.equal(parent.scope.project, owner);
+    }
+    const other = (await files.groups(owner)).find(group => group.kind === "other");
+    if (other) assert.ok(!(await files.children(other)).some(entry => [".codex", ".github"].includes(entry.path.split(/[\\/]/).at(-1))));
   }
   const src = (await files.children((await files.groups()).find(group => group.kind === "other"))).find(entry => entry.path === join(root, "src"));
   assert.deepEqual((await files.children(src)).map(entry => entry.path), [join(root, "src/README.ru.md")]);
