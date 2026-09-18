@@ -58,7 +58,7 @@
         "command": "eska.explorer.restart",
         "title": "%restart%",
         "category": "eska Explorer",
-        "icon": "$(refresh)"
+        "icon": "$(plug)"
       },
       {
         "command": "eska.explorer.disconnect",
