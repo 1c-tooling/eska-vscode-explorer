@@ -2,7 +2,7 @@
   "name": "eska-explorer",
   "displayName": "eska: 1C Explorer",
   "description": "%description%",
-  "version": "0.0.0",
+  "version": "0.0.1",
   "private": true,
   "engines": {
     "vscode": "^1.109.0"
@@ -226,8 +226,16 @@
         },
         "eska.explorer.treeLanguage": {
           "type": "string",
-          "enum": ["auto", "ru-RU", "en-US"],
-          "enumItemLabels": ["%treeLanguageAuto%", "%treeLanguageRussian%", "%treeLanguageEnglish%"],
+          "enum": [
+            "auto",
+            "ru-RU",
+            "en-US"
+          ],
+          "enumItemLabels": [
+            "%treeLanguageAuto%",
+            "%treeLanguageRussian%",
+            "%treeLanguageEnglish%"
+          ],
           "default": "auto",
           "scope": "window",
           "description": "%treeLanguage%"
