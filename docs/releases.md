@@ -14,8 +14,8 @@
    и создаёт тег `v<version>` и GitHub Release с соответствующим changelog.
 
 Сейчас релиз содержит исходники, автоматически прикрепляемые GitHub, и описание
-из changelog. Установочный VSIX будет включён после выбора publisher и подготовки
-упаковки. Публикации в Marketplace, npm и Open VSX в этих workflow нет.
+из changelog. Локальная [упаковка VSIX](packaging.md) подготовлена; publisher — `1c-tooling`.
+Прикрепление VSIX к GitHub Release требует отдельного изменения workflow. Публикации в Marketplace, npm и Open VSX в этих workflow нет.
 
 Release PR использует новую ветку `release/eska-explorer-<version>-<base>-<tree>`.
 Эта область имён зарезервирована за автоматизацией. Новый PR заменяет предыдущие

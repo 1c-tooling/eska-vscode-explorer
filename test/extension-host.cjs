@@ -43,8 +43,16 @@ exports.run = async function () {
   // Synonym matching remains visible in native Quick Pick; Enter reveals an initially unopened branch.
   await vscode.commands.executeCommand('eska.explorer.search');
   const search = explorer.searchView;
+  // The desktop may lose OS focus while automation runs; this test exercises search, not blur dismissal.
+  search.picker.ignoreFocusOut = true;
   search.picker.value = 'уНиКаЛьНыЙ код';
-  await until(() => search.picker.items.some(item => item.hit?.name === 'Артикул') && !search.picker.busy, 'synonym search');
+  try {
+    await until(() => search.picker.items.some(item => item.hit?.name === 'Артикул') && !search.picker.busy, 'synonym search');
+  } catch (error) {
+    throw new Error(`${error.message}: ${JSON.stringify({ value: search.picker.value, busy: search.picker.busy,
+      text: search.session.snapshot.text, loading: search.session.snapshot.loading, disposed: search.disposed, current: explorer.searchView === search,
+      projects: search.session.snapshot.projects.map(row => ({ progress: row.progress, error: row.error?.code, hits: row.hits.map(hit => hit.name) })) })}`);
+  }
   const searchSession = explorer.connection.state.session.sessionId;
   for (const language of ['ru-RU', 'en-US', 'auto']) {
     await vscode.workspace.getConfiguration('eska.explorer').update('treeLanguage', language, vscode.ConfigurationTarget.Workspace);

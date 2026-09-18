@@ -8,6 +8,7 @@ async function json(name) { return JSON.parse(await readFile(new URL(`../${name}
 test("contributions stay within Explorer and preserve independent BSL providers", async () => {
   const manifest = await json("package.json");
   assert.equal(manifest.name, "eska-explorer");
+  assert.equal(manifest.publisher, "1c-tooling");
   assert.deepEqual(manifest.extensionKind, ["workspace"]);
   assert.equal(manifest.capabilities.untrustedWorkspaces.supported, false);
   assert.equal(manifest.capabilities.virtualWorkspaces.supported, false);

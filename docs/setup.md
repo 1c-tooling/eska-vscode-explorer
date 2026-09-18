@@ -13,3 +13,9 @@ prompts. Supported sources are Designer XML; supported project types are
 Review the proposed settings before saving. Then run
 **eska Explorer: Restart Connection**. The extension does not initialize projects,
 install eska or build a 1C configuration automatically.
+
+## Install the extension
+
+Install the VSIX using **Extensions → Install from VSIX…**, then reload if prompted.
+The extension ID is `1c-tooling.eska-explorer`. The backend is installed separately.
+[Packaging instructions](packaging.md).

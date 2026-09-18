@@ -37,11 +37,13 @@
     "test": "bun run --bun compile && bun test",
     "test:node": "npm run compile && node --test test/*.test.mjs",
     "test:integration": "bun run --bun compile && bun test test/integration.test.mjs test/tree.test.mjs test/search.test.mjs",
-    "test:host": "bun run --bun compile && bun test/run-host.mjs"
+    "test:host": "bun run --bun compile && bun test/run-host.mjs",
+    "package": "bun run --bun compile && bun run --bun vsce package --no-dependencies --skip-license --no-rewrite-relative-links"
   },
   "devDependencies": {
     "@types/node": "22.20.3",
     "@types/vscode": "1.109.0",
+    "@vscode/vsce": "4.0.0",
     "typescript": "7.0.2"
   },
   "contributes": {
@@ -238,5 +240,6 @@
         }
       }
     }
-  }
+  },
+  "publisher": "1c-tooling"
 }
