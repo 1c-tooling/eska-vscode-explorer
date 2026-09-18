@@ -4,6 +4,7 @@
   "description": "%description%",
   "version": "0.0.1",
   "private": true,
+  "license": "Apache-2.0",
   "engines": {
     "vscode": "^1.109.0"
   },
@@ -38,7 +39,7 @@
     "test:node": "npm run compile && node --test test/*.test.mjs",
     "test:integration": "bun run --bun compile && bun test test/integration.test.mjs test/tree.test.mjs test/search.test.mjs",
     "test:host": "bun run --bun compile && bun test/run-host.mjs",
-    "package": "bun run --bun compile && bun run --bun vsce package --no-dependencies --skip-license --no-rewrite-relative-links"
+    "package": "bun run --bun compile && bun run --bun vsce package --no-dependencies --no-rewrite-relative-links"
   },
   "devDependencies": {
     "@types/node": "22.20.3",
