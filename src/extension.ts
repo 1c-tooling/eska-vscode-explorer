@@ -129,8 +129,10 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
     item.id = entry.key;
     item.contextValue = "eskaMetadata";
     item.accessibilityInformation = { label };
+    // The special folder icon makes VS Code omit leaf twistie space in file-only icon themes.
+    // A regular product icon keeps group and child indentation consistent without changing user settings.
     item.iconPath = new vscode.ThemeIcon(node.state === "error" ? "warning"
-      : node.id.kind === "module" ? "file-code" : node.id.kind === "collection" ? "folder" : "symbol-class");
+      : node.id.kind === "module" ? "file-code" : node.id.kind === "collection" ? "symbol-namespace" : "symbol-class");
     if (!node.parent) item.description = entry.project.info.scope.kind === "member"
       ? `${entry.project.info.scope.name} · ${this.text(entry.project.info.type)}` : this.text(entry.project.info.type);
     if (node.id.kind !== "collection") item.command = { command: "eska.explorer.openSource", title: this.text("openSource"), arguments: [entry] };
