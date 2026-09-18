@@ -116,7 +116,7 @@ export async function resolveSource(tree: MetadataTree, entry: TreeEntry, target
   const properties = await tree.request(entry.project, "metadata/properties", { objectId: id.objectId });
   if (!Array.isArray(properties.properties)) throw new ExplorerError("protocolInvalid");
   const names = properties.properties.filter((property) => isRecord(property) && isRecord(property.key)
-    && property.key.namespace === "http://v8.1c.ru/8.3/MDClasses" && property.key.name === "Name");
+    && property.key.namespace === (entry.node.metadataKind === "predefined-item" ? "http://v8.1c.ru/8.3/xcf/predef" : "http://v8.1c.ru/8.3/MDClasses") && property.key.name === "Name");
   if (names.length !== 1 || !isRecord(names[0].range)
     || typeof names[0].range.start !== "number" || typeof names[0].range.end !== "number") throw new ExplorerError("protocolInvalid");
   if (!before.equals(await readFile(path)) || generation !== entry.project.info.generation || event !== entry.project.info.eventSequence) {

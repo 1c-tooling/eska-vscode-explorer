@@ -60,6 +60,7 @@ const labels: Readonly<Record<string, readonly [string, string]>> = {
   "enum-value": ["Значение перечисления", "Enumeration value"],
   "accounting-flag": ["Признак учёта", "Accounting flag"],
   "ext-dimension-accounting-flag": ["Признак учёта субконто", "Subconto accounting flag"],
+  "predefined-item": ["Предопределённый элемент", "Predefined item"],
   "recalculation": ["Перерасчёт", "Recalculation"],
   "column": ["Колонка", "Column"],
   "url-template": ["Шаблон URL", "URL template"],

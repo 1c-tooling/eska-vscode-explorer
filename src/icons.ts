@@ -63,6 +63,7 @@ export const metadataIcons: Readonly<Record<string, string>> = {
   "addressing-attribute": "attribute",
   "requisite": "attribute",
   "enum-value": "enum",
+  "predefined-item": "enum",
   "accounting-flag": "check",
   "ext-dimension-accounting-flag": "check",
   "column": "attribute",
