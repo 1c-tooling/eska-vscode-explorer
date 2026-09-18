@@ -1,0 +1,119 @@
+{
+  "name": "eska-explorer",
+  "displayName": "eska: 1C Explorer",
+  "description": "%description%",
+  "version": "0.0.0",
+  "private": true,
+  "engines": {
+    "vscode": "^1.109.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/1c-tooling/eska-vscode-explorer.git"
+  },
+  "categories": [
+    "Other"
+  ],
+  "main": "./out/extension.js",
+  "extensionKind": [
+    "workspace"
+  ],
+  "activationEvents": [
+    "onView:eska.explorer.projects"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": false,
+      "description": "%trust%"
+    },
+    "virtualWorkspaces": {
+      "supported": false,
+      "description": "%virtual%"
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p .",
+    "check": "tsc -p . --noEmit",
+    "test": "bun run compile && bun test",
+    "test:node": "npm run compile && node --test test/*.test.mjs",
+    "test:integration": "bun run compile && bun test test/integration.test.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.3",
+    "@types/vscode": "1.109.0",
+    "typescript": "7.0.2"
+  },
+  "contributes": {
+    "commands": [
+      {
+        "command": "eska.explorer.connect",
+        "title": "%connect%",
+        "category": "eska Explorer",
+        "icon": "$(plug)"
+      },
+      {
+        "command": "eska.explorer.restart",
+        "title": "%restart%",
+        "category": "eska Explorer",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "eska.explorer.disconnect",
+        "title": "%disconnect%",
+        "category": "eska Explorer",
+        "icon": "$(debug-disconnect)"
+      },
+      {
+        "command": "eska.explorer.showLog",
+        "title": "%showLog%",
+        "category": "eska Explorer",
+        "icon": "$(output)"
+      }
+    ],
+    "views": {
+      "explorer": [
+        {
+          "id": "eska.explorer.projects",
+          "name": "eska: 1C Explorer",
+          "visibility": "collapsed",
+          "contextualTitle": "eska: 1C Explorer"
+        }
+      ]
+    },
+    "menus": {
+      "view/title": [
+        {
+          "command": "eska.explorer.connect",
+          "when": "view == eska.explorer.projects",
+          "group": "navigation@1"
+        },
+        {
+          "command": "eska.explorer.restart",
+          "when": "view == eska.explorer.projects",
+          "group": "navigation@2"
+        },
+        {
+          "command": "eska.explorer.disconnect",
+          "when": "view == eska.explorer.projects",
+          "group": "navigation@3"
+        },
+        {
+          "command": "eska.explorer.showLog",
+          "when": "view == eska.explorer.projects",
+          "group": "navigation@4"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "eska: 1C Explorer",
+      "properties": {
+        "eska.explorer.executable": {
+          "type": "string",
+          "default": "eska",
+          "scope": "machine-overridable",
+          "description": "%executable%"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,59 @@
+import { API_VERSION, MAX_HEADER, MAX_REQUEST, MAX_RESPONSE } from "../out/protocol.js";
+
+const mode = process.argv[2] ?? "ok";
+let input = Buffer.alloc(0);
+let initialized = false;
+let opening = 0;
+
+/** Independent writer prevents transport tests from sharing the encoder under test. */
+function send(value) {
+  const bytes = Buffer.from(JSON.stringify(value));
+  process.stdout.write(`Content-Length: ${bytes.length}\r\n\r\n`);
+  process.stdout.write(bytes);
+}
+
+/** A deliberately small peer exposes crash, timeout and protocol incompatibility paths. */
+function handle(request) {
+  const ok = (result) => send({ jsonrpc: "2.0", id: request.id, result });
+  if (mode === "hang") return;
+  if (mode === "crash") process.exit(7);
+  if (mode === "garbage") { process.stdout.write("ordinary command help\r\n\r\n"); return; }
+  if (request.method === "initialize") {
+    initialized = true;
+    const result = { apiVersion: mode === "incompatible" ? { major: 2, minor: 0 } : API_VERSION,
+      server: { name: "eska", version: "test" },
+      capabilities: { designerXml: true, readOnly: true, multiContext: false },
+      limits: { maxHeaderBytes: MAX_HEADER, maxRequestBytes: MAX_REQUEST, maxResponseBytes: MAX_RESPONSE } };
+    if (mode === "slow") setTimeout(() => ok(result), 200);
+    else ok(result);
+  } else if (request.method === "workspace/open") {
+    if (!initialized) process.exit(8);
+    if (mode === "missing-manifest") {
+      send({ jsonrpc: "2.0", id: request.id, error: { code: -32000, message: "Request failed",
+        data: { kind: "project_open_failed", details: { reason: "manifest_missing" } } } });
+      return;
+    }
+    const path = request.params.start;
+    ok({ sessionId: `session-${++opening}`, projects: [{ projectId: "project-1", type: "configuration",
+      scope: { kind: "standalone" }, rootPath: path, sourcePath: path,
+      root: { kind: "object", objectId: "opaque-root" }, generation: "9007199254740993",
+      eventSequence: "0", requiresRefresh: false, requiresReopen: false }] });
+  } else if (request.method === "shutdown") {
+    if (mode !== "ignore-shutdown") ok(null);
+  } else if (request.method === "exit") process.exit(0);
+  else if (request.method === "test/crash") process.exit(9);
+}
+
+process.stdin.on("data", (chunk) => {
+  input = Buffer.concat([input, chunk]);
+  for (;;) {
+    const end = input.indexOf("\r\n\r\n");
+    if (end < 0) return;
+    const length = Number(input.subarray(0, end).toString().split(":")[1]);
+    if (input.length < end + 4 + length) return;
+    const request = JSON.parse(input.subarray(end + 4, end + 4 + length));
+    input = input.subarray(end + 4 + length);
+    handle(request);
+  }
+});
+process.stdin.on("end", () => process.exit(0));
