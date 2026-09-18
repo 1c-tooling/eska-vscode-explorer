@@ -52,11 +52,35 @@ exports.run = async function () {
   assert.equal(vscode.window.activeTextEditor.document.uri.fsPath, fixture.module);
 
   // A user collapse must survive a branch refresh, despite expandedByDefault on the backend.
+  await vscode.commands.executeCommand('eska.explorer.projects.focus');
   await explorer.view.reveal(modules, { select: true, focus: true, expand: true });
   await vscode.commands.executeCommand('list.collapse');
   await until(() => explorer.getTreeItem(modules).collapsibleState === vscode.TreeItemCollapsibleState.Collapsed, 'module collapse event');
   await explorer.view.reveal(customers, { select: true, focus: true, expand: true });
   const selected = explorer.view.selection[0].key;
+  // Language changes repaint cached labels without reconnecting or losing native tree state.
+  const languageTree = explorer.tree;
+  const sessionId = explorer.connection.state.session.sessionId;
+  const moduleId = explorer.getTreeItem(modules).id;
+  let repaints = 0;
+  const repaintSubscription = explorer.onDidChangeTreeData(() => { repaints++; });
+  for (const language of ['ru-RU', 'en-US', 'auto']) {
+    const previousRepaints = repaints;
+    await vscode.workspace.getConfiguration('eska.explorer').update('treeLanguage', language, vscode.ConfigurationTarget.Workspace);
+    await until(() => repaints > previousRepaints, 'language repaint');
+    const locale = language === 'auto' ? (vscode.env.language.toLowerCase().startsWith('ru') ? 'ru-RU' : 'en-US') : language;
+    assert.equal(explorer.getTreeItem(modules).label, locale === 'ru-RU' ? 'Модули' : 'Modules');
+    assert.equal(explorer.getTreeItem(scripts[0]).label, scripts[0].node.label.translations[locale]);
+    assert.equal(explorer.getTreeItem(goods).label, 'Товары');
+    assert.equal(explorer.getTreeItem(modules).id, moduleId);
+    assert.equal(explorer.getTreeItem(modules).collapsibleState, vscode.TreeItemCollapsibleState.Collapsed);
+    assert.equal(explorer.tree, languageTree);
+    assert.equal(explorer.connection.state.session.sessionId, sessionId);
+    assert.equal((await explorer.getChildren(modules))[0], scripts[0], 'reuse cached module nodes');
+    await explorer.view.reveal(customers, { select: false });
+    assert.equal(explorer.view.selection[0].key, selected);
+  }
+  repaintSubscription.dispose();
   const original = await fs.readFile(fixture.descriptor, 'utf8');
   const generation = goods.project.info.generation;
   await fs.writeFile(fixture.descriptor, original.replace('<Name>Артикул</Name>', '<Name>НовыйАртикул</Name>'));

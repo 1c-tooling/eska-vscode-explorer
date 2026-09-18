@@ -152,6 +152,14 @@
           "default": "eska",
           "scope": "machine-overridable",
           "description": "%executable%"
+        },
+        "eska.explorer.treeLanguage": {
+          "type": "string",
+          "enum": ["auto", "ru-RU", "en-US"],
+          "enumItemLabels": ["%treeLanguageAuto%", "%treeLanguageRussian%", "%treeLanguageEnglish%"],
+          "default": "auto",
+          "scope": "window",
+          "description": "%treeLanguage%"
         }
       }
     }

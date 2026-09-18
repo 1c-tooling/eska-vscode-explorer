@@ -37,6 +37,7 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
   private watchers: vscode.Disposable[] = [];
   private readonly expanded = new Map<string, boolean>();
   private readonly recovering = new Set<ProjectTree>();
+  private treeLanguage = this.resolveTreeLanguage();
   private opening = 0;
   private selected: vscode.WorkspaceFolder | undefined;
   private attempted = false;
@@ -79,12 +80,24 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
       if (event.affectsConfiguration("eska.explorer.executable", this.selected?.uri)) {
         void this.connection.disconnect();
       }
+      if (event.affectsConfiguration("eska.explorer.treeLanguage")) {
+        this.treeLanguage = this.resolveTreeLanguage();
+        // Labels already contain both translations; reuse nodes and their expansion state.
+        this.changed.fire(undefined);
+      }
     }));
     if (this.view.visible) void this.connect(false);
   }
 
   /** Resolve the active host locale without changing the workspace's language providers. */
   private text(key: MessageKey, ...values: string[]): string { return message(vscode.env.language, key, ...values); }
+
+  /** Only metadata labels use this override; commands and errors retain the editor's language. */
+  private resolveTreeLanguage(): "ru-RU" | "en-US" {
+    const language = vscode.workspace.getConfiguration("eska.explorer").get<string>("treeLanguage", "auto");
+    return language === "ru-RU" || language === "en-US" ? language
+      : vscode.env.language.toLowerCase().startsWith("ru") ? "ru-RU" : "en-US";
+  }
 
   /** Query only roots or the expanded branch; errors stay next to their owning project/object. */
   async getChildren(entry?: Element): Promise<Element[]> {
@@ -122,7 +135,7 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
     }
     const node = entry.node;
     const label = node.label.kind === "name" ? node.label.text
-      : node.label.translations[vscode.env.language.toLowerCase().startsWith("ru") ? "ru-RU" : "en-US"];
+      : node.label.translations[this.treeLanguage];
     const expanded = this.expanded.get(entry.key) ?? node.expandedByDefault;
     const item = new vscode.TreeItem(label, node.state === "empty" ? vscode.TreeItemCollapsibleState.None
       : expanded ? vscode.TreeItemCollapsibleState.Expanded : vscode.TreeItemCollapsibleState.Collapsed);
