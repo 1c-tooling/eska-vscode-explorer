@@ -48,21 +48,20 @@ class StoreTests(unittest.TestCase):
         raise AssertionError(args)
 
     def test_dry_run_never_publishes(self):
-        """Both registries validate the asset without needing any credentials."""
-        for registry in self.module.REGISTRIES:
-            with patch.object(self.module, "run", side_effect=self.forge), patch.object(self.module.subprocess, "run") as publish:
-                self.module.publish("0.1.0", registry, "oidc")
-                publish.assert_not_called()
+        """The asset is validated without needing any credentials."""
+        with patch.object(self.module, "run", side_effect=self.forge), patch.object(self.module.subprocess, "run") as publish:
+            self.module.publish("0.1.0", "token")
+            publish.assert_not_called()
 
     def test_invalid_version_and_local_publish_stop_before_network(self):
         """Untrusted versions and local invocations cannot start publication."""
         with patch.object(self.module, "run") as run:
             for version in ("v0.1.0", "0.1.0-beta", "../main", "01.2.3", "0.0.0"):
                 with self.assertRaises(ValueError):
-                    self.module.publish(version, "marketplace", "oidc")
+                    self.module.publish(version, "oidc")
             os.environ["GITHUB_REF"] = "refs/heads/feat/explorer"
             with self.assertRaises(RuntimeError):
-                self.module.publish("0.1.0", "marketplace", "oidc", False)
+                self.module.publish("0.1.0", "oidc", False)
             run.assert_not_called()
 
     def test_incomplete_or_corrupt_release_cannot_publish(self):
@@ -70,31 +69,29 @@ class StoreTests(unittest.TestCase):
         for target, key, value in ((self.release, "draft", True), (self.release, "prerelease", True), (self.release, "assets", []), (self.asset, "state", "new"), (self.asset, "size", 1), (self.asset, "digest", "sha256:wrong"), (self.manifest, "version", "0.2.0")):
             with self.subTest(key=key), patch.dict(target, {key: value}), patch.object(self.module, "run", side_effect=self.forge), patch.object(self.module.subprocess, "run") as publish:
                 with self.assertRaises(ValueError):
-                    self.module.publish("0.1.0", "marketplace", "oidc", False)
+                    self.module.publish("0.1.0", "oidc", False)
                 publish.assert_not_called()
 
     def test_registry_authentication_is_explicit(self):
         """OIDC strips tokens; token mode keeps secrets in the process environment only."""
-        for registry, token in (("marketplace", "VSCE_PAT"), ("openvsx", "OVSX_PAT")):
-            for authentication in ("oidc", "token"):
-                with self.subTest(registry=registry, authentication=authentication), patch.dict(os.environ, {"VSCE_PAT": "secret-a", "OVSX_PAT": "secret-b"}), patch.object(self.module, "run", side_effect=self.forge), patch.object(self.module.subprocess, "run") as publish:
-                    self.module.publish("0.1.0", registry, authentication, False)
-                    publish.assert_called_once()
-                    command = publish.call_args.args[0]
-                    self.assertEqual(command[:3], ["bun", "run", "--bun"])
-                    self.assertNotIn("secret-a", command)
-                    self.assertNotIn("secret-b", command)
-                    environment = publish.call_args.kwargs["env"]
-                    if authentication == "oidc":
-                        self.assertNotIn("VSCE_PAT", environment)
-                        self.assertNotIn("OVSX_PAT", environment)
-                        self.assertIn("--oidc" if registry == "marketplace" else "--trusted-publishing", command)
-                    else:
-                        self.assertIn(token, environment)
+        for authentication in ("oidc", "token"):
+            with self.subTest(authentication=authentication), patch.dict(os.environ, {"OVSX_PAT": "secret"}), patch.object(self.module, "run", side_effect=self.forge), patch.object(self.module.subprocess, "run") as publish:
+                self.module.publish("0.1.0", authentication, False)
+                publish.assert_called_once()
+                command = publish.call_args.args[0]
+                self.assertEqual(command[:5], ["bun", "run", "--bun", "ovsx", "publish"])
+                self.assertNotIn("secret", command)
+                environment = publish.call_args.kwargs["env"]
+                if authentication == "oidc":
+                    self.assertNotIn("OVSX_PAT", environment)
+                    self.assertIn("--trusted-publishing", command)
+                else:
+                    self.assertEqual(environment["OVSX_PAT"], "secret")
+                    self.assertNotIn("--trusted-publishing", command)
 
     def test_missing_token_fails(self):
         """Token mode must not fall through to implicit OIDC discovery."""
         with patch.object(self.module, "run", side_effect=self.forge), patch.object(self.module.subprocess, "run") as publish:
             with self.assertRaises(RuntimeError):
-                self.module.publish("0.1.0", "openvsx", "token", False)
+                self.module.publish("0.1.0", "token", False)
             publish.assert_not_called()

@@ -1,4 +1,4 @@
-name: Publish extension stores
+name: Publish Open VSX
 
 on:
   workflow_dispatch:
@@ -7,15 +7,10 @@ on:
         description: 'Existing GitHub release version, without v'
         required: true
         type: string
-      registry:
-        description: 'Publish one registry at a time; retry only the failed registry'
-        required: true
-        type: choice
-        options: [marketplace, openvsx]
       authentication:
         description: 'Open VSX first publication requires token; OIDC needs registry setup'
         required: true
-        default: oidc
+        default: token
         type: choice
         options: [oidc, token]
       dry_run:
@@ -27,14 +22,14 @@ permissions:
   contents: read
 
 concurrency:
-  group: eska-explorer-store-${{ inputs.registry }}
+  group: eska-explorer-openvsx
   cancel-in-progress: false
 
 jobs:
   publish:
     if: github.repository == '1c-tooling/eska-vscode-explorer' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    environment: ${{ inputs.registry }}
+    environment: openvsx
     timeout-minutes: 15
     permissions:
       contents: read
@@ -52,10 +47,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_VERSION: ${{ inputs.version }}
-          REGISTRY: ${{ inputs.registry }}
           AUTHENTICATION: ${{ inputs.authentication }}
           DRY_RUN: ${{ inputs.dry_run }}
-          VSCE_PAT: ${{ secrets.VSCE_PAT }}
           OVSX_PAT: ${{ secrets.OVSX_PAT }}
         run: |
           options=()
@@ -63,4 +56,4 @@ jobs:
             options+=(--publish)
           fi
           python3 scripts/publish-stores.py "$RELEASE_VERSION" \
-            --registry "$REGISTRY" --authentication "$AUTHENTICATION" "${options[@]}"
+            --authentication "$AUTHENTICATION" "${options[@]}"

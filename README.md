@@ -250,7 +250,7 @@ IDE API и обязательные возможности дерева, пои�
 - [Установка, упаковка и проверка VSIX](https://github.com/1c-tooling/eska-vscode-explorer/blob/main/docs/packaging.md)
 - [Разработка и тестирование](https://github.com/1c-tooling/eska-vscode-explorer/blob/main/docs/development.md)
 - [Автоматизация релизов](https://github.com/1c-tooling/eska-vscode-explorer/blob/main/docs/releases.md)
-- [Marketplace и Open VSX](https://github.com/1c-tooling/eska-vscode-explorer/blob/main/docs/publishing.md)
+- [Публикация в Open VSX](https://github.com/1c-tooling/eska-vscode-explorer/blob/main/docs/publishing.md)
 
 ## Лицензия
 

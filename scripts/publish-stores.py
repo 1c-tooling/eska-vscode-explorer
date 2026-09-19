@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate a GitHub release VSIX and explicitly publish it to one extension registry."""
+"""Validate a GitHub release VSIX and explicitly publish it to Open VSX."""
 import argparse
 import hashlib
 import json
@@ -12,7 +12,6 @@ import xml.etree.ElementTree as ET
 import zipfile
 
 REPOSITORY = "1c-tooling/eska-vscode-explorer"
-REGISTRIES = ("marketplace", "openvsx")
 
 
 def run(*args):
@@ -41,26 +40,21 @@ def validate_package(path, version, manifest):
                 raise ValueError("Expected a packaged PNG store icon")
 
 
-def publish_command(registry, authentication, path):
+def publish_command(authentication, path):
     """Publish the existing file: never repack it, change its version, or pass tokens in arguments."""
-    if registry not in REGISTRIES or authentication not in ("oidc", "token"):
-        raise ValueError("Unknown registry/authentication")
-    if registry == "marketplace":
-        command = ["bun", "run", "--bun", "vsce", "publish", "--packagePath", str(path)]
-        if authentication == "oidc":
-            command.append("--oidc")
-    else:
-        command = ["bun", "run", "--bun", "ovsx", "publish", str(path)]
-        if authentication == "oidc":
-            command.append("--trusted-publishing")
+    if authentication not in ("oidc", "token"):
+        raise ValueError("Unknown authentication")
+    command = ["bun", "run", "--bun", "ovsx", "publish", str(path)]
+    if authentication == "oidc":
+        command.append("--trusted-publishing")
     return command
 
 
-def publish(version, registry, authentication, dry_run=True):
+def publish(version, authentication, dry_run=True):
     """Read the released asset and fail closed on tag, digest, identity or authorization mismatches."""
     if not re.fullmatch(r"(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)", version) or version == "0.0.0":
         raise ValueError("Expected a released stable version without the v prefix")
-    publish_command(registry, authentication, Path("validation.vsix"))
+    publish_command(authentication, Path("validation.vsix"))
     if not dry_run and (os.environ.get("GITHUB_ACTIONS") != "true" or os.environ.get("GITHUB_REPOSITORY") != REPOSITORY
                         or os.environ.get("GITHUB_REF") != "refs/heads/main" or os.environ.get("GITHUB_EVENT_NAME") != "workflow_dispatch"):
         raise RuntimeError("Publication is allowed only by manual workflow dispatch from main")
@@ -84,23 +78,21 @@ def publish(version, registry, authentication, dry_run=True):
         validate_package(path, version, manifest)
         print(f"Validated 1c-tooling.eska-explorer@{version}: {digest}", flush=True)
         if dry_run:
-            print(f"Dry run: {registry}; no publication performed")
+            print("Dry run: Open VSX; no publication performed")
             return
         environment = os.environ.copy()
         # OIDC must not silently select an inherited long-lived token instead.
         if authentication == "oidc":
-            environment.pop("VSCE_PAT", None)
             environment.pop("OVSX_PAT", None)
-        elif not environment.get("VSCE_PAT" if registry == "marketplace" else "OVSX_PAT"):
+        elif not environment.get("OVSX_PAT"):
             raise RuntimeError("The selected registry publishing secret is missing")
-        subprocess.run(publish_command(registry, authentication, path), env=environment, check=True)
+        subprocess.run(publish_command(authentication, path), env=environment, check=True)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("version")
-    parser.add_argument("--registry", required=True, choices=REGISTRIES)
-    parser.add_argument("--authentication", choices=("oidc", "token"), default="oidc")
+    parser.add_argument("--authentication", choices=("oidc", "token"), default="token")
     parser.add_argument("--publish", action="store_true", help="Actually publish; otherwise validate only")
     arguments = parser.parse_args()
-    publish(arguments.version, arguments.registry, arguments.authentication, not arguments.publish)
+    publish(arguments.version, arguments.authentication, not arguments.publish)

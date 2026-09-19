@@ -1,35 +1,18 @@
-# Публикация в VS Code Marketplace и Open VSX
+# Публикация в Open VSX
 
 Постоянный идентификатор расширения — `1c-tooling.eska-explorer`.
 Название — **ESKA: 1C Explorer**, лицензия — Apache-2.0.
-Регистрация издателей и первая публикация ещё предстоят. Доступность имени
-`1c-tooling` нужно подтвердить при регистрации; при конфликте не меняйте publisher
-в одном workflow — это часть идентификатора устанавливаемого расширения.
+Публикуем расширение только в Open VSX; VSIX также доступен в GitHub Releases.
+Marketplace не используется. Перед первым выпуском нужно создать namespace
+`1c-tooling`; при конфликте имени не меняйте publisher без отдельного решения.
 
-## 1. Зарегистрировать издателей
-
-### VS Code Marketplace
-
-1. Войдите в [управление издателями](https://marketplace.visualstudio.com/manage)
-   и создайте publisher с ID `1c-tooling`.
-2. Настройте для него trusted publishing из GitHub Actions: владелец `1c-tooling`,
-   репозиторий `eska-vscode-explorer`, workflow `publish-stores.yml`,
-   environment `marketplace`. В workflow выберите `authentication: oidc`.
-3. Если trusted publishing пока недоступен для аккаунта, используйте PAT с правом
-   **Marketplace → Manage** и сохраните его как environment secret `VSCE_PAT`.
-   Выберите `authentication: token`. Токен не добавляется в репозиторий.
-
-`@vscode/vsce` 4.0.0 поддерживает прямой обмен GitHub OIDC через `--oidc`;
-Azure login в workflow не нужен. Инструкции:
-[vsce: OIDC](https://github.com/microsoft/vscode-vsce/blob/main/README.md),
-[публикация расширения](https://code.visualstudio.com/api/working-with-extensions/publishing-extension).
-
-### Open VSX
+## 1. Настроить издателя Open VSX
 
 1. Войдите через GitHub на [Open VSX](https://open-vsx.org/).
    Создайте и привяжите Eclipse account согласно
    [инструкции издателя](https://github.com/eclipse-openvsx/openvsx/wiki/Publishing-Extensions).
    Publisher Agreement принимает владелец аккаунта самостоятельно.
+   Eclipse Contributor Agreement (ECA) для публикации расширения не требуется.
 2. Создайте access token в настройках Open VSX. С ним создайте namespace
    `1c-tooling` командой `bun run --bun ovsx create-namespace 1c-tooling`
    из репозитория расширения, передав токен через переменную окружения `OVSX_PAT`.
@@ -49,7 +32,7 @@ Azure login в workflow не нужен. Инструкции:
 
 ## 2. Подготовить GitHub и релиз
 
-В Settings → Environments создайте `marketplace` и `openvsx`, разрешите deployment
+В Settings → Environments создайте `openvsx`, разрешите deployment
 только из `main`. При токеновой авторизации положите соответствующий secret
 в environment. При OIDC секреты магазинов не нужны; параметры доверия в магазине
 должны точно совпадать с репозиторием, workflow и environment.
@@ -66,12 +49,11 @@ Azure login в workflow не нужен. Инструкции:
 
 ## 3. Опубликовать существующий VSIX
 
-Actions → **Publish extension stores** → Run workflow:
+Actions → **Publish Open VSX** → Run workflow:
 
 - ветка `main`;
 - `version`: номер существующего стабильного GitHub-релиза, без `v`;
-- `registry`: `marketplace` или `openvsx`;
-- `authentication`: настроенный способ авторизации;
+- `authentication`: `token` по умолчанию; `oidc` только после настройки доверия;
 - сначала `dry_run: true`, затем повторный запуск с `dry_run: false`.
 
 Dry run проверяет релиз, размер и SHA-256 asset (если digest предоставлен GitHub),
@@ -79,13 +61,12 @@ identity, версию, manifest и наличие runtime. Он не прове
 не отправляет пакет в магазин. Реальная публикация передаёт те же байты VSIX
 из GitHub Release, без повторной упаковки. Локальные исходники не подмешиваются.
 
-Для второго магазина запустите workflow отдельно. Если один магазин принял пакет,
-а другой вернул ошибку, повторяйте только неудавшийся магазин. Существующая версия
+При сбое повторите workflow после устранения причины. Существующая версия
 не перезаписывается, ошибка дубликата не скрывается. Для изменения уже опубликованного
 пакета нужен следующий релиз.
 
 Workflow `Release` по-прежнему выпускает только GitHub Release и VSIX.
-Публикация в магазины запускается вручную; после установки из магазина обновления
+Публикация в Open VSX запускается вручную; после установки из магазина обновления
 расширения доставляет IDE согласно её настройкам. CLI ESKA обновляется отдельно.
 
 ## Локальная проверка без публикации
@@ -93,7 +74,7 @@ Workflow `Release` по-прежнему выпускает только GitHub 
 С авторизованным GitHub CLI и локальными тегами:
 
 ```sh
-python3 scripts/publish-stores.py <version> --registry marketplace
+python3 scripts/publish-stores.py <version>
 ```
 
 Без `--publish` команда только проверяет пакет. Реальная публикация скриптом
