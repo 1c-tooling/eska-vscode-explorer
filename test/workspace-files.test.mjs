@@ -168,3 +168,34 @@ test("directory links remain navigable but ancestor cycles terminate", { skip: p
   assert.equal(back.link, true);
   assert.deepEqual(await files.children(back), []);
 });
+
+
+test("member-only containers disappear and reappear when ordinary files change", async t => {
+  const root = await fixture(t);
+  const first = project(join(root, "src/first"), undefined, true);
+  const second = project(join(root, "src/nested/second"), undefined, true);
+  await populate(root, ["eska.toml"]);
+  for (const p of [first, second]) await populate(p.info.rootPath.value, ["eska.toml"]);
+  const { files, watches, changes } = model(t, [first, second], root);
+  assert.deepEqual((await files.groups()).map(group => group.kind), ["settings"]);
+  assert.deepEqual([...watches.keys()].sort(), [root, join(root, "src"), join(root, "src/nested")].sort());
+  await populate(join(root, "src/nested"), ["README.md"]);
+  await watches.get(join(root, "src/nested"))();
+  assert.deepEqual(changes, [undefined]);
+  const other = (await files.groups()).find(group => group.kind === "other");
+  const [src] = await files.children(other);
+  assert.equal(src.path, join(root, "src"));
+  const [nested] = await files.children(src);
+  const [readme] = await files.children(nested);
+  assert.equal(readme.path, join(root, "src/nested/README.md"));
+  assert.equal((await files.reveal(readme.path)).path, readme.path);
+  await rm(readme.path);
+  await watches.get(join(root, "src/nested"))();
+  assert.deepEqual((await files.groups()).map(group => group.kind), ["settings"]);
+  await mkdir(join(root, "src/assets"));
+  await watches.get(join(root, "src"))();
+  const restored = (await files.groups()).find(group => group.kind === "other");
+  const [container] = await files.children(restored);
+  assert.deepEqual((await files.children(container)).map(entry => entry.path), [join(root, "src/assets")]);
+  assert.ok(!watches.has(join(root, "src/assets")), "unrelated empty directories remain lazy and visible");
+});

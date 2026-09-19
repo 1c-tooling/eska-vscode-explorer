@@ -121,10 +121,31 @@ export class WorkspaceFiles {
     return { real, entries: children };
   }
 
+  /** Inspect only member ancestors, never their source trees or unrelated directories. */
+  private async visibleEntries(path: string, scope: FileScope, entries: DirectoryEntry[]): Promise<DirectoryEntry[]> {
+    const visible = await Promise.all(entries.map(async entry => {
+      const child = join(path, entry.name);
+      if (this.excluded(child, scope)) return false;
+      const container = entry.directory && !entry.link && this.scopes.some(other =>
+        other !== scope && other.project && relativeFile(child, other.path));
+      if (!container) return true;
+      try {
+        // Hidden containers need a parent refresh when an ordinary file appears inside them.
+        const owner = scope.project?.info.scope.kind === "member" ? scope.project : undefined;
+        const snapshot = await this.listing(child, owner);
+        return (await this.visibleEntries(child, scope, snapshot.entries)).length > 0;
+      } catch {
+        // Keep unreadable folders accessible for refresh instead of treating them as empty.
+        return true;
+      }
+    }));
+    return entries.filter((_, index) => visible[index]);
+  }
+
   /** Reuse one shallow root snapshot for settings, documentation and other files. */
   private async scopeFiles(scope: FileScope): Promise<DirectoryEntry[]> {
     const snapshot = await this.listing(scope.path, scope.project?.info.scope.kind === "member" ? scope.project : undefined);
-    return snapshot.entries.filter(entry => !this.excluded(join(scope.path, entry.name), scope));
+    return this.visibleEntries(scope.path, scope, snapshot.entries);
   }
 
   /** Keep standalone files at view level and member files below their configuration; hide absent categories. */
@@ -155,8 +176,8 @@ export class WorkspaceFiles {
       }
       if ((await this.listing(scope.path, scope.project?.info.scope.kind === "member" ? scope.project : undefined)).real === snapshot.real) return [];
     }
-    return snapshot.entries.filter(entry => {
-      if (this.excluded(join(path, entry.name), scope)) return false;
+    const entries = await this.visibleEntries(path, scope, snapshot.entries);
+    return entries.filter(entry => {
       return parent.fileKind === "entry" || fileCategory(entry.name, entry.directory) === parent.kind;
     }).map(entry => ({ fileKind: "entry", key: `file:${join(path, entry.name)}`, path: join(path, entry.name),
       directory: entry.directory, link: entry.link, parent }));

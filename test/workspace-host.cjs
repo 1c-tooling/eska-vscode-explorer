@@ -44,6 +44,8 @@ exports.run = async function () {
   const projects = rows.filter(row => row.node);
   assert.equal(projects.length, 2);
   assert.ok(rows.some(row => row.kind === "settings"));
+  const otherFiles = await explorer.getChildren(rows.find(row => row.kind === "other"));
+  assert.ok(!otherFiles.some(row => row.path === path.join(fixture.root, "src")), "member-only src is hidden");
   const root = projects[0];
   // Match members by their authoritative physical paths.
   const firstRoot = projects.find(row => row.project.info.rootPath.value === first.root);
