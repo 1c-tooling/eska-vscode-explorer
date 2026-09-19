@@ -10,6 +10,8 @@ import subprocess
 import tempfile
 import xml.etree.ElementTree as ET
 import zipfile
+from urllib.error import HTTPError
+from urllib.request import urlopen
 
 REPOSITORY = "1c-tooling/eska-vscode-explorer"
 
@@ -50,14 +52,35 @@ def publish_command(authentication, path):
     return command
 
 
+def remote_digest(version):
+    """Hash the registry's existing universal VSIX; only a missing version permits upload."""
+    base = f"https://open-vsx.org/api/1c-tooling/eska-explorer/{version}"
+    try:
+        response = urlopen(base, timeout=30)
+    except HTTPError as error:
+        if error.code == 404:
+            return None
+        raise
+    with response:
+        metadata = json.load(response)
+    if (metadata.get("namespace"), metadata.get("name"), metadata.get("version"), metadata.get("targetPlatform")) != (
+            "1c-tooling", "eska-explorer", version, "universal"):
+        raise ValueError("Unexpected Open VSX version identity")
+    digest = hashlib.sha256()
+    with urlopen(f"{base}/file/1c-tooling.eska-explorer-{version}.vsix", timeout=30) as package:
+        while chunk := package.read(1024 * 1024):
+            digest.update(chunk)
+    return "sha256:" + digest.hexdigest()
+
+
 def publish(version, authentication, dry_run=True):
     """Read the released asset and fail closed on tag, digest, identity or authorization mismatches."""
     if not re.fullmatch(r"(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)", version) or version == "0.0.0":
         raise ValueError("Expected a released stable version without the v prefix")
     publish_command(authentication, Path("validation.vsix"))
     if not dry_run and (os.environ.get("GITHUB_ACTIONS") != "true" or os.environ.get("GITHUB_REPOSITORY") != REPOSITORY
-                        or os.environ.get("GITHUB_REF") != "refs/heads/main" or os.environ.get("GITHUB_EVENT_NAME") != "workflow_dispatch"):
-        raise RuntimeError("Publication is allowed only by manual workflow dispatch from main")
+                        or os.environ.get("GITHUB_REF") != "refs/heads/main" or os.environ.get("GITHUB_EVENT_NAME") not in ("workflow_dispatch", "push")):
+        raise RuntimeError("Publication is allowed only by release push or manual workflow dispatch from main")
     run("git", "merge-base", "--is-ancestor", f"refs/tags/v{version}", "HEAD")
     manifest = json.loads(run("git", "show", f"refs/tags/v{version}:package.json"))
     release = json.loads(run("gh", "api", f"repos/{REPOSITORY}/releases/tags/v{version}"))
@@ -79,6 +102,12 @@ def publish(version, authentication, dry_run=True):
         print(f"Validated 1c-tooling.eska-explorer@{version}: {digest}", flush=True)
         if dry_run:
             print("Dry run: Open VSX; no publication performed")
+            return
+        existing = remote_digest(version)
+        if existing is not None:
+            if existing != digest:
+                raise ValueError("Open VSX already contains different bytes for this version")
+            print(f"Already published in Open VSX with matching SHA-256: {version}")
             return
         environment = os.environ.copy()
         # OIDC must not silently select an inherited long-lived token instead.

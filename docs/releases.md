@@ -16,8 +16,10 @@
 и прикрепляет его к Assets. Исходники берутся именно из тега `v<version>`, даже
 если в `main` уже есть новые изменения. Перед загрузкой проверяются содержимое
 архива, identity и версия. [Локальная упаковка VSIX](packaging.md); publisher — `1c-tooling`.
-Workflow `Release` не публикует в магазины. Для Open VSX добавлен
-отдельный ручной [Publish Open VSX](publishing.md); npm не используется.
+После успешного задания `release` автоматически вызывается
+[Publish Open VSX](publishing.md) с тем же VSIX. Ручной запуск сохранён для
+восстановления после сбоя. Совпадающая по SHA-256 опубликованная версия
+пропускается; несовпадающая вызывает ошибку. npm не используется.
 
 Release PR использует новую ветку `release/eska-explorer-<version>-<base>-<tree>`.
 Эта область имён зарезервирована за автоматизацией. Новый PR заменяет предыдущие
@@ -45,7 +47,9 @@ minor. После 1.0 действуют обычные patch/minor/major. Со�
 
 ## Настройка GitHub
 
-Используется штатный `GITHUB_TOKEN`; отдельный PAT не требуется. Репозиторий должен
+Для GitHub используется штатный `GITHUB_TOKEN`; отдельный GitHub PAT не требуется.
+Для Open VSX нужен `OVSX_PAT` в environment `openvsx`. Он доступен только
+заданию публикации в этом environment. Репозиторий должен
 разрешать GitHub Actions создавать pull requests: Settings → Actions → General →
 Workflow permissions → **Allow GitHub Actions to create and approve pull requests**.
 Workflow задаёт `contents: write`, `pull-requests: write`, `actions: write` только

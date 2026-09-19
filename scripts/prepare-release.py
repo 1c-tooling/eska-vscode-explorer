@@ -53,7 +53,7 @@ def prepare() -> None:
         body.write_text(
             f"Обновляет версию расширения до {version} и CHANGELOG.md по Conventional Commits.\n\n"
             "После слияния GitHub Actions проверит эту версию и создаст GitHub Release. "
-            "Публикация в Open VSX выполняется отдельным workflow.\n\n"
+            "Затем VSIX автоматически публикуется в Open VSX.\n\n"
             "Проверки этого commit запускаются отдельным workflow CI.\n", encoding="utf-8")
         run("gh", "pr", "create", "--repo", REPOSITORY, "--base", "main", "--head", branch,
             "--title", f"chore(release): Подготовлена версия {version}", "--body-file", str(body))
