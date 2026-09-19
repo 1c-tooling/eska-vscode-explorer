@@ -13,7 +13,8 @@ host VS Code. Bun используется для инструментов пр�
 bun install --frozen-lockfile --ignore-scripts
 bun run --bun check
 bun run --bun compile
-bun test
+mkdir -p ../eska-playground
+ESKA_TEST_ROOT="$(realpath ../eska-playground)" bun test
 ```
 
 Для проверки именно Node runtime после компиляции:
