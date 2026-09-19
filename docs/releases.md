@@ -16,7 +16,8 @@
 и прикрепляет его к Assets. Исходники берутся именно из тега `v<version>`, даже
 если в `main` уже есть новые изменения. Перед загрузкой проверяются содержимое
 архива, identity и версия. [Локальная упаковка VSIX](packaging.md); publisher — `1c-tooling`.
-Публикации в Marketplace, npm и Open VSX в этих workflow нет.
+Workflow `Release` не публикует в магазины. Для Open VSX добавлен
+отдельный ручной [Publish Open VSX](publishing.md); npm не используется.
 
 Release PR использует новую ветку `release/eska-explorer-<version>-<base>-<tree>`.
 Эта область имён зарезервирована за автоматизацией. Новый PR заменяет предыдущие

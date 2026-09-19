@@ -116,3 +116,34 @@ ESKA_TEST_BINARY="$(realpath ../eska/target/debug/eska)" \
 ESKA_TEST_ROOT="$(realpath ../eska-playground)" \
 VSCODE_EXECUTABLE=codium node test/run-host.mjs test/predefined-host.cjs
 ```
+
+## Проверка файлов рабочей области
+
+`test/workspace-files.test.mjs` проверяет разделение общих/проектных файлов,
+исключение исходников, ленивое чтение, инвалидацию снимков и циклы ссылок.
+Нативный сценарий использует собственный workspace с двумя проектами:
+
+```sh
+ESKA_TEST_BINARY="$(realpath ../eska/target/debug/eska)" \
+VSCODE_EXECUTABLE=codium node test/run-host.mjs test/workspace-host.cjs
+```
+
+Он проверяет открытие файлов, переход по горячей клавише, появление/удаление
+README, язык групп, ancestry метаданных, шесть переключений Git-веток и
+переподключение. Ветки создаются только внутри собственного fixture; второй
+проект должен сохранить кеш. Сборка 1С не нужна.
+
+## Управление глобальной CLI
+
+`installation.ts` отвечает за поиск, handshake и проверку официальных релизов,
+`backend-setup.ts` — за UI согласия, задачи установки и переподключение.
+Нативный runner добавляет тестовую ESKA в начало отдельного PATH и отключает
+фоновые обновления; пользовательская ESKA не меняется. `installation.test.mjs`
+проверяет приоритет PATH, stable-only релизы, JSON update и capabilities.
+`backend-setup.test.mjs` загружает скомпилированный UI-адаптер с фасадом VS Code
+и проверяет согласие/отказ, быстрое завершение задачи, ошибку и переподключение.
+Одинаковый набор из 57 тестов проверен в Node и Bun 1.4.2.
+
+После ревью 2026-09-19: 68 Node-тестов с реальным backend; отдельно проверены
+native shutdown и освобождение объектов за 20 подключений.
+Новые сценарии и ограничения замеров описаны в [отчёте MVP](mvp-review-linux.md).

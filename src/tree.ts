@@ -106,6 +106,9 @@ export class MetadataTree {
 
   /** In-flight deduplication prevents repeated expansion requests for the same branch. */
   children(entry: TreeEntry): Promise<TreeEntry[]> {
+    if (this.disposed || entry.project.nodes.get(nodeKey(entry.node.id)) !== entry) {
+      return Promise.reject(new ExplorerError("obsolete"));
+    }
     if (entry.children) return Promise.resolve(entry.children);
     if (entry.pending) return entry.pending;
     const pending = this.loadChildren(entry);
@@ -117,6 +120,7 @@ export class MetadataTree {
   /** Preserve server ordering and parent relationships, rejecting malformed sibling lists. */
   private async loadChildren(entry: TreeEntry): Promise<TreeEntry[]> {
     const result = await this.request(entry.project, "metadata/children", { node: entry.node.id, hideEmptyRootSections: false });
+    if (entry.project.nodes.get(nodeKey(entry.node.id)) !== entry) throw new ExplorerError("obsolete");
     if (!Array.isArray(result.nodes)) throw new ExplorerError("protocolInvalid");
     const nodes = result.nodes.map(parseNode);
     const keys = new Set<string>();
@@ -143,9 +147,10 @@ export class MetadataTree {
       if (this.disposed) throw new ExplorerError("obsolete");
       if (project.info.requiresReopen) throw new ExplorerError("obsolete");
       if (project.info.requiresRefresh && method !== "metadata/refresh") throw new ExplorerError("branchInvalid");
+      const generation = project.info.generation;
       try {
         const result = await this.connection.request(this.session.sessionId, method,
-          { ...params, projectId: project.info.projectId, generation: project.info.generation }, signal);
+          { ...params, projectId: project.info.projectId, generation }, signal);
         if (this.disposed) throw new ExplorerError("obsolete");
         if (!isRecord(result) || result.sessionId !== this.session.sessionId || result.projectId !== project.info.projectId
           || !isToken(result.generation) || !isToken(result.eventSequence)) throw new ExplorerError("protocolInvalid");
@@ -160,6 +165,8 @@ export class MetadataTree {
         return result;
       } catch (error) {
         if (error instanceof ExplorerError && error.domain === "stale_generation") {
+          // An ordered event already invalidated this snapshot; retry without triggering another refresh.
+          if (generation !== project.info.generation && !project.info.requiresRefresh && !project.info.requiresReopen) continue;
           await this.synchronize(project);
           if (method === "metadata/refresh") continue;
           this.recover(project, project.info.requiresReopen);
@@ -198,7 +205,15 @@ export class MetadataTree {
   private upsert(project: ProjectTree, node: MetadataNode): TreeEntry {
     const key = nodeKey(node.id);
     let entry = project.nodes.get(key);
-    if (entry) entry.node = node;
+    if (entry) {
+      entry.node = node;
+      // Empty branches have no expander: they will never load children again to prune old rows.
+      if (node.state === "empty") {
+        for (const child of entry.previousChildren) this.prune(child);
+        entry.children = [];
+        entry.previousChildren = entry.children;
+      }
+    }
     else {
       entry = { key: `${project.key}:${key}`, project, node, children: undefined, previousChildren: [], pending: undefined };
       project.nodes.set(key, entry);

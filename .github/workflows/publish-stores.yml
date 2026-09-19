@@ -1,0 +1,59 @@
+name: Publish Open VSX
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Existing GitHub release version, without v'
+        required: true
+        type: string
+      authentication:
+        description: 'Open VSX first publication requires token; OIDC needs registry setup'
+        required: true
+        default: token
+        type: choice
+        options: [oidc, token]
+      dry_run:
+        description: 'Validate the released VSIX without publishing'
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: eska-explorer-openvsx
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: github.repository == '1c-tooling/eska-vscode-explorer' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: openvsx
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install pinned Bun
+        run: bash scripts/install-tools.sh
+      - name: Install locked publishing tools
+        run: bun install --frozen-lockfile --ignore-scripts
+      - name: Validate or publish released VSIX
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ inputs.version }}
+          AUTHENTICATION: ${{ inputs.authentication }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          OVSX_PAT: ${{ secrets.OVSX_PAT }}
+        run: |
+          options=()
+          if [[ "$DRY_RUN" == false ]]; then
+            options+=(--publish)
+          fi
+          python3 scripts/publish-stores.py "$RELEASE_VERSION" \
+            --authentication "$AUTHENTICATION" "${options[@]}"

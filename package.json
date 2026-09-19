@@ -45,6 +45,7 @@
     "@types/node": "22.20.3",
     "@types/vscode": "1.109.0",
     "@vscode/vsce": "4.0.0",
+    "ovsx": "1.2.0",
     "typescript": "7.0.2"
   },
   "contributes": {
@@ -122,6 +123,11 @@
         "command": "eska.explorer.revealActiveFile",
         "title": "%revealActiveFile%",
         "category": "ESKA Explorer"
+      },
+      {
+        "command": "eska.explorer.checkUpdates",
+        "title": "%checkUpdates%",
+        "category": "ESKA Explorer"
       }
     ],
     "views": {
@@ -165,6 +171,11 @@
           "command": "eska.explorer.search",
           "when": "view == eska.explorer.projects",
           "group": "navigation@0"
+        },
+        {
+          "command": "eska.explorer.checkUpdates",
+          "when": "view == eska.explorer.projects",
+          "group": "connection@4"
         }
       ],
       "view/item/context": [
@@ -175,7 +186,7 @@
         },
         {
           "command": "eska.explorer.refreshNode",
-          "when": "view == eska.explorer.projects && (viewItem == eskaMetadata || viewItem == eskaCommonModule || viewItem == eskaModuleObject || viewItem == eskaForm || viewItem == eskaRootFiltered || viewItem == eskaRootUnfiltered)",
+          "when": "view == eska.explorer.projects && (viewItem == eskaFiles || viewItem == eskaMetadata || viewItem == eskaCommonModule || viewItem == eskaModuleObject || viewItem == eskaForm || viewItem == eskaRootFiltered || viewItem == eskaRootUnfiltered)",
           "group": "inline@2"
         },
         {
@@ -251,6 +262,12 @@
           "default": true,
           "scope": "resource",
           "description": "%hideEmptyRootGroups%"
+        },
+        "eska.explorer.checkForUpdates": {
+          "type": "boolean",
+          "default": true,
+          "scope": "window",
+          "description": "%checkForUpdates%"
         }
       }
     },
@@ -274,5 +291,18 @@
       }
     ]
   },
-  "publisher": "1c-tooling"
+  "publisher": "1c-tooling",
+  "homepage": "https://github.com/1c-tooling/eska-vscode-explorer#readme",
+  "bugs": {
+    "url": "https://github.com/1c-tooling/eska-vscode-explorer/issues"
+  },
+  "keywords": [
+    "1C",
+    "1С",
+    "BSL",
+    "Designer XML",
+    "eska",
+    "metadata"
+  ],
+  "icon": "resources/icon.png"
 }

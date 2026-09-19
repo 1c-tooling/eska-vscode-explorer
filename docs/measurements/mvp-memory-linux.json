@@ -1,0 +1,196 @@
+{
+  "passed": true,
+  "suite": "memory",
+  "vscode": "1.109.5",
+  "node": "22.21.1",
+  "method": "20 reconnects, 3808 rows per cycle, search index on 10 cycles; forced GC after disconnect",
+  "baseline": {
+    "rss": 161738752,
+    "heapTotal": 41041920,
+    "heapUsed": 26377396,
+    "external": 4148074,
+    "arrayBuffers": 0
+  },
+  "rounds": [
+    {
+      "round": 1,
+      "rss": 193105920,
+      "heapTotal": 59129856,
+      "heapUsed": 27406620,
+      "external": 4175196,
+      "arrayBuffers": 0,
+      "savedExpansionKeys": 3
+    },
+    {
+      "round": 2,
+      "rss": 194310144,
+      "heapTotal": 60440576,
+      "heapUsed": 27937876,
+      "external": 4175196,
+      "arrayBuffers": 0,
+      "savedExpansionKeys": 3
+    },
+    {
+      "round": 3,
+      "rss": 206307328,
+      "heapTotal": 71618560,
+      "heapUsed": 28526484,
+      "external": 4175196,
+      "arrayBuffers": 0,
+      "savedExpansionKeys": 3
+    },
+    {
+      "round": 4,
+      "rss": 206839808,
+      "heapTotal": 70569984,
+      "heapUsed": 27642132,
+      "external": 4163509,
+      "arrayBuffers": 0,
+      "savedExpansionKeys": 3
+    },
+    {
+      "round": 5,
+      "rss": 206893056,
+      "heapTotal": 71258112,
+      "heapUsed": 27187048,
+      "external": 4162075,
+      "arrayBuffers": 0,
+      "savedExpansionKeys": 3
+    },
+    {
+      "round": 6,
+      "rss": 207224832,
+      "heapTotal": 71258112,
+      "heapUsed": 27543388,
+      "external": 4162075,
+      "arrayBuffers": 0,
+      "savedExpansionKeys": 3
+    },
+    {
+      "round": 7,
+      "rss": 207044608,
+      "heapTotal": 72830976,
+      "heapUsed": 27955240,
+      "external": 4162075,
+      "arrayBuffers": 0,
+      "savedExpansionKeys": 3
+    },
+    {
+      "round": 8,
+      "rss": 207167488,
+      "heapTotal": 72830976,
+      "heapUsed": 28387588,
+      "external": 4162075,
+      "arrayBuffers": 0,
+      "savedExpansionKeys": 3
+    },
+    {
+      "round": 9,
+      "rss": 207806464,
+      "heapTotal": 36196352,
+      "heapUsed": 29129116,
+      "external": 4162075,
+      "arrayBuffers": 0,
+      "savedExpansionKeys": 3
+    },
+    {
+      "round": 10,
+      "rss": 207212544,
+      "heapTotal": 48779264,
+      "heapUsed": 29513380,
+      "external": 4162075,
+      "arrayBuffers": 0,
+      "savedExpansionKeys": 3
+    },
+    {
+      "round": 11,
+      "rss": 207491072,
+      "heapTotal": 35934208,
+      "heapUsed": 29938448,
+      "external": 4162075,
+      "arrayBuffers": 0,
+      "savedExpansionKeys": 3
+    },
+    {
+      "round": 12,
+      "rss": 207609856,
+      "heapTotal": 49303552,
+      "heapUsed": 30312860,
+      "external": 4162075,
+      "arrayBuffers": 0,
+      "savedExpansionKeys": 3
+    },
+    {
+      "round": 13,
+      "rss": 207720448,
+      "heapTotal": 54022144,
+      "heapUsed": 30720044,
+      "external": 4162075,
+      "arrayBuffers": 0,
+      "savedExpansionKeys": 3
+    },
+    {
+      "round": 14,
+      "rss": 207646720,
+      "heapTotal": 62148608,
+      "heapUsed": 31101696,
+      "external": 4162075,
+      "arrayBuffers": 0,
+      "savedExpansionKeys": 3
+    },
+    {
+      "round": 15,
+      "rss": 212172800,
+      "heapTotal": 76304384,
+      "heapUsed": 31520804,
+      "external": 4162075,
+      "arrayBuffers": 0,
+      "savedExpansionKeys": 3
+    },
+    {
+      "round": 16,
+      "rss": 212852736,
+      "heapTotal": 76566528,
+      "heapUsed": 31885732,
+      "external": 4162075,
+      "arrayBuffers": 0,
+      "savedExpansionKeys": 3
+    },
+    {
+      "round": 17,
+      "rss": 214114304,
+      "heapTotal": 38162432,
+      "heapUsed": 32921536,
+      "external": 4162075,
+      "arrayBuffers": 0,
+      "savedExpansionKeys": 3
+    },
+    {
+      "round": 18,
+      "rss": 214257664,
+      "heapTotal": 51531776,
+      "heapUsed": 33287828,
+      "external": 4162075,
+      "arrayBuffers": 0,
+      "savedExpansionKeys": 3
+    },
+    {
+      "round": 19,
+      "rss": 214126592,
+      "heapTotal": 38424576,
+      "heapUsed": 33677100,
+      "external": 4162075,
+      "arrayBuffers": 0,
+      "savedExpansionKeys": 3
+    },
+    {
+      "round": 20,
+      "rss": 214278144,
+      "heapTotal": 52580352,
+      "heapUsed": 34043864,
+      "external": 4162075,
+      "arrayBuffers": 0,
+      "savedExpansionKeys": 3
+    }
+  ]
+}

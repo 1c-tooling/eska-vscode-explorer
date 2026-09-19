@@ -15,7 +15,7 @@ async function until(predicate, message) {
 /** Backend labels identify fixture nodes independently of the configured display language. */
 function named(entries, label) {
   const entry = entries.find(entry => entry.node && (entry.node.label.kind === 'name'
-    ? entry.node.label.text : entry.node.label.translations['ru-RU']) === label);
+    ? entry.node.label.text : entry.node?.label.translations['ru-RU']) === label);
   assert.ok(entry, `Missing ${label}`);
   return entry;
 }

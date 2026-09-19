@@ -5,6 +5,7 @@ export const MAX_REQUEST = 1_048_576;
 export const MAX_RESPONSE = 67_108_864;
 
 export type FailureCode =
+  | "updateFailed" | "updateBusy" | "cliPathConflict"
   | "executableMissing" | "spawnFailed" | "connectionLost" | "protocolInvalid"
   | "handshakeFailed" | "timeout" | "resourceLimit" | "incompatible" | "manifestMissing"
   | "manifestInvalid" | "selectionInvalid" | "sourceInvalid" | "rootInvalid"
@@ -50,7 +51,7 @@ export function parseHandshake(value: unknown): string {
   if (apiVersion.major !== API_VERSION.major || !Number.isSafeInteger(apiVersion.minor)
     || (apiVersion.minor as number) < API_VERSION.minor || server.name !== "eska"
     || capabilities.designerXml !== true || capabilities.readOnly !== true
-    || capabilities.multiContext !== false) {
+    || capabilities.multiContext !== false || capabilities.search !== true || capabilities.clientFileEvents !== true) {
     throw new ExplorerError("incompatible");
   }
   if (typeof server.version !== "string" || !server.version

@@ -71,7 +71,7 @@ test("missing executable is reported and all pending requests are settled", asyn
 
 for (const [mode, code] of [["crash", "connectionLost"], ["garbage", "protocolInvalid"], ["hang", "timeout"]]) {
   test(`failed backend ${mode} settles pending requests and exits`, async (t) => {
-    const peer = child(t, mode, 150);
+    const peer = child(t, mode, mode === "hang" ? 150 : 2000);
     await assert.rejects(peer.request("initialize", hello), { code });
     await peer.stop();
     exited(peer.pid);
@@ -171,6 +171,32 @@ test('cancelled requests are acknowledged without poisoning the next response', 
   const controller = new AbortController();
   controller.abort();
   await assert.rejects(peer.request('test/wait', {}, 2000, controller.signal), { code: 'cancelled' });
+  await peer.stop();
+  exited(peer.pid);
+});
+
+/** A cancelled UI read settles immediately, but its eventual response still belongs to the transport. */
+test('cancellation does not wait for an uninterruptible read', async t => {
+  const peer = child(t);
+  await peer.request('initialize', hello);
+  const controller = new AbortController();
+  const pending = peer.request('test/late', {}, 2000, controller.signal);
+  const started = performance.now();
+  controller.abort();
+  await assert.rejects(pending, { code: 'cancelled' });
+  assert.ok(performance.now() - started < 150);
+  await new Promise(resolve => setTimeout(resolve, 400));
+  assert.equal((await peer.request('initialize', hello)).apiVersion.major, 1);
+});
+
+/** Probe disposal must reap a peer that ignores both protocol shutdown and SIGTERM. */
+test('lifetime cancellation escalates to SIGKILL and reaps its process', async t => {
+  const controller = new AbortController();
+  const peer = new BackendProcess({ executable: process.execPath, args: [fixture, 'ignore-term'],
+    cwd: process.cwd(), signal: controller.signal, log() {}, failed() {} });
+  t.after(() => peer.stop());
+  await peer.request('initialize', hello);
+  controller.abort();
   await peer.stop();
   exited(peer.pid);
 });

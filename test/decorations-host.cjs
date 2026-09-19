@@ -43,12 +43,12 @@ exports.run = async function () {
   /** Resolve a status through the same provider used by the native renderer. */
   const decoration = entry => explorer.decorations.provideFileDecoration(explorer.getTreeItem(entry).resourceUri);
   const [root] = await explorer.getChildren();
-  const catalogs = (await explorer.getChildren(root)).find(entry => entry.node.id.collection?.metadataKind === "catalog");
+  const catalogs = (await explorer.getChildren(root)).find(entry => entry.node?.id.collection?.metadataKind === "catalog");
   const objects = await explorer.getChildren(catalogs);
   const owner = objects.find(entry => entry.node.label.text === "Товары");
   const clean = objects.find(entry => entry.node.label.text === "Покупатели");
   const groups = await explorer.getChildren(owner);
-  const modules = groups.find(entry => entry.node.id.collection?.kind === "modules");
+  const modules = groups.find(entry => entry.node?.id.collection?.kind === "modules");
   const [module] = await explorer.getChildren(modules);
   await repository.status();
   assert.equal(await decoration(module), undefined);
@@ -76,7 +76,7 @@ exports.run = async function () {
     managerEntry = rows.find(entry => entry.node?.id.role === "manager");
     return managerEntry && (await decoration(managerEntry))?.badge === "U";
   }, "new untracked module");
-  const forms = (await explorer.getChildren(owner)).find(entry => entry.node.id.collection?.metadataKind === "form");
+  const forms = (await explorer.getChildren(owner)).find(entry => entry.node?.id.collection?.metadataKind === "form");
   const [form] = await explorer.getChildren(forms);
   const formRows = await explorer.getChildren(form);
   await fs.appendFile(formModule, "// modified form\n");

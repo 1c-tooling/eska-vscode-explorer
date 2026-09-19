@@ -22,6 +22,8 @@ def check(archive):
         shipped = json.loads(package.read('extension/package.json'))
         assert all(shipped.get(key) == value for key, value in manifest.items()), 'Packaged manifest differs'
         required = ['package.json', 'package.nls.json', 'package.nls.ru.json', 'README.md', 'CHANGELOG.md', 'LICENSE']
+        if manifest.get('icon'):
+            required.append(manifest['icon'])
         required += [path.relative_to(root).as_posix() for pattern in ['out/*.js', 'resources/icons/**/*.svg', 'docs/*.md', 'docs/measurements/*.json'] for path in root.glob(pattern)]
         # vsce publishes a LICENSE without an extension as LICENSE.txt.
         packaged = {name: 'extension/' + ('LICENSE.txt' if name == 'LICENSE' else name) for name in required}
