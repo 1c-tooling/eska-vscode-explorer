@@ -5,6 +5,7 @@ let input = Buffer.alloc(0);
 let initialized = false;
 let opening = 0;
 const cancellable = new Map();
+if (mode === "ignore-term") process.on("SIGTERM", () => {});
 
 /** Independent writer prevents transport tests from sharing the encoder under test. */
 function send(value) {
@@ -29,7 +30,7 @@ function handle(request) {
     cancellable.set(request.id, setTimeout(() => { cancellable.delete(request.id); ok('done'); }, 200));
     return;
   }
-  if (request.method === 'test/late') { setTimeout(() => ok('late'), 100); return; }
+  if (request.method === 'test/late') { setTimeout(() => ok('late'), 300); return; }
   if (mode === "hang") return;
   if (mode === "crash") process.exit(7);
   if (mode === "garbage") { process.stdout.write("ordinary command help\r\n\r\n"); return; }
@@ -54,7 +55,7 @@ function handle(request) {
       root: { kind: "object", objectId: "opaque-root" }, generation: "9007199254740993",
       eventSequence: "0", requiresRefresh: false, requiresReopen: false }] });
   } else if (request.method === "shutdown") {
-    if (mode !== "ignore-shutdown") ok(null);
+    if (mode !== "ignore-shutdown" && mode !== "ignore-term") ok(null);
   } else if (request.method === "exit") process.exit(0);
   else if (request.method === "test/crash") process.exit(9);
   else if (request.method === "test/noisy-crash") {

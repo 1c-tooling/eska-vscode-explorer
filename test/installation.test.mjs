@@ -1,8 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, writeFile, chmod, rm, realpath } from "node:fs/promises";
+import { mkdir, mkdtemp, writeFile, chmod, rm, realpath, readFile } from "node:fs/promises";
 import { join, resolve, delimiter } from "node:path";
-import { compareVersions, findGlobal, parseRelease, checkUpdate, assertCargoRelease } from "../out/installation.js";
+import { compareVersions, findGlobal, parseRelease, checkUpdate, assertCargoRelease, runProbe, fetchText } from "../out/installation.js";
 import { parseHandshake, API_VERSION, MAX_HEADER, MAX_REQUEST, MAX_RESPONSE } from "../out/protocol.js";
 
 /** Installation checks use only their own disposable prefix under the shared playground. */
@@ -32,9 +32,47 @@ test("global discovery preserves PATH priority and finds a newly installed user 
   const first = join(root, "first/bin"), second = join(root, ".eska/bin");
   for (const dir of [first, second]) { await mkdir(dir, { recursive: true }); await writeFile(join(dir, "eska"), "fixture"); await chmod(join(dir, "eska"), 0o755); }
   assert.equal(await findGlobal(first, root, "linux"), await realpath(join(first, "eska")));
+  await rm(join(first, "eska"));
+  await mkdir(join(first, "eska"));
+  assert.equal(await findGlobal(first, root, "linux"), await realpath(join(second, "eska")));
   assert.equal(await findGlobal(`.${delimiter}relative`, root, "linux"), await realpath(join(second, "eska")));
   await rm(join(second, "eska"));
   assert.equal(await findGlobal("", root, "linux"), undefined);
+});
+
+/** Read-only probes must not outlive either their deadline or extension deactivation. */
+test("read-only probes reap SIGTERM-resistant processes on timeout and cancellation", { skip: process.platform === "win32" }, async t => {
+  const root = await fixture(t);
+  for (const cancel of [false, true]) {
+    const pidFile = join(root, `probe-${cancel}.pid`);
+    const controller = new AbortController();
+    const pending = runProbe(process.execPath, ["-e", 'require("node:fs").writeFileSync(process.argv[1], String(process.pid)); process.on("SIGTERM",()=>{}); setInterval(()=>{},1000)', pidFile],
+      root, 3000, 1024, controller.signal);
+    const rejected = assert.rejects(pending);
+    let pid;
+    for (let attempt = 0; attempt < 400; attempt++) {
+      try { pid = Number(await readFile(pidFile, "utf8")); break; } catch { await new Promise(resolve => setTimeout(resolve, 5)); }
+    }
+    assert.ok(pid);
+    if (cancel) controller.abort();
+    await rejected;
+    assert.throws(() => process.kill(pid, 0), { code: "ESRCH" });
+  }
+});
+
+/** Oversized and interrupted downloads cannot reach an installer or leave the reader open. */
+test("downloads reject HTTP failures, oversized bodies and cancellation", async t => {
+  const original = globalThis.fetch;
+  t.after(() => { globalThis.fetch = original; });
+  let cancelled = false;
+  globalThis.fetch = async () => new Response(new ReadableStream({ cancel() { cancelled = true; } }), { status: 503 });
+  await assert.rejects(fetchText("https://example.invalid", 10), { code: "updateFailed" });
+  assert.equal(cancelled, true);
+  globalThis.fetch = async () => new Response("12345678901");
+  await assert.rejects(fetchText("https://example.invalid", 10), { code: "updateFailed" });
+  globalThis.fetch = async (_url, { signal }) => { signal.throwIfAborted(); return new Response("unused"); };
+  const controller = new AbortController(); controller.abort();
+  await assert.rejects(fetchText("https://example.invalid", 10, controller.signal));
 });
 
 test("native CLI update checks validate status, method and version before displaying an update", { skip: process.platform === "win32" }, async t => {

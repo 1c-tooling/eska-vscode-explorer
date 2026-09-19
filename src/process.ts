@@ -21,6 +21,7 @@ export interface ProcessOptions {
   log: DiagnosticLog;
   failed: (error: ExplorerError) => void;
   notification?: (method: string, params: unknown) => void;
+  signal?: AbortSignal;
 }
 
 /** Own one child and its pipes; every terminal condition settles all outstanding requests. */
@@ -41,6 +42,8 @@ export class BackendProcess {
   private stopReason = "none";
 
   constructor(private readonly options: ProcessOptions) {
+    if (options.signal?.aborted) throw new ExplorerError("cancelled");
+    const abort = (): void => { this.fail(new ExplorerError("cancelled")); };
     this.child = spawn(options.executable, options.args ?? ["ide", "--stdio"], {
       cwd: options.cwd, shell: false, windowsHide: true, stdio: "pipe",
     });
@@ -48,6 +51,7 @@ export class BackendProcess {
     this.closed = new Promise((resolve) => {
       this.child.once("close", (code, signal) => {
         this.ended = true;
+        options.signal?.removeEventListener("abort", abort);
         this.log("process_closed", { exitCode: code, signal, stopReason: this.stopReason,
           failure: this.failure?.code, receivedBytes: this.receivedBytes, stderrBytes: this.logBytes });
         if (this.logBytes > 16384) this.log("stderr_tail", { text: this.stderrTail.toString("utf8"), truncated: true });
@@ -90,6 +94,7 @@ export class BackendProcess {
       this.logBytes += chunk.length;
       if (remaining > 0 && this.logBytes > 16384) this.log("stderr_live_limit", { retainedTailBytes: 16384 });
     });
+    options.signal?.addEventListener("abort", abort, { once: true });
   }
 
   /** Correlate every event with the owned process; JSON encoding prevents multiline log injection. */
@@ -125,6 +130,7 @@ export class BackendProcess {
         const pending = this.pending.get(id);
         if (!pending || pending.cancelled) return;
         pending.cancelled = true;
+        pending.reject(new ExplorerError("cancelled"));
         try { this.notify("$/cancelRequest", { id }); }
         catch (error) { this.fail(error instanceof ExplorerError ? error : new ExplorerError("connectionLost")); }
       };

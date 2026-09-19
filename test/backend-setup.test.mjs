@@ -38,7 +38,7 @@ const vscode = {
 // Load the compiled adapter with a local VS Code facade, without modifying the process module loader.
 const backendRequire = createRequire(new URL("../out/backend-setup.js", import.meta.url));
 const adapter = { exports: {} };
-runInNewContext(`(function(require,module,exports){${readFileSync(new URL("../out/backend-setup.js", import.meta.url), "utf8")}\n})`)(
+runInNewContext(`(function(require,module,exports){${readFileSync(new URL("../out/backend-setup.js", import.meta.url), "utf8")}\n})`, { AbortController, AbortSignal })(
   name => name === "vscode" ? vscode : backendRequire(name), adapter, adapter.exports);
 const { BackendSetup } = adapter.exports;
 
@@ -106,4 +106,77 @@ test("bootstrap uses exactly the release approved by the user and disposes tempo
   ui.approved = true;
   await setup.check(true);
   assert.equal(queries, 1); assert.equal(disposed, 1); assert.equal(ui.errors.length, 0);
+});
+
+/** Await actual probe cleanup during deactivation instead of just sending an abort signal. */
+test("shutdown cancels and awaits an in-flight CLI probe without opening installation UI", async t => {
+  const { setup } = await fixture(t);
+  let started, cleaned;
+  const ready = new Promise(resolve => { started = resolve; });
+  replace(t, installation, "inspectGlobal", async (_log, signal) => {
+    started();
+    await new Promise(resolve => signal.addEventListener("abort", resolve, { once: true }));
+    await new Promise(resolve => { cleaned = resolve; });
+    return undefined;
+  });
+  const opening = setup.ensure();
+  await ready;
+  let stopped = false;
+  const shutdown = setup.shutdown().then(() => { stopped = true; });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(stopped, false);
+  cleaned();
+  await shutdown;
+  assert.equal(await opening, undefined);
+  assert.equal(ui.tasks.length, 0);
+});
+
+/** A closing editor must release its cross-window lock after the task reports termination. */
+test("shutdown waits for the installation task and removes its lock", async t => {
+  const { root, setup } = await fixture(t);
+  let started;
+  const ready = new Promise(resolve => { started = resolve; });
+  replace(t, installation, "inspectGlobal", async () => ({ path: join(root, "eska"), version: "0.11.0", compatible: true, selfUpdate: true }));
+  replace(t, installation, "checkUpdate", async () => ({ version: "0.11.1", method: "installer" }));
+  replace(t, vscode.tasks, "executeTask", async () => {
+    const execution = { terminate() {
+      setImmediate(() => { for (const listener of [...endListeners]) listener({ execution }); });
+    } };
+    started();
+    return execution;
+  });
+  ui.approved = true;
+  const updating = setup.check(true);
+  await ready;
+  await setup.shutdown();
+  await updating;
+  await assert.rejects(access(join(root, ".eska/.explorer-install.lock")));
+  assert.equal(processListeners.size + endListeners.size, 0);
+  assert.equal(ui.errors.length, 0);
+});
+
+/** Network checks have no authority to stop a working metadata connection. */
+test("network failure stays quiet in the background and never disconnects", async t => {
+  const { root, setup, events } = await fixture(t);
+  replace(t, installation, "inspectGlobal", async () => ({ path: join(root, "eska"), version: "0.11.0", compatible: true, selfUpdate: true }));
+  replace(t, installation, "checkUpdate", async () => { throw new Error("network unavailable"); });
+  await setup.check(false);
+  assert.deepEqual(events, []);
+  assert.equal(ui.tasks.length + ui.errors.length, 0);
+  await setup.check(true);
+  assert.equal(ui.errors.length, 1);
+  assert.deepEqual(events, []);
+});
+
+/** A successful installer exit cannot hide an older CLI shadowing the new binary in PATH. */
+test("an older copy remaining first in PATH prevents a false successful update", async t => {
+  const { root, setup, events } = await fixture(t);
+  replace(t, installation, "inspectGlobal", async () => ({ path: join(root, "first/eska"), version: "0.11.0", compatible: true, selfUpdate: true }));
+  replace(t, installation, "checkUpdate", async () => ({ version: "0.11.1", method: "installer" }));
+  ui.approved = true;
+  await setup.check(true);
+  assert.equal(ui.errors.length, 1);
+  assert.deepEqual(events, ["disconnect"]);
+  assert.equal(ui.tasks.length, 1);
+  await assert.rejects(access(join(root, ".eska/.explorer-install.lock")));
 });

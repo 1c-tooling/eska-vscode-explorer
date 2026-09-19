@@ -58,6 +58,7 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
   private selected: vscode.WorkspaceFolder | undefined;
   private attempted = false;
   private selecting = false;
+  private connecting: AbortController | undefined;
   private disposed = false;
   private stopping: Promise<void> | undefined;
 
@@ -74,7 +75,7 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
     for (const [name, action] of [
       ["connect", () => this.connect(true)],
       ["restart", () => this.connect(false)],
-      ["disconnect", () => this.connection.disconnect()],
+      ["disconnect", () => this.disconnect()],
       ["showLog", () => this.output.show(true)],
       ["checkUpdates", () => this.setup.check(true)],
       ["refresh", () => this.refresh()],
@@ -106,12 +107,12 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
     this.disposables.push(vscode.workspace.onDidChangeWorkspaceFolders(() => {
       if (this.selected && !this.folders().some((folder) => folder.uri.toString() === this.selected?.uri.toString())) {
         this.selected = undefined;
-        void this.connection.disconnect();
+        void this.disconnect();
       }
     }));
     this.disposables.push(vscode.workspace.onDidChangeConfiguration((event) => {
       if (event.affectsConfiguration("eska.explorer.executable", this.selected?.uri)) {
-        void this.connection.disconnect();
+        void this.disconnect();
       }
       if (event.affectsConfiguration("eska.explorer.hideEmptyRootGroups")) {
         void this.repaint(this.tree?.projects.flatMap((project) => project.root ? [project.root] : []));
@@ -434,9 +435,19 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
     }
   }
 
+  /** Invalidate preflight as well as the protocol connection so late probes cannot reconnect. */
+  private disconnect(): Promise<void> {
+    this.connecting?.abort();
+    this.selecting = false;
+    return this.connection.disconnect();
+  }
+
   /** Selection is explicit for unrelated multi-root folders; workspace members are opened by eska. */
   private async connect(choose: boolean): Promise<void> {
     if (this.disposed || this.selecting) return;
+    this.connecting?.abort();
+    const controller = new AbortController();
+    this.connecting = controller;
     this.attempted = true;
     this.selecting = true;
     try {
@@ -450,12 +461,13 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
           { placeHolder: this.text("choose"), ignoreFocusOut: true },
         ))?.folder;
       }
-      if (!folder || this.disposed) return;
+      if (!folder || this.disposed || controller.signal.aborted) return;
       if (!this.folders().some((value) => value.uri.toString() === folder.uri.toString())) return;
       assertHost(vscode.workspace.isTrusted, folder.uri.scheme, vscode.env.remoteName);
       this.selected = folder;
-      const global = await this.setup.ensure();
-      if (!global || this.disposed) return;
+      const global = await this.setup.ensure(controller.signal);
+      if (!global || this.disposed || controller.signal.aborted) return;
+      if (!this.folders().some(value => value.uri.toString() === folder.uri.toString())) return;
       const configured = vscode.workspace.getConfiguration("eska.explorer", folder.uri).get<string>("executable", "eska");
       const executable = configured === "eska" ? global : configured;
       // Release the picker guard before the asynchronous handshake, allowing disconnect/restart.
@@ -463,8 +475,8 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
       await this.connection.connect({ executable, path: folder.uri.fsPath, name: folder.name,
         locale: vscode.env.language.toLowerCase().startsWith("ru") ? "ru-RU" : "en-US" });
     } catch (error) {
-      this.showError(error instanceof ExplorerError ? error : new ExplorerError("spawnFailed"));
-    } finally { this.selecting = false; }
+      if (!controller.signal.aborted && !this.disposed) this.showError(error instanceof ExplorerError ? error : new ExplorerError("spawnFailed"));
+    } finally { if (this.connecting === controller) this.selecting = false; }
   }
 
   /** Read workspace folders afresh after pickers or asynchronous lifecycle operations. */
@@ -528,6 +540,7 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
   shutdown(): Promise<void> {
     if (!this.stopping) {
       this.disposed = true;
+      this.connecting?.abort();
       void vscode.commands.executeCommand("setContext", "eska.explorer.activeProject", false);
       void vscode.commands.executeCommand("setContext", "eska.explorer.connected", false);
       for (const disposable of this.disposables) disposable.dispose();
@@ -537,7 +550,7 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
       for (const watcher of this.watchers) watcher.dispose();
       this.view.dispose();
       this.changed.dispose();
-      this.stopping = this.connection.dispose().finally(() => this.output.dispose());
+      this.stopping = Promise.all([this.connection.dispose(), this.setup.shutdown()]).then(() => {}).finally(() => this.output.dispose());
     }
     return this.stopping;
   }

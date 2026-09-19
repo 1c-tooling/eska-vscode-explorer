@@ -1,19 +1,39 @@
 import { execFile } from "node:child_process";
-import { access, realpath, readFile, mkdtemp, writeFile, rm } from "node:fs/promises";
+import { access, realpath, readFile, mkdtemp, writeFile, rm, stat } from "node:fs/promises";
 import { constants } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { dirname, isAbsolute, join, delimiter } from "node:path";
-import { promisify } from "node:util";
 import { BackendProcess } from "./process.js";
 import { API_VERSION, ExplorerError, isRecord, parseHandshake } from "./protocol.js";
 import type { DiagnosticLog } from "./diagnostics.js";
 
-const execute = promisify(execFile);
 export const MIN_CLI_VERSION = "0.11.0";
 const RELEASES = "https://api.github.com/repos/1c-tooling/eska/releases";
 export interface GlobalCli { path: string; version: string; compatible: boolean; selfUpdate: boolean }
 export interface Release { version: string; installer: string }
 export interface InstallCommand { executable: string; args: string[]; cwd: string; env?: Record<string, string>; dispose(): Promise<void> }
+
+/** Read-only probes have a hard deadline; cancellation also waits until their child is reaped. */
+export async function runProbe(executable: string, args: string[], cwd: string, timeout: number,
+  maxBuffer: number, signal?: AbortSignal): Promise<{ stdout: string }> {
+  if (signal?.aborted) throw new ExplorerError("cancelled");
+  let closed: Promise<void> | undefined;
+  const result = new Promise<{ stdout: string }>((resolve, reject) => {
+    const child = execFile(executable, args, { cwd, timeout, maxBuffer, windowsHide: true,
+      killSignal: "SIGKILL" }, (error, stdout) => {
+      if (error) reject(error); else resolve({ stdout });
+    });
+    // Node 22 execFile does not forward killSignal to spawn's AbortSignal handler.
+    const abort = (): void => { child.kill("SIGKILL"); };
+    signal?.addEventListener("abort", abort, { once: true });
+    closed = new Promise(resolve => child.once("close", () => {
+      signal?.removeEventListener("abort", abort);
+      resolve();
+    }));
+  });
+  try { return await result; }
+  finally { await closed; }
+}
 
 /** Compare stable release triples, rejecting malformed output instead of interpreting arbitrary text. */
 export function compareVersions(left: string, right: string): number {
@@ -34,20 +54,23 @@ export async function findGlobal(paths = process.env.PATH ?? "", home = homedir(
   const directories = [...paths.split(delimiter).filter(isAbsolute), join(home, ".eska", "bin")];
   for (const directory of directories) {
     const candidate = join(directory, name);
-    try { await access(candidate, constants.X_OK); return await realpath(candidate); } catch { /* Continue to the next installation. */ }
+    try {
+      await access(candidate, constants.X_OK);
+      if ((await stat(candidate)).isFile()) return await realpath(candidate);
+    } catch { /* Continue to the next installation. */ }
   }
   return undefined;
 }
 
 /** Probe the global CLI independently of a development override, without opening or indexing a project. */
-export async function inspectGlobal(log: DiagnosticLog): Promise<GlobalCli | undefined> {
+export async function inspectGlobal(log: DiagnosticLog, signal?: AbortSignal): Promise<GlobalCli | undefined> {
   const path = await findGlobal();
   if (!path) return undefined;
-  const { stdout } = await execute(path, ["--version"], { cwd: homedir(), timeout: 10_000, maxBuffer: 64 * 1024, windowsHide: true });
+  const { stdout } = await runProbe(path, ["--version"], homedir(), 10_000, 64 * 1024, signal);
   const version = stdout.trim().replace(/^eska /, "");
   const result: GlobalCli = { path, version, compatible: false, selfUpdate: false };
   if (compareVersions(version, MIN_CLI_VERSION) < 0) return result;
-  const child = new BackendProcess({ executable: path, cwd: homedir(), log, failed() {} });
+  const child = new BackendProcess({ executable: path, cwd: homedir(), log, failed() {}, ...(signal ? { signal } : {}) });
   try {
     const hello = await child.request("initialize", { apiVersion: API_VERSION, client: { name: "eska-explorer", version: "probe" }, locale: "en-US" }, 10_000);
     parseHandshake(hello);
@@ -60,9 +83,14 @@ export async function inspectGlobal(log: DiagnosticLog): Promise<GlobalCli | und
 }
 
 /** Download a bounded official response; non-success HTTP statuses never become executable content. */
-export async function fetchText(url: string, limit: number): Promise<string> {
-  const response = await fetch(url, { headers: { "User-Agent": "eska-explorer", "Accept": "application/vnd.github+json" }, signal: AbortSignal.timeout(30_000) });
-  if (!response.ok || !response.body) throw new ExplorerError("updateFailed");
+export async function fetchText(url: string, limit: number, signal?: AbortSignal): Promise<string> {
+  const timeout = AbortSignal.timeout(30_000);
+  const response = await fetch(url, { headers: { "User-Agent": "eska-explorer", "Accept": "application/vnd.github+json" },
+    signal: signal ? AbortSignal.any([signal, timeout]) : timeout });
+  if (!response.ok || !response.body) {
+    await response.body?.cancel();
+    throw new ExplorerError("updateFailed");
+  }
   const reader = response.body.getReader();
   const chunks: Uint8Array[] = [];
   let size = 0;
@@ -90,11 +118,11 @@ export function parseRelease(value: unknown, platform = process.platform): Relea
 }
 
 /** Resolve the current stable published release, without downloading an installer yet. */
-export async function latestRelease(): Promise<Release> { return parseRelease(JSON.parse(await fetchText(`${RELEASES}/latest`, 2 * 1024 * 1024))); }
+export async function latestRelease(signal?: AbortSignal): Promise<Release> { return parseRelease(JSON.parse(await fetchText(`${RELEASES}/latest`, 2 * 1024 * 1024, signal))); }
 
 /** Native update JSON contains no localized text and is validated before use in the UI. */
-export async function checkUpdate(cli: GlobalCli): Promise<{ version: string | undefined; method: string }> {
-  const { stdout } = await execute(cli.path, ["update", "--check", "--format", "json"], { cwd: homedir(), timeout: 45_000, maxBuffer: 1024 * 1024, windowsHide: true });
+export async function checkUpdate(cli: GlobalCli, signal?: AbortSignal): Promise<{ version: string | undefined; method: string }> {
+  const { stdout } = await runProbe(cli.path, ["update", "--check", "--format", "json"], homedir(), 45_000, 1024 * 1024, signal);
   const result: unknown = JSON.parse(stdout);
   if (!isRecord(result) || result.schemaVersion !== 1 || !["up-to-date", "update-available"].includes(String(result.status))
     || !["cargo", "installer"].includes(String(result.method)) || typeof result.availableVersion !== "string") throw new ExplorerError("updateFailed");
@@ -111,7 +139,7 @@ export function assertCargoRelease(index: string, version: string): void {
 }
 
 /** Preserve Cargo options during the one-time bootstrap from releases without `eska update`. */
-export async function bootstrapCommand(cli: GlobalCli | undefined, release: Release): Promise<InstallCommand> {
+export async function bootstrapCommand(cli: GlobalCli | undefined, release: Release, signal?: AbortSignal): Promise<InstallCommand> {
   if (cli) {
     const root = dirname(dirname(cli.path));
     let metadata: unknown;
@@ -124,10 +152,10 @@ export async function bootstrapCommand(cli: GlobalCli | undefined, release: Rele
         || typeof entry.profile !== "string" || typeof entry.target !== "string"
         || typeof entry.all_features !== "boolean" || typeof entry.no_default_features !== "boolean"
         || !Array.isArray(entry.bins) || !entry.bins.includes(process.platform === "win32" ? "eska.exe" : "eska")) throw new ExplorerError("updateFailed");
-      const { stdout } = await execute("cargo", ["install", "--list", "--root", root], { cwd: root, timeout: 10_000, maxBuffer: 1024 * 1024, windowsHide: true });
+      const { stdout } = await runProbe("cargo", ["install", "--list", "--root", root], root, 10_000, 1024 * 1024, signal);
       if (!stdout.split(/\r?\n/).includes(`eska v${cli.version}:`)) throw new ExplorerError("updateFailed");
       // A GitHub release can appear before its Cargo publication; never silently switch channels.
-      assertCargoRelease(await fetchText("https://index.crates.io/es/ka/eska", 4 * 1024 * 1024), release.version);
+      assertCargoRelease(await fetchText("https://index.crates.io/es/ka/eska", 4 * 1024 * 1024, signal), release.version);
       const args = ["install", "eska", "--locked", "--registry", "crates-io", "--version", release.version, "--root", root, "--profile", entry.profile, "--target", entry.target];
       if (entry.all_features === true) args.push("--all-features");
       if (entry.no_default_features === true) args.push("--no-default-features");
@@ -139,7 +167,7 @@ export async function bootstrapCommand(cli: GlobalCli | undefined, release: Rele
   try {
     const windows = process.platform === "win32";
     const file = join(folder, windows ? "install.ps1" : "install.sh");
-    await writeFile(file, await fetchText(release.installer, 2 * 1024 * 1024), { mode: 0o600 });
+    await writeFile(file, await fetchText(release.installer, 2 * 1024 * 1024, signal), { mode: 0o600 });
     return { executable: windows ? "powershell.exe" : "/bin/sh", args: windows ? ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", file] : [file],
       cwd: homedir(), env: { ESKA_INSTALL_DIR: join(homedir(), ".eska", "bin"), ESKA_NO_MODIFY_PATH: "", INSTALLER_NO_MODIFY_PATH: "", ESKA_UNMANAGED_INSTALL: "" },
       async dispose() { await rm(folder, { recursive: true, force: true }); } };

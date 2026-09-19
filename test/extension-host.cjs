@@ -32,6 +32,19 @@ exports.run = async function () {
   const { addCommonModules } = await import("./fixture.mjs");
   await addCommonModules(fixture);
   const explorer = await extension.activate();
+  await vscode.commands.executeCommand('eska.explorer.disconnect');
+  // Disconnect must also invalidate preflight, before Connection owns a child.
+  const ensure = explorer.setup.ensure.bind(explorer.setup);
+  let releaseProbe;
+  explorer.setup.ensure = () => new Promise(resolve => { releaseProbe = resolve; });
+  const opening = vscode.commands.executeCommand('eska.explorer.connect');
+  await until(() => releaseProbe, 'preflight started');
+  await vscode.commands.executeCommand('eska.explorer.disconnect');
+  releaseProbe(process.env.ESKA_TEST_BINARY);
+  await opening;
+  assert.equal(explorer.connection.state.kind, 'disconnected');
+  assert.equal(explorer.connection.child, undefined);
+  explorer.setup.ensure = ensure;
   await vscode.commands.executeCommand('eska.explorer.connect');
   await vscode.commands.executeCommand('eska.explorer.projects.focus');
   assert.equal(explorer.status.text, `ESKA v${explorer.connection.state.version}`);
@@ -145,7 +158,7 @@ exports.run = async function () {
   await until(() => goods.project.info.generation !== generation, 'external file watcher invalidation');
   const updatedGroups = await explorer.getChildren(goods);
   named(await explorer.getChildren(named(updatedGroups, 'Реквизиты')), 'НовыйАртикул');
-  assert.equal(explorer.view.selection[0].key, selected, 'unrelated selection retained');
+  await until(() => explorer.view.selection[0]?.key === selected, 'unrelated selection retained after native refresh');
   assert.equal(explorer.getTreeItem(named(updatedGroups, 'Модули')).collapsibleState, vscode.TreeItemCollapsibleState.Collapsed);
 
   const beforeBroken = goods.project.info.generation;

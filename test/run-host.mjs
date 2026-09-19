@@ -69,7 +69,14 @@ try {
   try {
     const result = JSON.parse(await readFile(join(fixture.root, "host-result.json"), "utf8"));
     if (result.passed !== true) throw new Error("Acceptance result did not pass");
+    for (const pid of result.shutdownPids ?? []) {
+      try { process.kill(pid, 0); }
+      catch (error) { if (error.code === "ESRCH") continue; throw error; }
+      // Only a PID recorded by this fixture is eligible for cleanup after a failed shutdown check.
+      process.kill(pid, "SIGKILL");
+      throw new Error(`Backend ${pid} survived native host shutdown`);
+    }
     console.log(JSON.stringify(result));
   }
-  catch { throw new Error(`Extension host did not report success\n${output}`); }
+  catch (error) { throw new Error(`Extension host did not report success: ${error.message}\n${output}`); }
 } finally { await rm(root, { recursive: true, force: true }); }
