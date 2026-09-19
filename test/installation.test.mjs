@@ -46,12 +46,16 @@ test("read-only probes reap SIGTERM-resistant processes on timeout and cancellat
   for (const cancel of [false, true]) {
     const pidFile = join(root, `probe-${cancel}.pid`);
     const controller = new AbortController();
-    const pending = runProbe(process.execPath, ["-e", 'require("node:fs").writeFileSync(process.argv[1], String(process.pid)); process.on("SIGTERM",()=>{}); setInterval(()=>{},1000)', pidFile],
+    const pending = runProbe(process.execPath, ["-e", 'process.on("SIGTERM",()=>{}); require("node:fs").writeFileSync(process.argv[1], String(process.pid)); setInterval(()=>{},1000)', pidFile],
       root, 3000, 1024, controller.signal);
     const rejected = assert.rejects(pending);
     let pid;
     for (let attempt = 0; attempt < 400; attempt++) {
-      try { pid = Number(await readFile(pidFile, "utf8")); break; } catch { await new Promise(resolve => setTimeout(resolve, 5)); }
+      try {
+        pid = Number(await readFile(pidFile, "utf8"));
+        if (Number.isSafeInteger(pid) && pid > 0) break;
+      } catch { /* The child has not created its readiness file yet. */ }
+      await new Promise(resolve => setTimeout(resolve, 5));
     }
     assert.ok(pid);
     if (cancel) controller.abort();
