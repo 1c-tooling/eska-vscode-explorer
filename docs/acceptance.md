@@ -130,3 +130,35 @@ ESKA_BSL_EXTENSION=/absolute/path/to/installed/bsl-analyzer-extension \
 ESKA_BSL_BINARY="$(command -v bsl-analyzer-app)" \
 VSCODE_EXECUTABLE=codium node test/run-host.mjs test/compatibility-host.cjs
 ```
+
+## Реальная установка CLI на Linux — 2026-09-19
+
+Проверка выполнялась на Linux x86-64 через `bootstrapCommand` и `inspectGlobal`
+из скомпилированного production-кода расширения. Использованы официальные
+`eska-installer.sh` из GitHub Assets релизов 0.10.1 и 0.11.0.
+SHA-256 установщика 0.11.0:
+`eab7659fc01519f04f4218cfc7565ce8911805fee9a92e512d20d600559d054f`.
+
+| Сценарий | Результат |
+| --- | --- |
+| Чистая установка 0.11.0 | Успех; глобальная CLI найдена, IDE handshake принят |
+| Определение установленной 0.10.1 | Версия распознана, совместимость отклонена |
+| Bootstrap 0.10.1 → 0.11.0 | Успех; каталог сохранён, новая CLI совместима |
+| PATH | В тестовом `.profile` добавлено подключение `.eska/bin/env` |
+| Receipt | Версия 0.11.0, `install_layout: flat`, prefix = тестовый `~/.eska/bin` |
+| `selfUpdate` опубликованной 0.11.0 | Отсутствует, корректно распознано как false |
+
+Для каждого сценария создан отдельный временный home в соседнем
+`eska-playground`; HOME/XDG_CONFIG_HOME заданы только дочернему процессу.
+PATH ограничен системными утилитами, поиск установленной CLI использовал fallback
+`~/.eska/bin`. После проверки временные каталоги удалены. Пользовательская ESKA,
+настройки оболочки и большая конфигурация не изменялись.
+
+Полный вызов `eska update` с настоящей сменой версии не подтверждён.
+Опубликованная 0.11.0 ещё не содержит команду. Текущая debug-сборка, скопированная
+только в тестовую установку с настоящим receipt, вернула на `update --check
+--format json` код 1 и `{"schemaVersion":1,"status":"error","code":"network"}`.
+GitHub API отвечал HTTP 403, при этом скачивание Assets работало.
+
+Здесь проверен реальный subprocess установщика, без нативного UI VS Code Tasks.
+Cargo-обновление, полное self-update и Windows/macOS требуют отдельной приёмки.
