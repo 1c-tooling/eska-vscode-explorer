@@ -6,7 +6,7 @@
 Расширение работает с **Designer XML** через [eska CLI](https://github.com/1c-tooling/eska).
 Поддерживает конфигурации, расширения конфигураций, внешние отчёты и обработки.
 
-[Установка](#установка) · [Горячие клавиши](#горячие-клавиши) · [Настройки](#настройки) · [Подробное руководство](docs/usage.md)
+[Установка](#установка) · [Горячие клавиши](#горячие-клавиши) · [Настройки](#настройки) · [Подробное руководство](https://github.com/1c-tooling/eska-vscode-explorer/blob/main/docs/usage.md)
 
 ## Возможности
 
@@ -53,13 +53,13 @@
 В редакторе откройте **Расширения → … → Установить из VSIX…** и выберите файл.
 
 Идентификатор расширения — `1c-tooling.eska-explorer`.
-Подробности установки и проверки пакета — в [инструкции VSIX](docs/packaging.md).
+Подробности установки и проверки пакета — в [инструкции VSIX](https://github.com/1c-tooling/eska-vscode-explorer/blob/main/docs/packaging.md).
 
 ### 3. Откройте проект
 
 Откройте папку с `eska.toml`, предоставьте доверие рабочей области и раскройте
 **ESKA: 1C Explorer** в проводнике. Если `eska.toml` ещё нет, настройте проект
-через `eska init`: [инструкция подготовки проекта](docs/setup.ru.md).
+через `eska init`: [инструкция подготовки проекта](https://github.com/1c-tooling/eska-vscode-explorer/blob/main/docs/setup.ru.md).
 
 При успешном подключении справа в строке состояния появится `ESKA v<версия>`.
 Из нескольких независимых папок редактора выбирается одна; при открытии
@@ -103,7 +103,7 @@ ESKA: 1C Explorer
 
 Папки читаются при раскрытии. `Ctrl+K`, затем `E` (на macOS `Cmd+K`, затем `E`)
 находит в дереве также настройки и другие файлы.
-[Правила группировки](docs/usage.md#файлы-рабочей-области).
+[Правила группировки](https://github.com/1c-tooling/eska-vscode-explorer/blob/main/docs/usage.md#файлы-рабочей-области).
 
 ## Навигация по исходникам
 
@@ -209,7 +209,7 @@ CLI с поддержкой самообновления вызывается ч
 первое обновление выполняется через Cargo либо официальный установщик.
 Для Cargo сохраняются прежний каталог и параметры установки; ошибка Cargo
 не вызывает переход на установщик. После успешного обновления Explorer
-переподключается. Подробности и ограничения — [управление CLI](docs/cli-management.md).
+переподключается. Подробности и ограничения — [управление CLI](https://github.com/1c-tooling/eska-vscode-explorer/blob/main/docs/cli-management.md).
 
 Перед открытием проекта проверяются минимальная версия CLI **0.11.0**, версия
 IDE API и обязательные возможности дерева, поиска и уведомлений о файлах.
@@ -245,11 +245,12 @@ IDE API и обязательные возможности дерева, пои�
 
 ## Документация и разработка
 
-- [Подробное руководство по дереву, поиску и диагностике](docs/usage.md)
-- [Настройка проекта](docs/setup.ru.md)
-- [Установка, упаковка и проверка VSIX](docs/packaging.md)
-- [Разработка и тестирование](docs/development.md)
-- [Автоматизация релизов](docs/releases.md)
+- [Подробное руководство по дереву, поиску и диагностике](https://github.com/1c-tooling/eska-vscode-explorer/blob/main/docs/usage.md)
+- [Настройка проекта](https://github.com/1c-tooling/eska-vscode-explorer/blob/main/docs/setup.ru.md)
+- [Установка, упаковка и проверка VSIX](https://github.com/1c-tooling/eska-vscode-explorer/blob/main/docs/packaging.md)
+- [Разработка и тестирование](https://github.com/1c-tooling/eska-vscode-explorer/blob/main/docs/development.md)
+- [Автоматизация релизов](https://github.com/1c-tooling/eska-vscode-explorer/blob/main/docs/releases.md)
+- [Marketplace и Open VSX](https://github.com/1c-tooling/eska-vscode-explorer/blob/main/docs/publishing.md)
 
 ## Лицензия
 

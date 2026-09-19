@@ -45,6 +45,7 @@
     "@types/node": "22.20.3",
     "@types/vscode": "1.109.0",
     "@vscode/vsce": "4.0.0",
+    "ovsx": "1.2.0",
     "typescript": "7.0.2"
   },
   "contributes": {
@@ -290,5 +291,18 @@
       }
     ]
   },
-  "publisher": "1c-tooling"
+  "publisher": "1c-tooling",
+  "homepage": "https://github.com/1c-tooling/eska-vscode-explorer#readme",
+  "bugs": {
+    "url": "https://github.com/1c-tooling/eska-vscode-explorer/issues"
+  },
+  "keywords": [
+    "1C",
+    "1С",
+    "BSL",
+    "Designer XML",
+    "eska",
+    "metadata"
+  ],
+  "icon": "resources/icon.png"
 }

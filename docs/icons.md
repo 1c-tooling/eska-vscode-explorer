@@ -90,3 +90,9 @@
 `managed-application`, `ordinary-application`, `session`, `external-connection`,
 `command`) используют `module.svg`; роль различается подписью. Общий модуль
 как объект использует `common-module.svg`.
+
+## Иконка магазина
+
+`resources/icon.png` — общий логотип 1c-tooling, перенесённый из
+`assets/1c-tooling-logo.png` сайта проекта. PNG включён в VSIX отдельно от SVG
+метаданных и указан в поле `icon` манифеста.

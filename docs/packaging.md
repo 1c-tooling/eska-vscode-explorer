@@ -37,7 +37,7 @@ python3 scripts/check-vsix.py eska-explorer-0.0.1.vsix
 Закреплён официальный `@vscode/vsce` 4.0.0; компилятор и упаковщик запускаются через
 Bun. `--no-dependencies` допустим, поскольку у расширения нет runtime dependencies;
 backend устанавливается отдельно. При появлении такой зависимости пересмотрите
-упаковку. `.vscodeignore` разрешает только runtime JS, NLS, документацию, LICENSE и SVG.
+упаковку. `.vscodeignore` разрешает только runtime JS, NLS, документацию, LICENSE, SVG и PNG-иконку магазина.
 В пакет не входят node_modules, TS, тесты, карты исходников, стенды и Git-файлы.
 `check-vsix.py` проверяет identity, ZIP CRC, полный список и байты ресурсов.
 
