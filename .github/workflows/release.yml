@@ -19,6 +19,8 @@ jobs:
     if: github.repository == '1c-tooling/eska-vscode-explorer' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
+    outputs:
+      version: ${{ steps.publish.outputs.version }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
@@ -42,6 +44,7 @@ jobs:
           KNOPE_TEST_BINARY="$(command -v knope)" \
             python3 -m unittest discover -s test -p '*_test.py'
       - name: Publish the prepared version
+        id: publish
         env:
           GITHUB_TOKEN: ${{ github.token }}
           GH_TOKEN: ${{ github.token }}
@@ -58,8 +61,21 @@ jobs:
             git fetch origin --tags
           fi
           python3 scripts/release-vsix.py "$version"
+          printf 'version=%s\n' "$version" >> "$GITHUB_OUTPUT"
       - name: Prepare the next release PR
         env:
           GITHUB_TOKEN: ${{ github.token }}
           GH_TOKEN: ${{ github.token }}
         run: python3 scripts/prepare-release.py
+
+  openvsx:
+    needs: release
+    if: needs.release.outputs.version != ''
+    permissions:
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/publish-stores.yml
+    with:
+      version: ${{ needs.release.outputs.version }}
+      authentication: token
+      dry_run: false

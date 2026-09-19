@@ -8,6 +8,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 import zipfile
+from urllib.error import HTTPError
 from release_test import load, ROOT
 
 
@@ -17,6 +18,10 @@ class StoreTests(unittest.TestCase):
     def setUp(self):
         """Create an owned fixture and mock only external process boundaries."""
         self.module = load("publish-stores")
+        self.read_remote_digest = self.module.remote_digest
+        remote = patch.object(self.module, "remote_digest", return_value=None)
+        self.remote = remote.start()
+        self.addCleanup(remote.stop)
         directory = tempfile.TemporaryDirectory(prefix="explorer-stores-", dir=Path(os.environ.get("ESKA_TEST_ROOT", ROOT.parent / "eska-playground")))
         self.addCleanup(directory.cleanup)
         self.root = Path(directory.name)
@@ -95,3 +100,42 @@ class StoreTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 self.module.publish("0.1.0", "token", False)
             publish.assert_not_called()
+
+    def test_release_push_and_identical_retry(self):
+        """A release push uploads once; an identical existing package needs no upload or token."""
+        os.environ["GITHUB_EVENT_NAME"] = "push"
+        with patch.dict(os.environ, {"OVSX_PAT": "secret"}), patch.object(self.module, "run", side_effect=self.forge), patch.object(self.module.subprocess, "run") as publish:
+            self.module.publish("0.1.0", "token", False)
+            publish.assert_called_once()
+            publish.reset_mock()
+            self.remote.return_value = self.asset["digest"]
+            self.module.publish("0.1.0", "token", False)
+            publish.assert_not_called()
+            self.remote.return_value = "sha256:different"
+            with self.assertRaises(ValueError):
+                self.module.publish("0.1.0", "token", False)
+            publish.assert_not_called()
+
+    def test_pull_request_cannot_publish(self):
+        """Even a matching repository and ref cannot authorize a PR-triggered publication."""
+        os.environ["GITHUB_EVENT_NAME"] = "pull_request"
+        with patch.object(self.module, "run") as run:
+            with self.assertRaises(RuntimeError):
+                self.module.publish("0.1.0", "token", False)
+            run.assert_not_called()
+
+    def test_remote_lookup_distinguishes_missing_from_errors(self):
+        """API/network errors and inaccessible existing packages never become a fresh upload."""
+        for status in (404, 403, 429, 500):
+            with self.subTest(status=status), patch.object(self.module, "urlopen", side_effect=HTTPError("https://open-vsx.org", status, "error", {}, None)):
+                if status == 404:
+                    self.assertIsNone(self.read_remote_digest("0.1.0"))
+                else:
+                    with self.assertRaises(HTTPError):
+                        self.read_remote_digest("0.1.0")
+        metadata = {"namespace": "1c-tooling", "name": "eska-explorer", "version": "0.1.0", "targetPlatform": "universal"}
+        with patch.object(self.module, "urlopen", side_effect=[io.BytesIO(json.dumps(metadata).encode()), io.BytesIO(self.payload)]):
+            self.assertEqual(self.read_remote_digest("0.1.0"), self.asset["digest"])
+        with patch.object(self.module, "urlopen", side_effect=[io.BytesIO(json.dumps(metadata).encode()), HTTPError("https://open-vsx.org", 404, "error", {}, None)]):
+            with self.assertRaises(HTTPError):
+                self.read_remote_digest("0.1.0")
