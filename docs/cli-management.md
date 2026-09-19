@@ -37,7 +37,8 @@ minor не ниже 0, Designer XML, read-only API, отсутствие multi-c
 Для старого CLI без `selfUpdate` первое обновление выполняется прежним способом:
 Cargo определяется по реальному каталогу бинарника, `.crates2.json` и
 `cargo install --list --root <root>`. Сохраняются root, target, profile и features;
-предложенная версия должна быть опубликована также в crates.io. Ошибка Cargo
+предложенная версия должна быть опубликована также в официальном sparse index
+crates.io (`index.crates.io`), без отметки yanked. Web API crates.io не требуется. Ошибка Cargo
 не переключает установку на готовый бинарник. Для прочих установок используется
 официальный установщик в `~/.eska/bin`, затем повторно проверяется PATH.
 

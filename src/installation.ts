@@ -102,6 +102,14 @@ export async function checkUpdate(cli: GlobalCli): Promise<{ version: string | u
   return { version: result.status === "update-available" ? result.availableVersion : undefined, method: String(result.method) };
 }
 
+/** Validate the selected release against Cargo's index without depending on the crates.io web API. */
+export function assertCargoRelease(index: string, version: string): void {
+  compareVersions(version, MIN_CLI_VERSION);
+  const entries: unknown[] = index.split(/\r?\n/).filter(line => line.trim()).map(line => JSON.parse(line));
+  if (!entries.some(entry => isRecord(entry) && entry.name === "eska" && entry.vers === version
+    && entry.yanked === false && (entry.v === undefined || entry.v === 1 || entry.v === 2))) throw new ExplorerError("updateFailed");
+}
+
 /** Preserve Cargo options during the one-time bootstrap from releases without `eska update`. */
 export async function bootstrapCommand(cli: GlobalCli | undefined, release: Release): Promise<InstallCommand> {
   if (cli) {
@@ -119,8 +127,7 @@ export async function bootstrapCommand(cli: GlobalCli | undefined, release: Rele
       const { stdout } = await execute("cargo", ["install", "--list", "--root", root], { cwd: root, timeout: 10_000, maxBuffer: 1024 * 1024, windowsHide: true });
       if (!stdout.split(/\r?\n/).includes(`eska v${cli.version}:`)) throw new ExplorerError("updateFailed");
       // A GitHub release can appear before its Cargo publication; never silently switch channels.
-      const published: unknown = JSON.parse(await fetchText(`https://crates.io/api/v1/crates/eska/${release.version}`, 1024 * 1024));
-      if (!isRecord(published) || !isRecord(published.version) || published.version.num !== release.version || published.version.yanked !== false) throw new ExplorerError("updateFailed");
+      assertCargoRelease(await fetchText("https://index.crates.io/es/ka/eska", 4 * 1024 * 1024), release.version);
       const args = ["install", "eska", "--locked", "--registry", "crates-io", "--version", release.version, "--root", root, "--profile", entry.profile, "--target", entry.target];
       if (entry.all_features === true) args.push("--all-features");
       if (entry.no_default_features === true) args.push("--no-default-features");

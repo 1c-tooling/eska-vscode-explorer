@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, writeFile, chmod, rm, realpath } from "node:fs/promises";
 import { join, resolve, delimiter } from "node:path";
-import { compareVersions, findGlobal, parseRelease, checkUpdate } from "../out/installation.js";
+import { compareVersions, findGlobal, parseRelease, checkUpdate, assertCargoRelease } from "../out/installation.js";
 import { parseHandshake, API_VERSION, MAX_HEADER, MAX_REQUEST, MAX_RESPONSE } from "../out/protocol.js";
 
 /** Installation checks use only their own disposable prefix under the shared playground. */
@@ -59,4 +59,18 @@ test("compatible API major still requires search and file-event support", () => 
     limits: { maxHeaderBytes: MAX_HEADER, maxRequestBytes: MAX_REQUEST, maxResponseBytes: MAX_RESPONSE } };
   assert.equal(parseHandshake(hello), "0.11.0");
   for (const capability of ["search", "clientFileEvents"]) assert.throws(() => parseHandshake({ ...hello, capabilities: { ...hello.capabilities, [capability]: false } }), { code: "incompatible" });
+});
+
+/** Yanked, unpublished and future-schema entries cannot approve a Cargo installation. */
+test("Cargo publication is read from the sparse index and rejects unusable entries", () => {
+  const index = [
+    { name: "eska", vers: "0.11.1", yanked: false },
+    { name: "eska", vers: "0.11.2", yanked: true },
+    { name: "eska", vers: "0.11.3", yanked: false, v: 3 },
+    { name: "other", vers: "0.11.4", yanked: false },
+  ].map(entry => JSON.stringify(entry)).join("\n") + "\n";
+  assert.doesNotThrow(() => assertCargoRelease(index, "0.11.1"));
+  for (const version of ["0.11.2", "0.11.3", "0.11.4", "0.11.5", "0.11.1-rc.1"]) assert.throws(() => assertCargoRelease(index, version));
+  assert.throws(() => assertCargoRelease("broken", "0.11.1"));
+  assert.throws(() => assertCargoRelease("", "0.11.1"));
 });
