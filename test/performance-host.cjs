@@ -84,6 +84,7 @@ exports.run = async function () {
     }
     const [, indexMs] = await timed(async () => {
       await vscode.commands.executeCommand('eska.explorer.search');
+      explorer.searchView.picker.ignoreFocusOut = true;
       await until(() => explorer.searchView.session.snapshot.projects[0]?.progress?.state === 'ready', 'index complete');
     });
     const search = explorer.searchView;
@@ -101,12 +102,20 @@ exports.run = async function () {
       await vscode.commands.executeCommand('eska.explorer.refreshNode', report);
       await explorer.getChildren(report);
     });
+    const [, fullRefreshMs] = await timed(() => explorer.tree.refresh(root.project));
+    const [, reindexMs] = await timed(() => until(async () =>
+      (await explorer.tree.request(root.project, 'metadata/index', { action: 'status' })).progress.state === 'ready', 'reindex complete'));
+    const beforeIdle = await fs.readFile(`/proc/${pid}/status`, 'utf8');
+    await new Promise(resolve => setTimeout(resolve, 500));
+    const afterIdle = await fs.readFile(`/proc/${pid}/status`, 'utf8');
+    const switches = text => Number(text.match(/^voluntary_ctxt_switches:\s+(\d+)/m)[1]);
+    const idleWakeups = switches(afterIdle) - switches(beforeIdle);
     const backendMemory = await memory(pid), hostMemory = await memory(process.pid);
     await vscode.commands.executeCommand('eska.explorer.disconnect');
     await until(async () => { try { await fs.stat(`/proc/${pid}`); return false; } catch (error) { if (error.code === 'ENOENT') return true; throw error; } }, 'backend stopped', 10000);
     await vscode.commands.executeCommand('workbench.action.closeAllEditors');
     rounds.push({ connect, rootMs, sectionsMs, modulesMs, templatesMs, warmRoot, selections, source, filters,
-      indexMs, searchMs, queryMs, refreshMs, backendMemory, hostMemory, afterDisconnect: await memory(process.pid) });
+      indexMs, searchMs, queryMs, refreshMs, fullRefreshMs, reindexMs, idleWakeups, backendMemory, hostMemory, afterDisconnect: await memory(process.pid) });
   }
   const result = { passed: true, suite: 'performance', vscode: vscode.version, node: process.versions.node,
     diskCache: 'existing cache retained; fresh backend per round; OS cache not flushed', rounds };
