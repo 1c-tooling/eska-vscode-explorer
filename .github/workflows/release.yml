@@ -35,10 +35,10 @@ jobs:
           bun install --frozen-lockfile --ignore-scripts
           bun run --bun check
           bun run --bun compile
+          mkdir -p ../eska-playground
+          export ESKA_TEST_ROOT="$(realpath ../eska-playground)"
           bun test
           knope --validate
-          mkdir -p ../eska-playground
-          ESKA_TEST_ROOT="$(realpath ../eska-playground)" \
           KNOPE_TEST_BINARY="$(command -v knope)" \
             python3 -m unittest discover -s test -p '*_test.py'
       - name: Publish the prepared version
