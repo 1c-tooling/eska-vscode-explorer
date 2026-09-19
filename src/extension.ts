@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { BackendSetup } from "./backend-setup.js";
 import { GitDecorations } from "./decorations.js";
 import { revealFile, relativeFile } from "./reveal.js";
 import { iconName } from "./icons.js";
@@ -39,6 +40,7 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
   private readonly decorations = new GitDecorations();
   private readonly output = vscode.window.createOutputChannel("ESKA Explorer", { log: true });
   private readonly connection: Connection;
+  private readonly setup: BackendSetup;
   private readonly view: vscode.TreeView<Element>;
   private readonly status = vscode.window.createStatusBarItem("eska.explorer.connection", vscode.StatusBarAlignment.Right, 0);
   private readonly disposables: vscode.Disposable[] = [];
@@ -65,12 +67,16 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
     this.filters = new ProjectFilters(context.workspaceState);
     this.connection = new Connection(String(context.extension.packageJSON.version),
       (state) => this.update(state), (text, level) => this.output[level ?? "info"](text));
+    this.setup = new BackendSetup(context, (text, level) => { if (!this.disposed) this.output[level ?? "info"](text); },
+      () => this.connection.disconnect(), () => this.connect(false));
+    this.disposables.push(this.setup);
     this.view = vscode.window.createTreeView("eska.explorer.projects", { treeDataProvider: this });
     for (const [name, action] of [
       ["connect", () => this.connect(true)],
       ["restart", () => this.connect(false)],
       ["disconnect", () => this.connection.disconnect()],
       ["showLog", () => this.output.show(true)],
+      ["checkUpdates", () => this.setup.check(true)],
       ["refresh", () => this.refresh()],
       ["search", () => this.search()],
       ["revealActiveFile", () => this.revealActiveFile()],
@@ -448,7 +454,10 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
       if (!this.folders().some((value) => value.uri.toString() === folder.uri.toString())) return;
       assertHost(vscode.workspace.isTrusted, folder.uri.scheme, vscode.env.remoteName);
       this.selected = folder;
-      const executable = vscode.workspace.getConfiguration("eska.explorer", folder.uri).get<string>("executable", "eska");
+      const global = await this.setup.ensure();
+      if (!global || this.disposed) return;
+      const configured = vscode.workspace.getConfiguration("eska.explorer", folder.uri).get<string>("executable", "eska");
+      const executable = configured === "eska" ? global : configured;
       // Release the picker guard before the asynchronous handshake, allowing disconnect/restart.
       this.selecting = false;
       await this.connection.connect({ executable, path: folder.uri.fsPath, name: folder.name,
@@ -493,6 +502,7 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
       this.status.text = `ESKA v${state.version}`;
       this.status.tooltip = this.text("ready", state.version);
       this.status.show();
+      void this.setup.background();
     } else {
       // Never leave a successful connection indicator after disconnect or process failure.
       this.status.hide();

@@ -1,6 +1,18 @@
 import type { FailureCode } from "./protocol.js";
 
 const en = {
+  cliMissing: "ESKA is not installed for this user. Install version {1} for the editor and terminal?",
+  cliIncompatible: "Global ESKA {0} is incompatible with Explorer. Install version {1}?",
+  cliInstall: "Install ESKA for this user",
+  cliUpdate: "Update ESKA",
+  cliCurrent: "ESKA {0} is up to date.",
+  cliUpdateAvailable: "ESKA {0}: version {1} is available. Update the shared CLI installation?",
+  cliUpdated: "ESKA updated to {0}. Open a new terminal if the PATH changed.",
+  cliInstalling: "Installing ESKA",
+  updateFailed: "ESKA installation or update failed. See the ESKA task terminal and connection log.",
+  updateBusy: "Another ESKA installation is running. Wait for it to finish. If it was interrupted, check ~/.eska/.explorer-install.lock.",
+  cliPathConflict: "A compatible ESKA could not be found after installation. Check for multiple installations and the PATH order.",
+
   settings: "Project settings", documentation: "Documentation", other: "Other files",
   filesUnavailable: "Could not read this folder. Check access permissions and refresh the tree.",
   gitModified: "Modified", gitAdded: "Added or untracked", gitDeleted: "Deleted",
@@ -47,6 +59,18 @@ const en = {
 } as const;
 
 const ru: Record<keyof typeof en, string> = {
+  cliMissing: "ESKA не установлена для текущего пользователя. Установить версию {1} для редактора и терминала?",
+  cliIncompatible: "Глобальная ESKA {0} несовместима с Explorer. Установить версию {1}?",
+  cliInstall: "Установить ESKA для пользователя",
+  cliUpdate: "Обновить ESKA",
+  cliCurrent: "ESKA {0} актуальна.",
+  cliUpdateAvailable: "ESKA {0}: доступна версия {1}. Обновить общую установку CLI?",
+  cliUpdated: "ESKA обновлена до {0}. Если PATH изменился, откройте новый терминал.",
+  cliInstalling: "Установка ESKA",
+  updateFailed: "Не удалось установить или обновить ESKA. Подробности — в терминале задачи ESKA и журнале подключения.",
+  updateBusy: "Установка ESKA уже выполняется. Дождитесь завершения. Если она была прервана, проверьте ~/.eska/.explorer-install.lock.",
+  cliPathConflict: "После установки не найдена совместимая ESKA. Проверьте наличие нескольких копий и порядок каталогов в PATH.",
+
   settings: "Настройки проекта", documentation: "Документация", other: "Прочие файлы",
   filesUnavailable: "Не удалось прочитать папку. Проверьте права доступа и обновите дерево.",
   gitModified: "Изменён", gitAdded: "Добавлен или не отслеживается", gitDeleted: "Удалён",

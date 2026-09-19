@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { mkdtemp, rm, readFile, writeFile, cp, mkdir } from "node:fs/promises";
+import { mkdtemp, rm, readFile, writeFile, cp, mkdir, symlink } from "node:fs/promises";
 import { resolve, join, isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createTreeProject } from "./fixture.mjs";
@@ -12,6 +12,13 @@ if (!isAbsolute(playground)) throw new Error("ESKA_TEST_ROOT must be absolute.")
 const root = await mkdtemp(join(playground, "explorer-host-"));
 try {
   const fixture = await createTreeProject(join(root, "project"));
+  const bin = join(root, "bin");
+  await mkdir(bin);
+  const executableName = process.platform === "win32" ? "eska.exe" : "eska";
+  if (process.platform === "win32") await cp(binary, join(bin, executableName));
+  else await symlink(binary, join(bin, executableName));
+  await mkdir(join(fixture.root, ".vscode"), { recursive: true });
+  await writeFile(join(fixture.root, ".vscode/settings.json"), JSON.stringify({ "eska.explorer.checkForUpdates": false }));
   const executable = process.env.VSCODE_EXECUTABLE ?? "code";
   let extensionPath = repository;
   if (process.env.ESKA_BSL_EXTENSION) {
@@ -22,6 +29,7 @@ try {
     await cp(process.env.ESKA_BSL_EXTENSION, join(root, "extensions", `${analyzer.publisher}.${analyzer.name}-${analyzer.version}`), { recursive: true });
     await mkdir(join(fixture.root, ".vscode"), { recursive: true });
     await writeFile(join(fixture.root, ".vscode", "settings.json"), JSON.stringify({
+      "eska.explorer.checkForUpdates": false,
       "bsl-analyzer-lsp.server.path": process.env.ESKA_BSL_BINARY,
       "[bsl]": { "editor.defaultFormatter": `${analyzer.publisher}.${analyzer.name}` }
     }));
@@ -44,13 +52,13 @@ try {
   if (process.env.ESKA_PERF_PROJECT) {
     if (!isAbsolute(process.env.ESKA_PERF_PROJECT)) throw new Error("ESKA_PERF_PROJECT must be absolute.");
     workspace = join(root, "performance.code-workspace");
-    await writeFile(workspace, JSON.stringify({ folders: [{ path: process.env.ESKA_PERF_PROJECT }] }));
+    await writeFile(workspace, JSON.stringify({ folders: [{ path: process.env.ESKA_PERF_PROJECT }], settings: { "eska.explorer.checkForUpdates": false } }));
   }
   const child = spawn(executable, ["--verbose", "--wait",
     `--extensionDevelopmentPath=${extensionPath}`, `--extensionTestsPath=${resolve(repository, process.argv[2] ?? "test/extension-host.cjs")}`,
     `--user-data-dir=${join(root, "profile")}`, `--extensions-dir=${join(root, "extensions")}`,
     "--disable-workspace-trust", ...(process.env.ESKA_BSL_EXTENSION ? [] : ["--disable-extensions"]), "--disable-gpu", "--new-window", workspace],
-  { env: { ...process.env, ESKA_HOST_FIXTURE: JSON.stringify(fixture) }, stdio: ["ignore", "pipe", "pipe"] });
+  { env: { ...process.env, PATH: bin + (process.platform === "win32" ? ";" : ":") + (process.env.PATH ?? ""), ESKA_HOST_FIXTURE: JSON.stringify(fixture) }, stdio: ["ignore", "pipe", "pipe"] });
   let output = "";
   /** Retain bounded diagnostic output; host startup can be verbose. */
   const capture = (data) => { output = (output + data.toString()).slice(-32000); };

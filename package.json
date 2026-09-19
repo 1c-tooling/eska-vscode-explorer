@@ -122,6 +122,11 @@
         "command": "eska.explorer.revealActiveFile",
         "title": "%revealActiveFile%",
         "category": "ESKA Explorer"
+      },
+      {
+        "command": "eska.explorer.checkUpdates",
+        "title": "%checkUpdates%",
+        "category": "ESKA Explorer"
       }
     ],
     "views": {
@@ -165,6 +170,11 @@
           "command": "eska.explorer.search",
           "when": "view == eska.explorer.projects",
           "group": "navigation@0"
+        },
+        {
+          "command": "eska.explorer.checkUpdates",
+          "when": "view == eska.explorer.projects",
+          "group": "connection@4"
         }
       ],
       "view/item/context": [
@@ -251,6 +261,12 @@
           "default": true,
           "scope": "resource",
           "description": "%hideEmptyRootGroups%"
+        },
+        "eska.explorer.checkForUpdates": {
+          "type": "boolean",
+          "default": true,
+          "scope": "window",
+          "description": "%checkForUpdates%"
         }
       }
     },
