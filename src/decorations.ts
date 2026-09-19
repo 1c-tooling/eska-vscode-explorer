@@ -6,7 +6,7 @@ import { relativeFile } from "./reveal.js";
 import { message } from "./messages.js";
 import { gitStatus, type GitStatus } from "./git-status.js";
 import type { FormSource } from "./forms.js";
-import type { MetadataTree, ProjectTree, TreeEntry } from "./tree.js";
+import { nodeKey, type MetadataTree, type ProjectTree, type TreeEntry } from "./tree.js";
 
 // Read-only subset of https://github.com/microsoft/vscode/blob/main/extensions/git/src/api/git.d.ts.
 interface Change { uri: vscode.Uri; originalUri: vscode.Uri; status: number }
@@ -30,7 +30,7 @@ export class GitDecorations implements vscode.FileDecorationProvider, vscode.Dis
   private readonly subscriptions: vscode.Disposable[] = [];
   private apiSubscriptions: vscode.Disposable[] = [];
   private readonly repositories = new Map<Repository, vscode.Disposable>();
-  private readonly entries = new Map<string, Entry>();
+  private readonly entries = new Map<string, WeakRef<Entry>>();
   private readonly snapshots = new Map<ProjectTree, Snapshot>();
   private results = new Map<string, Promise<vscode.FileDecoration | undefined>>();
   private api: GitApi | undefined;
@@ -93,6 +93,11 @@ export class GitDecorations implements vscode.FileDecorationProvider, vscode.Dis
     this.epoch++;
     this.snapshots.clear();
     this.results = new Map();
+    for (const [key, reference] of this.entries) {
+      const entry = reference.deref();
+      const owner = entry && ("owner" in entry ? entry.owner : entry);
+      if (!owner || owner.project.nodes.get(nodeKey(owner.node.id)) !== owner) this.entries.delete(key);
+    }
     clearTimeout(this.timer);
     this.timer = setTimeout(() => { this.changed.fire(undefined); }, 100);
   }
@@ -100,7 +105,7 @@ export class GitDecorations implements vscode.FileDecorationProvider, vscode.Dis
   /** Painting registers an identity only; no IO or backend request runs in getTreeItem. */
   resource(entry: Entry): vscode.Uri {
     const key = "owner" in entry ? `${entry.owner.key}:source:${entry.target}` : entry.key;
-    this.entries.set(key, entry);
+    this.entries.set(key, new WeakRef(entry));
     return vscode.Uri.from({ scheme: "eska-decoration", path: "/" + encodeURIComponent(key) });
   }
 
@@ -109,7 +114,7 @@ export class GitDecorations implements vscode.FileDecorationProvider, vscode.Dis
     if (uri.scheme !== "eska-decoration" || !this.tree || !this.api || this.disposed
       || !vscode.workspace.getConfiguration("git").get<boolean>("decorations.enabled", true)) return undefined;
     const key = decodeURIComponent(uri.path.slice(1));
-    const entry = this.entries.get(key);
+    const entry = this.entries.get(key)?.deref();
     if (!entry) return undefined;
     const cached = this.results.get(key);
     if (cached) return cached;

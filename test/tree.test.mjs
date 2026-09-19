@@ -4,6 +4,7 @@ import { mkdtemp, writeFile, rm, readFile, symlink } from "node:fs/promises";
 import { resolve, join, isAbsolute } from "node:path";
 import { Connection } from "../out/connection.js";
 import { MetadataTree, nodeKey, parseNode } from "../out/tree.js";
+import { ExplorerError } from "../out/protocol.js";
 import { nativePath, editorRange, existingSource, resolveSource, isCommonModule } from "../out/source.js";
 import { createTreeProject, descriptor, inline, addCommonModules } from "./fixture.mjs";
 
@@ -30,6 +31,36 @@ test("opaque node identities are independent of JSON property order", () => {
   assert.equal(nodeKey({ kind: "module", owner: "opaque/a.b", role: "object" }),
     nodeKey({ role: "object", owner: "opaque/a.b", kind: "module" }));
   assert.throws(() => parseNode({ id: { kind: "collection", collection: null } }), { code: "protocolInvalid" });
+});
+
+/** A branch that becomes empty has no native expander, so pruning cannot depend on another children request. */
+test("empty groups release removed descendants across repeated external edits", { skip: !executable }, async t => {
+  const root = await mkdtemp(join(process.env.ESKA_TEST_ROOT ?? resolve("../eska-playground"), "explorer-prune-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const fixture = await createTreeProject(join(root, "project"));
+  const connection = new Connection("test", () => {}, () => {});
+  t.after(() => connection.dispose());
+  await connection.connect({ executable, path: fixture.root, name: "test", locale: "en-US" });
+  const tree = new MetadataTree(connection, connection.state.session, () => {}, () => {});
+  t.after(() => tree.dispose());
+  const [top] = await tree.roots();
+  const owner = named(await tree.children(named(await tree.children(top), "Справочники")), "Товары");
+  const sizes = [];
+  for (let round = 0; round < 20; round++) {
+    await writeFile(fixture.descriptor, descriptor("Catalog", "Товары", inline(`Поле${round}`)));
+    await tree.refresh(owner.project, owner);
+    const attributes = named(await tree.children(owner), "Реквизиты");
+    const [removed] = await tree.children(attributes);
+    assert.ok(owner.project.nodes.has(nodeKey(removed.node.id)));
+    await writeFile(fixture.descriptor, descriptor("Catalog", "Товары"));
+    await tree.refresh(owner.project, owner);
+    await tree.children(owner);
+    assert.equal(attributes.node.state, "empty");
+    assert.equal(owner.project.nodes.has(nodeKey(removed.node.id)), false);
+    await assert.rejects(tree.children(removed), { code: "obsolete" });
+    sizes.push(owner.project.nodes.size);
+  }
+  assert.equal(new Set(sizes).size, 1);
 });
 
 test("real backend lazy trees, source positions and local invalidation for all four schemas", { skip: !executable }, async (t) => {
@@ -136,6 +167,32 @@ test("an invalidated in-flight expansion retries; older and gapped notifications
   notify('metadata/changed', responses('1', '3', { affected: [], requiresRefresh: false, requiresReopen: false }));
   assert.equal(root.children, undefined, 'event gap invalidates even at the same generation');
   assert.equal(recoveries.length, 1);
+  tree.dispose();
+});
+
+/** Requests queued behind a refresh are stale even though its notification arrived correctly. */
+test("an observed generation change retries queued reads without recursively refreshing", async () => {
+  const info = { projectId: "p", scope: { kind: "standalone" }, type: "configuration",
+    rootPath: { value: "/project", encoding: "utf-8" }, sourcePath: { value: "/project/src", encoding: "utf-8" },
+    root: { kind: "object", objectId: "root" }, generation: "0", eventSequence: "0", requiresRefresh: false, requiresReopen: false };
+  let notify;
+  const generations = [];
+  const connection = {
+    onNotification(listener) { notify = listener; return { dispose() {} }; },
+    async request(_session, method, params) {
+      assert.equal(method, "metadata/index", "known invalidation must not synchronize or refresh");
+      generations.push(params.generation);
+      if (generations.length === 1) {
+        notify("metadata/changed", { sessionId: "s", projectId: "p", generation: "1", eventSequence: "1",
+          affected: null, requiresRefresh: false, requiresReopen: false });
+        throw new ExplorerError("requestFailed", "stale_generation");
+      }
+      return { sessionId: "s", projectId: "p", generation: "1", eventSequence: "1", progress: {} };
+    },
+  };
+  const tree = new MetadataTree(connection, { sessionId: "s", projects: [info] }, () => {}, () => assert.fail("unexpected refresh"));
+  await tree.request(tree.projects[0], "metadata/index", { action: "status" });
+  assert.deepEqual(generations, ["0", "1"]);
   tree.dispose();
 });
 

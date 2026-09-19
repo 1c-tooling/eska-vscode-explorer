@@ -2,6 +2,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs/promises");
 const path = require("node:path");
 const vscode = require("vscode");
+const execute = require("node:util").promisify(require("node:child_process").execFile);
 
 /** Wait for native filesystem/selection events rather than assuming synchronous delivery. */
 async function until(predicate, reason) {
@@ -33,6 +34,17 @@ exports.run = async function () {
   await fs.writeFile(path.join(fixture.root, "build/demo.cf"), "test artifact, not a real configuration");
   await fs.mkdir(path.join(fixture.root, ".hidden"));
   await fs.writeFile(path.join(fixture.root, ".hidden/config"), "hidden\n");
+  // Two real Git branches exercise external checkout events without touching any user repository.
+  const git = (...args) => execute("git", args, { cwd: fixture.root });
+  await git("init", "-b", "review-a");
+  await git("config", "user.name", "Explorer Review");
+  await git("config", "user.email", "review@example.invalid");
+  await git("add", ".");
+  await git("commit", "-m", "test: branch A");
+  await git("switch", "-c", "review-b");
+  await fs.writeFile(first.descriptor, (await fs.readFile(first.descriptor, "utf8")).replace("<Name>Артикул</Name>", "<Name>ДругаяВетка</Name>"));
+  await git("commit", "-am", "test: branch B");
+  await git("switch", "review-a");
   const config = vscode.workspace.getConfiguration("eska.explorer");
   await config.update("executable", process.env.ESKA_TEST_BINARY, vscode.ConfigurationTarget.Workspace);
   await config.update("treeLanguage", "ru-RU", vscode.ConfigurationTarget.Workspace);
@@ -87,6 +99,26 @@ exports.run = async function () {
   await fs.rm(readme);
   await until(async () => !(await explorer.getChildren(secondRoot)).some(row => row.kind === "documentation"), "deleted README removes group");
   assert.equal(explorer.tree, tree, "ordinary file changes do not restart metadata backend");
+  const secondGeneration = secondRoot.project.info.generation;
+  const secondChildren = secondRoot.children;
+  const pid = explorer.connection.child.pid;
+  const goods = (await tree.children(catalogs)).find(entry => entry.node.label.text === "Товары");
+  assert.ok(goods);
+  await tree.request(firstRoot.project, "metadata/index", { action: "start" });
+  for (let round = 0; round < 6; round++) {
+    const name = round % 2 ? "Артикул" : "ДругаяВетка";
+    const previous = firstRoot.project.info.generation;
+    await git("switch", round % 2 ? "review-a" : "review-b");
+    await until(() => firstRoot.project.info.generation !== previous, "checkout invalidates first member");
+    const attributes = (await tree.children(goods)).find(entry => entry.node.id.collection?.metadataKind === "attribute");
+    assert.deepEqual((await tree.children(attributes)).map(entry => entry.node.label.text), [name]);
+    await until(async () => (await tree.request(firstRoot.project, "metadata/search", { text: name, limit: 50 })).hits.some(hit => hit.name === name), "search follows branch switch");
+    const stale = await tree.request(firstRoot.project, "metadata/search", { text: round % 2 ? "ДругаяВетка" : "Артикул", limit: 50 });
+    assert.ok(!stale.hits.some(hit => hit.ancestry.some(node => node.objectId === goods.node.id.objectId)), "old owner results removed");
+    assert.equal(secondRoot.project.info.generation, secondGeneration);
+    assert.equal(secondRoot.children, secondChildren);
+    assert.equal(explorer.connection.child.pid, pid);
+  }
   await config.update("treeLanguage", "en-US", vscode.ConfigurationTarget.Workspace);
   await until(() => explorer.getTreeItem(groups[0]).label === "Project settings", "file groups use tree language");
   await vscode.commands.executeCommand("eska.explorer.showEmptyGroups", root);
@@ -95,7 +127,11 @@ exports.run = async function () {
   await vscode.commands.executeCommand("eska.explorer.restart");
   const freshRows = await explorer.getChildren();
   assert.deepEqual(freshRows.map(row => row.key), rows.map(row => row.key));
+  const finalPid = explorer.connection.child.pid;
   await vscode.commands.executeCommand("eska.explorer.disconnect");
+  assert.throws(() => process.kill(finalPid, 0), { code: "ESRCH" });
   assert.equal(explorer.files, undefined);
+  assert.equal(explorer.connection.child, undefined);
+  assert.throws(() => process.kill(pid, 0), { code: "ESRCH" });
   await fs.writeFile(path.join(fixture.root, "host-result.json"), JSON.stringify({ passed: true, vscode: vscode.version, suite: "workspace" }));
 };
