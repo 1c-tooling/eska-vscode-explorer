@@ -64,6 +64,7 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
 
   constructor(private readonly context: vscode.ExtensionContext) {
     this.status.name = "ESKA Explorer";
+    this.status.command = "eska.explorer.checkUpdates";
     this.disposables.push(this.status, this.decorations);
     this.filters = new ProjectFilters(context.workspaceState);
     this.connection = new Connection(String(context.extension.packageJSON.version),
@@ -512,13 +513,14 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
     this.changed.fire(undefined);
     if (state.kind === "ready") {
       this.status.text = `ESKA v${state.version}`;
-      this.status.tooltip = this.text("ready", state.version);
+      this.status.tooltip = this.text("statusTooltip", state.version, state.target.executable);
       this.status.show();
       void this.setup.background();
     } else {
       // Never leave a successful connection indicator after disconnect or process failure.
       this.status.hide();
       this.status.text = "";
+      this.status.tooltip = undefined;
     }
     if (state.kind === "error") this.showError(state.error);
   }

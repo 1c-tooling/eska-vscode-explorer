@@ -48,6 +48,15 @@ exports.run = async function () {
   await vscode.commands.executeCommand('eska.explorer.connect');
   await vscode.commands.executeCommand('eska.explorer.projects.focus');
   assert.equal(explorer.status.text, `ESKA v${explorer.connection.state.version}`);
+  assert.ok(explorer.status.tooltip.includes(explorer.connection.state.version));
+  assert.ok(explorer.status.tooltip.includes(explorer.connection.state.target.executable));
+  assert.equal(explorer.status.command, 'eska.explorer.checkUpdates');
+  const checkUpdates = explorer.setup.check;
+  let manualCheck;
+  explorer.setup.check = async manual => { manualCheck = manual; };
+  try { await vscode.commands.executeCommand(explorer.status.command); }
+  finally { explorer.setup.check = checkUpdates; }
+  assert.equal(manualCheck, true, 'status bar invokes the manual update check');
   assert.ok(!explorer.view.message, 'connection status does not occupy the tree');
   const top = await explorer.getChildren();
   const [root] = top;
@@ -238,6 +247,7 @@ exports.run = async function () {
   await vscode.commands.executeCommand('eska.explorer.disconnect');
   assert.equal(explorer.searchView, undefined, 'disconnect disposes search input');
   assert.equal(explorer.status.text, '', 'disconnect clears the connected version');
+  assert.equal(explorer.status.tooltip, undefined, 'disconnect clears the connected binary');
   await fs.writeFile(path.join(fixture.root, 'host-result.json'), JSON.stringify({ passed: true, vscode: vscode.version, node: process.versions.node }));
   console.log('ESKA_TREE_HOST_PASSED', vscode.version);
 };
