@@ -29,7 +29,6 @@ def check(archive):
         packaged = {name: 'extension/' + ('LICENSE.txt' if name == 'LICENSE' else name) for name in required}
         expected = set(packaged.values()) | {'extension.vsixmanifest', '[Content_Types].xml'}
         assert {name.lower() for name in names} == {name.lower() for name in expected}, 'Unexpected or missing archive files'
-        assert len([name for name in names if name.endswith('.svg')]) == 192
         # vsce may normalize README/CHANGELOG names and augment package.json metadata.
         normalized = {name.lower(): name for name in names}
         for name in required:

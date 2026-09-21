@@ -132,6 +132,14 @@ export class MetadataTree {
     for (const old of entry.previousChildren) if (!keys.has(nodeKey(old.node.id))) this.prune(old);
     entry.children = nodes.map((node) => this.upsert(entry.project, node));
     entry.previousChildren = entry.children;
+    // A completed request proves object emptiness; unloaded nodes must keep their expander.
+    if (entry.node.id.kind === "object") {
+      const state = nodes.length === 0 ? "empty" : "non_empty";
+      if (entry.node.state !== state) {
+        entry.node = { ...entry.node, state };
+        this.changed([entry]);
+      }
+    }
     return entry.children;
   }
 

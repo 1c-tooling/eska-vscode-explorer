@@ -72,6 +72,7 @@
 | `resource` | `resource.svg` |
 | `requisite` | `attribute.svg` |
 | `enum-value` | `enum.svg` |
+| `predefined-item` | `predefined-item.svg` |
 | `accounting-flag` | `check.svg` |
 | `ext-dimension-accounting-flag` | `check.svg` |
 | `recalculation` | `recalculation.svg` |
@@ -85,7 +86,7 @@
 ## Группы и модули
 
 «Общие» — `common.svg`, «Модули» — `modules.svg`, metadata-группы —
-иконка их типа. Неизвестная группа — `unknown.svg`.
+иконка их типа, кроме перечисленных ниже отдельных образов. Неизвестная группа — `unknown.svg`.
 Все десять ролей (`module`, `object`, `manager`, `record-set`, `value-manager`,
 `managed-application`, `ordinary-application`, `session`, `external-connection`,
 `command`) используют `module.svg`; роль различается подписью. Общий модуль
@@ -96,3 +97,48 @@
 `resources/icon.png` — общий логотип 1c-tooling, перенесённый из
 `assets/1c-tooling-logo.png` сайта проекта. PNG включён в VSIX отдельно от SVG
 метаданных и указан в поле `icon` манифеста.
+
+## Различимые группы и проекты
+
+Корень использует `ProjectInfo.type`: `configuration` — прежний жёлтый куб,
+`extension` — фиолетовый пазл, `report` — лист с диаграммой,
+`processing` — синяя карточка с жёлтой стрелкой. Вложенные объекты
+по-прежнему используют `metadataKind`.
+
+Группа реквизитов — три поля цвета элементов. Предопределённые данные —
+фиолетовый список, их элементы — поле формы реквизита того же фиолетового цвета.
+Табличные части и их элементы — тёмно-зелёные (`#34835b`).
+Их реквизиты используют `tabular-attribute.svg`: прежнюю форму поля с тем же
+тёмно-зелёным цветом. Родитель определяется по связи узлов backend;
+реквизиты остальных объектов сохраняют исходный цвет.
+В контрастных темах сохраняются монохромные варианты.
+
+| Группа (`metadataKind`) | SVG |
+|---|---|
+| `command-group` | `command-group.svg` |
+| `common-attribute` | `common-attributes.svg` |
+| `common-command` | `common-commands.svg` |
+| `common-form` | `common-forms.svg` |
+| `common-template` | `common-templates.svg` |
+| `defined-type` | `defined-type.svg` |
+| `document-journal` | `document-journal.svg` |
+| `functional-option-parameter` | `option-parameters.svg` |
+| `integration-service` | `integration-service.svg` |
+| `sequence` | `sequence.svg` |
+| `session-parameter` | `session-parameters.svg` |
+| `style-item` | `style-item.svg` |
+| `web-service` | `web-service.svg` |
+| `web-socket-client` | `web-socket-client.svg` |
+| `addressing-attribute` | `addressing-attributes.svg` |
+| `attribute` | `attributes.svg` |
+| `requisite` | `requisites.svg` |
+| `enum-value` | `enum-values.svg` |
+| `predefined-item` | `predefined-data.svg` |
+| `accounting-flag` | `accounting-flag.svg` |
+| `ext-dimension-accounting-flag` | `dimension-flag.svg` |
+| `column` | `columns.svg` |
+| `url-template` | `url-template.svg` |
+| `operation` | `operations.svg` |
+| `integration-service-channel` | `integration-channel.svg` |
+
+Элементы `predefined-item` используют `predefined-item.svg`.

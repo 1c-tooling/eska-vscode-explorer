@@ -42,7 +42,7 @@ exports.run = async function () {
   const common = named(groups, 'Общие');
   const commonModule = named(await explorer.getChildren(named(await explorer.getChildren(common), 'Общие модули')), 'Обмен');
   const samples = [[root, 'configuration'], [catalog, 'catalog'], [goods, 'catalog'], [modules, 'modules'],
-    [module, 'module'], [section, 'tabular-section'], [quantity, 'attribute'], [commonModule, 'common-module']];
+    [module, 'module'], [section, 'tabular-section'], [quantity, 'tabular-attribute'], [commonModule, 'common-module']];
   const tree = explorer.tree, session = explorer.connection.state.session.sessionId;
   let repaints = 0;
   const subscription = explorer.onDidChangeTreeData(() => repaints++);
