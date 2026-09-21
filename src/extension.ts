@@ -252,7 +252,7 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
     const theme = kind === vscode.ColorThemeKind.HighContrast ? "contrast"
       : kind === vscode.ColorThemeKind.HighContrastLight ? "contrast-light"
       : kind === vscode.ColorThemeKind.Light ? "light" : "dark";
-    const key = `${theme}/${sourceIcon ?? iconName(entry.node, entry.project.info.type)}.svg`;
+    const key = `${theme}/${sourceIcon ?? iconName(entry.node, entry.project.info.type, this.tree?.parent(entry)?.node)}.svg`;
     let uri = this.iconPaths.get(key);
     if (!uri) {
       uri = vscode.Uri.joinPath(this.context.extensionUri, "resources", "icons", key);

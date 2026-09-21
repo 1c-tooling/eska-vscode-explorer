@@ -123,7 +123,7 @@ export const moduleIcons: Readonly<Record<string, string>> = {
 };
 
 /** Unknown backend kinds never become paths or alter the shape of the metadata tree. */
-export function iconName(node: MetadataNode, projectType?: ProjectInfo["type"]): string {
+export function iconName(node: MetadataNode, projectType?: ProjectInfo["type"], parent?: MetadataNode): string {
   const id = node.id;
   if (id.kind === "object" && node.parent === null && projectType) {
     return Object.hasOwn(projectIcons, projectType) ? projectIcons[projectType] : "unknown";
@@ -137,6 +137,10 @@ export function iconName(node: MetadataNode, projectType?: ProjectInfo["type"]):
       return Object.hasOwn(collectionIcons, kind) ? collectionIcons[kind]! : knownKind(kind);
     }
     return "unknown";
+  }
+  if (id.kind === "object" && node.metadataKind === "attribute"
+    && parent?.id.kind === "object" && parent.metadataKind === "tabular-section") {
+    return "tabular-attribute";
   }
   return knownKind(node.metadataKind);
 }

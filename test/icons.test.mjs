@@ -15,7 +15,7 @@ test("all backend metadata kinds have local artwork in every supported theme", a
   const kinds = [...vocabulary.matchAll(/^  "([a-z-]+)":/gm)].map(match => match[1]);
   assert.equal(kinds.length, 68);
   assert.deepEqual(Object.keys(metadataIcons).sort(), kinds.sort());
-  const names = new Set([...Object.values(metadataIcons), ...Object.values(moduleIcons), ...Object.values(collectionIcons), ...Object.values(projectIcons), "unknown", "common", "modules"]);
+  const names = new Set([...Object.values(metadataIcons), ...Object.values(moduleIcons), ...Object.values(collectionIcons), ...Object.values(projectIcons), "unknown", "common", "modules", "tabular-attribute"]);
   for (const theme of ["light", "dark", "contrast", "contrast-light"]) {
     const folder = new URL(`../resources/icons/${theme}/`, import.meta.url);
     for (const name of names) {
@@ -62,5 +62,19 @@ test("collections have distinct artwork and predefined items retain the field si
     const attribute = await readFile(new URL("attribute.svg", folder), "utf8");
     const predefined = await readFile(new URL("predefined-item.svg", folder), "utf8");
     assert.equal(predefined, attribute.replaceAll("#6c9fc3", "#8b80bb"));
+  }
+});
+
+test("tabular attributes inherit the table color without recoloring other fields", async () => {
+  const attribute = { ...node("attribute"), parent: { kind: "object", objectId: "section" } };
+  assert.equal(iconName(attribute, "configuration", node("tabular-section")), "tabular-attribute");
+  assert.equal(iconName(attribute, "configuration", node("catalog")), "attribute");
+  assert.equal(iconName(attribute, "configuration"), "attribute");
+  assert.equal(iconName({ ...attribute, metadataKind: "predefined-item" }, "configuration", node("tabular-section")), "predefined-item");
+  for (const theme of ["light", "dark", "contrast", "contrast-light"]) {
+    const folder = new URL(`../resources/icons/${theme}/`, import.meta.url);
+    const original = await readFile(new URL("attribute.svg", folder), "utf8");
+    const tabular = await readFile(new URL("tabular-attribute.svg", folder), "utf8");
+    assert.equal(tabular, original.replaceAll("#6c9fc3", "#34835b"));
   }
 });
