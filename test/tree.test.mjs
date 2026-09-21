@@ -223,3 +223,42 @@ test("common modules open existing BSL directly and retain explicit XML access",
   await assert.rejects(resolveSource(tree, binary), { code: "sourceMissing" });
   assert.equal((await resolveSource(tree, binary, "xml")).path, join(fixture.source, "CommonModules", "Защищенный.xml"));
 });
+
+
+/** A completed lazy response must repaint the owner without guessing from an unfilled cache. */
+test("empty lazy objects lose their expander and regain children after invalidation", async () => {
+  const rootId = { kind: "object", objectId: "root" };
+  const leafId = { kind: "object", objectId: "leaf" };
+  const leaf = { id: leafId, parent: rootId, metadataKind: "constant", state: "unloaded",
+    label: { kind: "name", text: "Leaf" }, expandedByDefault: false, rootSection: false };
+  const root = { ...leaf, id: rootId, parent: null, metadataKind: "configuration" };
+  const info = { projectId: "p", generation: "0", eventSequence: "0", root: rootId,
+    rootPath: { encoding: "utf-8", value: "/fixture" }, scope: { kind: "standalone" }, type: "configuration" };
+  let notify, withModule = false;
+  const repaints = [];
+  const connection = {
+    onNotification(callback) { notify = callback; return { dispose() {} }; },
+    async request(sessionId, method, params) {
+      const envelope = { sessionId, projectId: "p", generation: withModule ? "1" : "0", eventSequence: withModule ? "1" : "0" };
+      if (method === "metadata/root") return { ...envelope, node: root };
+      const nodes = params.node.objectId === "root" ? [leaf] : withModule
+        ? [{ ...leaf, id: { kind: "module", owner: "leaf", role: "manager" }, parent: leafId, state: "empty" }] : [];
+      return { ...envelope, nodes };
+    }
+  };
+  const tree = new MetadataTree(connection, { sessionId: "s", projects: [info] }, entries => repaints.push(entries), () => {});
+  const [top] = await tree.roots();
+  const [entry] = await tree.children(top);
+  assert.equal(entry.node.state, "unloaded");
+  assert.equal((await tree.children(entry)).length, 0);
+  assert.equal(entry.node.state, "empty");
+  assert.ok(repaints.some(entries => entries?.includes(entry)));
+  withModule = true;
+  notify("metadata/changed", { sessionId: "s", projectId: "p", generation: "1", eventSequence: "1",
+    affected: ["leaf"], requiresRefresh: false, requiresReopen: false });
+  await tree.children(top);
+  assert.equal(entry.node.state, "unloaded");
+  assert.equal((await tree.children(entry)).length, 1);
+  assert.equal(entry.node.state, "non_empty");
+  tree.dispose();
+});
