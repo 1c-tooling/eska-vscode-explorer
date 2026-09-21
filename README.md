@@ -1,3 +1,5 @@
+[![Open VSX Version](https://img.shields.io/open-vsx/v/1c-tooling/eska-explorer?style=flat-square&label=Open%20VSX)](https://open-vsx.org/extension/1c-tooling/eska-explorer)
+[![Open VSX Downloads](https://img.shields.io/open-vsx/dt/1c-tooling/eska-explorer?style=flat-square&label=Downloads)](https://open-vsx.org/extension/1c-tooling/eska-explorer)
 # ESKA: 1C Explorer
 
 Дерево метаданных 1С в VS Code и VSCodium: находите объекты по имени или синониму,
