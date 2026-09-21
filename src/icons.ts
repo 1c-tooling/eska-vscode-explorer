@@ -1,3 +1,4 @@
+import type { ProjectInfo } from "./protocol.js";
 import type { MetadataNode } from "./tree.js";
 
 // Presentation mapping only; all semantic kinds are supplied by the backend.
@@ -63,13 +64,49 @@ export const metadataIcons: Readonly<Record<string, string>> = {
   "addressing-attribute": "attribute",
   "requisite": "attribute",
   "enum-value": "enum",
-  "predefined-item": "enum",
+  "predefined-item": "predefined-item",
   "accounting-flag": "check",
   "ext-dimension-accounting-flag": "check",
   "column": "attribute",
   "url-template": "link",
   "operation": "method",
   "integration-service-channel": "exchange"
+};
+
+// Collections have their own silhouettes where object artwork would repeat.
+export const collectionIcons: Readonly<Record<string, string>> = {
+  "command-group": "command-group",
+  "common-attribute": "common-attributes",
+  "common-command": "common-commands",
+  "common-form": "common-forms",
+  "common-template": "common-templates",
+  "defined-type": "defined-type",
+  "document-journal": "document-journal",
+  "functional-option-parameter": "option-parameters",
+  "integration-service": "integration-service",
+  "sequence": "sequence",
+  "session-parameter": "session-parameters",
+  "style-item": "style-item",
+  "web-service": "web-service",
+  "web-socket-client": "web-socket-client",
+  "addressing-attribute": "addressing-attributes",
+  "attribute": "attributes",
+  "requisite": "requisites",
+  "enum-value": "enum-values",
+  "predefined-item": "predefined-data",
+  "accounting-flag": "accounting-flag",
+  "ext-dimension-accounting-flag": "dimension-flag",
+  "column": "columns",
+  "url-template": "url-template",
+  "operation": "operations",
+  "integration-service-channel": "integration-channel"
+};
+
+export const projectIcons: Readonly<Record<ProjectInfo["type"], string>> = {
+  configuration: "configuration",
+  extension: "extension",
+  report: "report",
+  processing: "data-processor"
 };
 
 export const moduleIcons: Readonly<Record<string, string>> = {
@@ -86,13 +123,19 @@ export const moduleIcons: Readonly<Record<string, string>> = {
 };
 
 /** Unknown backend kinds never become paths or alter the shape of the metadata tree. */
-export function iconName(node: MetadataNode): string {
+export function iconName(node: MetadataNode, projectType?: ProjectInfo["type"]): string {
   const id = node.id;
+  if (id.kind === "object" && node.parent === null && projectType) {
+    return Object.hasOwn(projectIcons, projectType) ? projectIcons[projectType] : "unknown";
+  }
   if (id.kind === "module") return Object.hasOwn(moduleIcons, id.role) ? moduleIcons[id.role]! : "unknown";
   if (id.kind === "collection") {
     if (id.collection.kind === "common") return "common";
     if (id.collection.kind === "modules") return "modules";
-    if (id.collection.kind === "metadata") return knownKind(id.collection.metadataKind);
+    if (id.collection.kind === "metadata") {
+      const kind = id.collection.metadataKind;
+      return Object.hasOwn(collectionIcons, kind) ? collectionIcons[kind]! : knownKind(kind);
+    }
     return "unknown";
   }
   return knownKind(node.metadataKind);
