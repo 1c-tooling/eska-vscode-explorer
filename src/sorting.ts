@@ -21,14 +21,15 @@ export class ProjectSorting {
     await this.state.update(`metadataSort:${project.key}`, order === "alphabetical" ? order : undefined);
   }
 
-  /** Sort visible object slots only; preserve virtual sections, module roles and cached arrays. */
+  /** Sort every metadata row by its displayed label without mutating backend arrays. */
   children(project: ProjectTree, entries: TreeEntry[], language: "ru-RU" | "en-US"): TreeEntry[] {
+    return this.rows(project, entries, language, entry => entry.node.label.kind === "name"
+      ? entry.node.label.text : entry.node.label.translations[language]);
+  }
+
+  /** Apply the same ordering to synthetic metadata rows such as form sources. */
+  rows<T>(project: ProjectTree, entries: T[], language: "ru-RU" | "en-US", label: (entry: T) => string): T[] {
     if (this.order(project) === "original") return entries;
-    const objects = entries.filter(entry => entry.node.id.kind === "object");
-    const label = (entry: TreeEntry): string => entry.node.label.kind === "name"
-      ? entry.node.label.text : entry.node.label.translations[language];
-    objects.sort((left, right) => collators[language].compare(label(left), label(right)));
-    let index = 0;
-    return entries.map(entry => entry.node.id.kind === "object" ? objects[index++]! : entry);
+    return [...entries].sort((left, right) => collators[language].compare(label(left), label(right)));
   }
 }

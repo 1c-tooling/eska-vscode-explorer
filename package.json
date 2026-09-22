@@ -134,6 +134,15 @@
         "title": "%sortObjects%",
         "category": "ESKA Explorer",
         "icon": "$(sort-precedence)"
+      },
+      {
+        "command": "eska.explorer.resetSortOrder",
+        "title": "%resetSortOrder%",
+        "category": "ESKA Explorer",
+        "icon": {
+          "light": "resources/icons/actions/sort-active-light.svg",
+          "dark": "resources/icons/actions/sort-active-dark.svg"
+        }
       }
     ],
     "views": {
@@ -192,27 +201,32 @@
         },
         {
           "command": "eska.explorer.refreshNode",
-          "when": "view == eska.explorer.projects && (viewItem == eskaFiles || viewItem == eskaMetadata || viewItem == eskaCommonModule || viewItem == eskaModuleObject || viewItem == eskaForm || viewItem == eskaRoot || viewItem == eskaRootFiltered || viewItem == eskaRootUnfiltered)",
+          "when": "view == eska.explorer.projects && (viewItem == eskaFiles || viewItem == eskaMetadata || viewItem == eskaCommonModule || viewItem == eskaModuleObject || viewItem == eskaForm || viewItem =~ /^eskaRoot(Sorted)?$/ || viewItem =~ /^eskaRootFiltered(Sorted)?$/ || viewItem =~ /^eskaRootUnfiltered(Sorted)?$/)",
           "group": "inline@2"
         },
         {
           "command": "eska.explorer.hideEmptyGroups",
-          "when": "view == eska.explorer.projects && viewItem == eskaRootUnfiltered",
+          "when": "view == eska.explorer.projects && viewItem =~ /^eskaRootUnfiltered(Sorted)?$/",
           "group": "inline@1"
         },
         {
           "command": "eska.explorer.showEmptyGroups",
-          "when": "view == eska.explorer.projects && viewItem == eskaRootFiltered",
+          "when": "view == eska.explorer.projects && viewItem =~ /^eskaRootFiltered(Sorted)?$/",
           "group": "inline@1"
         },
         {
           "command": "eska.explorer.resetRootFilter",
-          "when": "view == eska.explorer.projects && (viewItem == eskaRootFiltered || viewItem == eskaRootUnfiltered)",
+          "when": "view == eska.explorer.projects && (viewItem =~ /^eskaRootFiltered(Sorted)?$/ || viewItem =~ /^eskaRootUnfiltered(Sorted)?$/)",
           "group": "filter@1"
         },
         {
           "command": "eska.explorer.sortObjects",
           "when": "view == eska.explorer.projects && (viewItem == eskaRoot || viewItem == eskaRootFiltered || viewItem == eskaRootUnfiltered)",
+          "group": "inline@3"
+        },
+        {
+          "command": "eska.explorer.resetSortOrder",
+          "when": "view == eska.explorer.projects && viewItem =~ /^eskaRoot(Filtered|Unfiltered)?Sorted$/",
           "group": "inline@3"
         }
       ],
@@ -243,6 +257,10 @@
         },
         {
           "command": "eska.explorer.sortObjects",
+          "when": "false"
+        },
+        {
+          "command": "eska.explorer.resetSortOrder",
           "when": "false"
         }
       ]

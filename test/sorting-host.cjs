@@ -40,6 +40,8 @@ exports.run = async function () {
   }
   await fs.writeFile(path.join(fixture.root, 'eska.toml'), `[workspace]\nmembers=${JSON.stringify(types)}\n`);
   await vscode.workspace.getConfiguration('eska.explorer').update('executable', process.env.ESKA_TEST_BINARY, vscode.ConfigurationTarget.Workspace);
+  await vscode.workspace.getConfiguration('eska.explorer').update('treeLanguage', 'ru-RU', vscode.ConfigurationTarget.Workspace);
+  await vscode.workspace.getConfiguration('eska.explorer').update('hideEmptyRootGroups', false, vscode.ConfigurationTarget.Workspace);
   const extension = vscode.extensions.all.find(value => value.packageJSON.name === 'eska-explorer');
   const explorer = await extension.activate();
   await vscode.commands.executeCommand('eska.explorer.connect');
@@ -59,32 +61,47 @@ exports.run = async function () {
   const generation = first.project.info.generation;
   await explorer.view.reveal(goods, { select: true, focus: false });
   await until(() => explorer.view.selection[0] === goods);
-  await explorer.applySortOrder(first, 'alphabetical');
+  await vscode.commands.executeCommand('eska.explorer.sortObjects', first);
   assert.deepEqual(names(await explorer.getChildren(catalogs)), ['Покупатели', 'Товары']);
   assert.equal(catalogs.children, cached);
   assert.equal(explorer.connection.state.session.sessionId, session);
   assert.equal(first.project.info.generation, generation);
   assert.equal(explorer.tree, tree);
   await until(() => explorer.view.selection[0] === goods);
-  assert.deepEqual(await explorer.getChildren(first), groups);
+  const label = entry => entry.node.label.kind === 'name' ? entry.node.label.text : entry.node.label.translations['ru-RU'];
+  const compare = new Intl.Collator('ru-RU', { sensitivity: 'base', numeric: true }).compare;
+  const sorted = (await explorer.getChildren(first)).filter(entry => entry.node);
+  assert.deepEqual(sorted, groups.filter(entry => entry.node).sort((a, b) => compare(label(a), label(b))));
+  assert.notDeepEqual(sorted, groups.filter(entry => entry.node));
+  assert.equal(explorer.getTreeItem(first).contextValue, 'eskaRootUnfilteredSorted');
+  const common = sorted.find(entry => entry.node.id.collection?.kind === 'common');
+  const commonRows = await explorer.getChildren(common);
+  assert.deepEqual(commonRows.map(label), commonRows.map(label).sort(compare));
+  await vscode.commands.executeCommand('eska.explorer.hideEmptyGroups', first);
+  assert.equal(explorer.getTreeItem(first).contextValue, 'eskaRootFilteredSorted');
+  await vscode.commands.executeCommand('eska.explorer.showEmptyGroups', first);
+  assert.equal(explorer.getTreeItem(first).contextValue, 'eskaRootUnfilteredSorted');
   const secondCatalogs = collection(await explorer.getChildren(second), 'catalog');
   assert.deepEqual(names(await explorer.getChildren(secondCatalogs)), ['Товары', 'Покупатели']);
   const children = await explorer.getChildren(goods);
+  assert.deepEqual(children.map(label), children.map(label).sort(compare));
   const attributes = collection(children, 'attribute');
   assert.deepEqual(names(await explorer.getChildren(attributes)), ['А', 'Поле2', 'Поле10', 'Я']);
   const [section] = await explorer.getChildren(collection(children, 'tabular-section'));
   assert.deepEqual(names(await explorer.getChildren(section)), ['А', 'Поле2', 'Поле10', 'Я']);
-  await explorer.applySortOrder(first, 'original');
+  await vscode.commands.executeCommand('eska.explorer.resetSortOrder', first);
+  assert.equal(explorer.getTreeItem(first).contextValue, 'eskaRootUnfiltered');
+  assert.deepEqual(await explorer.getChildren(first), groups);
   assert.deepEqual(names(await explorer.getChildren(catalogs)), ['Товары', 'Покупатели']);
   assert.deepEqual(names(await explorer.getChildren(attributes)), ['Я', 'Поле10', 'Поле2', 'А']);
   assert.deepEqual(names(await explorer.getChildren(section)), ['Я', 'Поле10', 'Поле2', 'А']);
   for (const root of roots.filter(entry => ['report', 'processing'].includes(entry.project.info.type))) {
     assert.equal(explorer.getTreeItem(root).contextValue, 'eskaRoot');
     const group = collection(await explorer.getChildren(root), 'attribute');
-    await explorer.applySortOrder(root, 'alphabetical');
+    await vscode.commands.executeCommand('eska.explorer.sortObjects', root);
     assert.deepEqual(names(await explorer.getChildren(group)), ['А', 'Поле2', 'Поле10', 'Я']);
   }
-  await explorer.applySortOrder(first, 'alphabetical');
+  await vscode.commands.executeCommand('eska.explorer.sortObjects', first);
   await vscode.commands.executeCommand('eska.explorer.restart');
   const restarted = (await explorer.getChildren()).filter(entry => entry.node);
   for (const root of restarted) {

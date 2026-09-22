@@ -31,13 +31,13 @@ test("sorting defaults to original, persists per project and restores the exact 
   assert.equal(sorting.children(first, original, "ru-RU"), original);
 });
 
-test("object sorting leaves group and module slots intact, including direct subordinate objects", async () => {
+test("alphabetical sorting includes groups, modules and direct subordinate objects", async () => {
   const sorting = new ProjectSorting(storage());
   await sorting.set(first, "alphabetical");
   const modules = entry("Модули", "collection"), attributes = entry("Реквизиты", "collection"), module = entry("Объект", "module");
   const z = entry("Я"), a = entry("А");
   const original = Object.freeze([modules, z, attributes, a, module]);
-  assert.deepEqual(sorting.children(first, original, "ru-RU"), [modules, a, attributes, z, module]);
+  assert.deepEqual(sorting.children(first, original, "ru-RU"), [a, modules, module, attributes, z]);
   assert.deepEqual(sorting.children(first, [z, a], "ru-RU"), [a, z]);
   assert.deepEqual(original, [modules, z, attributes, a, module]);
 });
@@ -60,4 +60,16 @@ test("invalid stored preferences and failed saves preserve the original order", 
   assert.equal(sorting.order(first), "original");
   await assert.rejects(sorting.set(first, "alphabetical"), /write failed/);
   assert.equal(sorting.order(first), "original");
+});
+
+
+test("structural groups follow displayed translations in the selected tree language", async () => {
+  const sorting = new ProjectSorting(storage());
+  await sorting.set(first, "alphabetical");
+  const common = entry("unused", "collection"), documents = entry("unused2", "collection");
+  common.node.label = { kind: "key", translations: { "ru-RU": "Общие", "en-US": "Common" } };
+  documents.node.label = { kind: "key", translations: { "ru-RU": "Документы", "en-US": "Documents" } };
+  const original = Object.freeze([common, documents]);
+  assert.deepEqual(sorting.children(first, original, "ru-RU"), [documents, common]);
+  assert.deepEqual(sorting.children(first, original, "en-US"), [common, documents]);
 });

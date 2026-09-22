@@ -1,10 +1,6 @@
 import type { FailureCode } from "./protocol.js";
 
 const en = {
-  sortObjects: "Metadata object order",
-  sortOriginal: "Original order",
-  sortAlphabetical: "Alphabetical",
-  sortCurrent: "Current",
   sortSaveFailed: "Could not save the project's sort order. Try again.",
   cliMissing: "ESKA is not installed for this user. Install version {1} for the editor and terminal?",
   cliIncompatible: "Global ESKA {0} is incompatible with Explorer. Install version {1}?",
@@ -65,10 +61,6 @@ const en = {
 } as const;
 
 const ru: Record<keyof typeof en, string> = {
-  sortObjects: "Порядок объектов метаданных",
-  sortOriginal: "Исходный порядок",
-  sortAlphabetical: "По алфавиту",
-  sortCurrent: "Текущий",
   sortSaveFailed: "Не удалось сохранить порядок сортировки проекта. Попробуйте ещё раз.",
   cliMissing: "ESKA не установлена для текущего пользователя. Установить версию {1} для редактора и терминала?",
   cliIncompatible: "Глобальная ESKA {0} несовместима с Explorer. Установить версию {1}?",

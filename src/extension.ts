@@ -98,7 +98,8 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
       this.disposables.push(vscode.commands.registerCommand(`eska.explorer.${name}`, (entry: Element) =>
         this.setRootFilter(entry, name === "resetRootFilter" ? undefined : name === "hideEmptyGroups")));
     }
-    this.disposables.push(vscode.commands.registerCommand("eska.explorer.sortObjects", (entry: Element) => this.chooseSortOrder(entry)));
+    this.disposables.push(vscode.commands.registerCommand("eska.explorer.sortObjects", (entry: Element) => this.toggleSortOrder(entry)));
+    this.disposables.push(vscode.commands.registerCommand("eska.explorer.resetSortOrder", (entry: Element) => this.toggleSortOrder(entry)));
     this.disposables.push(vscode.window.onDidChangeActiveColorTheme(() => this.changed.fire(undefined)));
     this.disposables.push(this.view.onDidExpandElement(({ element }) => {
       if ("key" in element) this.expanded.set(element.key, true);
@@ -162,7 +163,8 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
         if (entry && (!("node" in entry) || isModuleLeaf(entry))) return [];
         if (entry && isForm(entry)) {
           const rows = await this.forms.children(tree, entry);
-          return tree === this.tree ? rows : [];
+          return tree === this.tree ? this.sorting.rows(entry.project, rows, this.treeLanguage,
+            row => message(this.treeLanguage, row.target === "form" ? "formSource" : "formModule")) : [];
         }
         const children: Element[] = [];
         if (entry) {
@@ -245,6 +247,7 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
         ? this.hideEmptyGroups(entry.project) ? "eskaRootFiltered" : "eskaRootUnfiltered"
         : "eskaRoot"
       : commonModule ? "eskaCommonModule" : directModuleRole(entry) ? "eskaModuleObject" : isForm(entry) ? "eskaForm" : "eskaMetadata";
+    if (!node.parent && this.sorting.order(entry.project) === "alphabetical") item.contextValue += "Sorted";
     item.accessibilityInformation = { label };
     item.iconPath = node.state === "error" ? new vscode.ThemeIcon("warning") : this.metadataIcon(entry);
     if (!node.parent) item.description = entry.project.info.scope.kind === "member"
@@ -384,18 +387,10 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
   }
 
   /** Reorder one project's visible branches without changing backend data or triggering eager loads. */
-  private async chooseSortOrder(entry: Element): Promise<void> {
+  private async toggleSortOrder(entry: Element): Promise<void> {
     const tree = this.tree;
     if (!tree || !entry || !("node" in entry) || entry.node.parent || !tree.projects.includes(entry.project)) return;
-    const current = this.sorting.order(entry.project);
-    const choices = (["original", "alphabetical"] as const).map(order => ({
-      label: this.text(order === "original" ? "sortOriginal" : "sortAlphabetical"),
-      ...(order === current ? { description: this.text("sortCurrent") } : {}),
-      order,
-    }));
-    const choice = await vscode.window.showQuickPick(choices, { placeHolder: this.text("sortObjects"), ignoreFocusOut: true });
-    if (!choice || this.tree !== tree || this.disposed || choice.order === current) return;
-    await this.applySortOrder(entry, choice.order);
+    await this.applySortOrder(entry, this.sorting.order(entry.project) === "alphabetical" ? "original" : "alphabetical");
   }
 
   /** Persist before repainting; a failed save leaves the existing order intact. */
