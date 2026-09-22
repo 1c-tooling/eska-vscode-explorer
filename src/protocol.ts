@@ -11,7 +11,7 @@ export type FailureCode =
   | "manifestInvalid" | "selectionInvalid" | "sourceInvalid" | "rootInvalid"
   | "requestFailed" | "cleanupFailed" | "unsupportedWorkspace" | "untrusted"
   | "noFolder" | "invalidExecutable" | "obsolete" | "branchInvalid" | "sourceMissing"
-  | "unsupportedPath" | "sourceChanged" | "cancelled";
+  | "handlerMissing" | "unsupportedPath" | "sourceChanged" | "cancelled";
 
 /** Only stable categories cross into the localized UI; raw protocol text stays private. */
 export class ExplorerError extends Error {
