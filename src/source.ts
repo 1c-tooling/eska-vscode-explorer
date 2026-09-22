@@ -2,6 +2,7 @@ import { readFile, realpath, stat } from "node:fs/promises";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import { ExplorerError, isRecord, isWirePath, type WirePath } from "./protocol.js";
 import { MetadataTree, type TreeEntry } from "./tree.js";
+import { eventHandler, handlerRange } from "./event-handler.js";
 
 /** Decode only paths representable without loss on this extension host and in a VS Code URI. */
 export function nativePath(path: WirePath): string {
@@ -96,6 +97,18 @@ export type SourceTarget = "default" | "xml" | "form" | "form-module";
 
 /** Request exact source mappings; virtual groups intentionally do not open an editor. */
 export async function resolveSource(tree: MetadataTree, entry: TreeEntry, target: SourceTarget = "default"): Promise<OpenSource> {
+  if (target === "default" && entry.node.id.kind === "object" && entry.node.metadataKind === "event-subscription") {
+    const generation = entry.project.info.generation;
+    const event = entry.project.info.eventSequence;
+    const handler = await eventHandler(tree, entry);
+    const source = await resolveSource(tree, handler.module);
+    const bytes = await readFile(source.path);
+    const text = editorRange(bytes, 0, bytes.length).text;
+    if (generation !== entry.project.info.generation || event !== entry.project.info.eventSequence) {
+      throw new ExplorerError("sourceChanged");
+    }
+    return { path: source.path, position: handlerRange(text, handler.name) };
+  }
   const id = entry.node.id;
   if (id.kind === "collection") throw new ExplorerError("sourceMissing");
   const moduleRole = id.kind === "module" ? id.role : target === "form-module" ? "module"
