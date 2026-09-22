@@ -18,7 +18,8 @@ Marketplace не используется. Перед первым выпуск�
    из репозитория расширения, передав токен через переменную окружения `OVSX_PAT`.
    Если namespace уже существует, запросите права владельца; не создавайте
    расширение под случайным другим именем.
-3. Сохраните токен в GitHub environment `openvsx` как secret `OVSX_PAT`.
+3. Сохраните токен как repository secret `OVSX_PAT` либо как secret
+   `OVSX_PAT` в GitHub environment `openvsx`.
    **Первый выпуск** запускайте с `authentication: token`.
 4. После появления первой активной версии настройте trusted publisher:
    owner `1c-tooling`, repository `eska-vscode-explorer`,
@@ -52,7 +53,9 @@ Marketplace не используется. Перед первым выпуск�
 После успешного задания `release` workflow `Release` автоматически вызывает
 `Publish Open VSX` с номером релиза, `authentication: token` и `dry_run: false`.
 Номер передаётся только после успешной загрузки VSIX в GitHub Release.
-Используется существующий environment `openvsx` и его secret `OVSX_PAT`.
+Публикация выполняется в environment `openvsx`. Repository secret `OVSX_PAT`
+явно передаётся из `Release` в вызываемый workflow; при наличии одноимённого
+секрета в environment GitHub использует его.
 Отдельный токен GitHub не нужен: это прямой вызов reusable workflow,
 а не ожидание события `release`, которое может не запуститься от `GITHUB_TOKEN`.
 Если в environment настроено ручное одобрение deployment, GitHub будет ждать его.
