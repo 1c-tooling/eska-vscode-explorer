@@ -2,6 +2,10 @@ name: Publish Open VSX
 
 on:
   workflow_call:
+    secrets:
+      OVSX_PAT:
+        description: Open VSX publishing token; optional for dry run, OIDC, or an environment secret
+        required: false
     inputs:
       version:
         required: true

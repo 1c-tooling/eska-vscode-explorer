@@ -1,6 +1,7 @@
 import type { FailureCode } from "./protocol.js";
 
 const en = {
+  sortSaveFailed: "Could not save the project's sort order. Try again.",
   cliMissing: "ESKA is not installed for this user. Install version {1} for the editor and terminal?",
   cliIncompatible: "Global ESKA {0} is incompatible with Explorer. Install version {1}?",
   cliInstall: "Install ESKA for this user",
@@ -60,6 +61,7 @@ const en = {
 } as const;
 
 const ru: Record<keyof typeof en, string> = {
+  sortSaveFailed: "Не удалось сохранить порядок сортировки проекта. Попробуйте ещё раз.",
   cliMissing: "ESKA не установлена для текущего пользователя. Установить версию {1} для редактора и терминала?",
   cliIncompatible: "Глобальная ESKA {0} несовместима с Explorer. Установить версию {1}?",
   cliInstall: "Установить ESKA для пользователя",

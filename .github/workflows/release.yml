@@ -75,6 +75,8 @@ jobs:
       contents: read
       id-token: write
     uses: ./.github/workflows/publish-stores.yml
+    secrets:
+      OVSX_PAT: ${{ secrets.OVSX_PAT }}
     with:
       version: ${{ needs.release.outputs.version }}
       authentication: token

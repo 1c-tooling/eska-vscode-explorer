@@ -48,8 +48,9 @@ minor. После 1.0 действуют обычные patch/minor/major. Со�
 ## Настройка GitHub
 
 Для GitHub используется штатный `GITHUB_TOKEN`; отдельный GitHub PAT не требуется.
-Для Open VSX нужен `OVSX_PAT` в environment `openvsx`. Он доступен только
-заданию публикации в этом environment. Репозиторий должен
+Для Open VSX нужен `OVSX_PAT` на уровне репозитория либо environment `openvsx`.
+`Release` явно передаёт repository secret в reusable workflow. Задание публикации
+использует environment `openvsx` и настроенные для него правила одобрения. Репозиторий должен
 разрешать GitHub Actions создавать pull requests: Settings → Actions → General →
 Workflow permissions → **Allow GitHub Actions to create and approve pull requests**.
 Workflow задаёт `contents: write`, `pull-requests: write`, `actions: write` только

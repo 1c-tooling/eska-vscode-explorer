@@ -9,6 +9,7 @@ import { assertHost } from "./host.js";
 import { message, type MessageKey } from "./messages.js";
 import { ExplorerError } from "./protocol.js";
 import { MetadataTree, type TreeEntry, type ProjectTree } from "./tree.js";
+import { ProjectSorting, type SortOrder } from "./sorting.js";
 import { ProjectFilters, isHiddenSection, supportsRootFilter } from "./filter.js";
 import { nativePath, isCommonModule, directModuleRole, isModuleLeaf, isForm, resolveSource, type SourceTarget } from "./source.js";
 import { FormSources, type FormSource } from "./forms.js";
@@ -50,6 +51,7 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
   private watchers: vscode.Disposable[] = [];
   private readonly iconPaths = new Map<string, vscode.Uri>();
   private readonly filters: ProjectFilters;
+  private readonly sorting: ProjectSorting;
   private readonly expanded = new Map<string, boolean>();
   private readonly forms = new FormSources();
   private readonly recovering = new Set<ProjectTree>();
@@ -67,6 +69,7 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
     this.status.command = "eska.explorer.checkUpdates";
     this.disposables.push(this.status, this.decorations);
     this.filters = new ProjectFilters(context.workspaceState);
+    this.sorting = new ProjectSorting(context.workspaceState);
     this.connection = new Connection(String(context.extension.packageJSON.version),
       (state) => this.update(state), (text, level) => this.output[level ?? "info"](text));
     this.setup = new BackendSetup(context, (text, level) => { if (!this.disposed) this.output[level ?? "info"](text); },
@@ -95,6 +98,8 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
       this.disposables.push(vscode.commands.registerCommand(`eska.explorer.${name}`, (entry: Element) =>
         this.setRootFilter(entry, name === "resetRootFilter" ? undefined : name === "hideEmptyGroups")));
     }
+    this.disposables.push(vscode.commands.registerCommand("eska.explorer.sortObjects", (entry: Element) => this.toggleSortOrder(entry)));
+    this.disposables.push(vscode.commands.registerCommand("eska.explorer.resetSortOrder", (entry: Element) => this.toggleSortOrder(entry)));
     this.disposables.push(vscode.window.onDidChangeActiveColorTheme(() => this.changed.fire(undefined)));
     this.disposables.push(this.view.onDidExpandElement(({ element }) => {
       if ("key" in element) this.expanded.set(element.key, true);
@@ -158,13 +163,14 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
         if (entry && (!("node" in entry) || isModuleLeaf(entry))) return [];
         if (entry && isForm(entry)) {
           const rows = await this.forms.children(tree, entry);
-          return tree === this.tree ? rows : [];
+          return tree === this.tree ? this.sorting.rows(entry.project, rows, this.treeLanguage,
+            row => message(this.treeLanguage, row.target === "form" ? "formSource" : "formModule")) : [];
         }
         const children: Element[] = [];
         if (entry) {
           const all = await tree.children(entry);
           const hide = this.hideEmptyGroups(entry.project);
-          children.push(...all.filter((child) => !isHiddenSection(child, hide)
+          children.push(...this.sorting.children(entry.project, all, this.treeLanguage).filter((child) => !isHiddenSection(child, hide)
             && !(directModuleRole(entry) && child.node.id.kind === "collection" && child.node.id.collection.kind === "modules")));
         }
         else for (const project of tree.projects) {
@@ -236,9 +242,12 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
     item.id = entry.key;
     item.resourceUri = this.decorations.resource(entry);
     item.tooltip = label;
-    item.contextValue = !node.parent && supportsRootFilter(entry.project)
-      ? this.hideEmptyGroups(entry.project) ? "eskaRootFiltered" : "eskaRootUnfiltered"
+    item.contextValue = !node.parent
+      ? supportsRootFilter(entry.project)
+        ? this.hideEmptyGroups(entry.project) ? "eskaRootFiltered" : "eskaRootUnfiltered"
+        : "eskaRoot"
       : commonModule ? "eskaCommonModule" : directModuleRole(entry) ? "eskaModuleObject" : isForm(entry) ? "eskaForm" : "eskaMetadata";
+    if (!node.parent && this.sorting.order(entry.project) === "alphabetical") item.contextValue += "Sorted";
     item.accessibilityInformation = { label };
     item.iconPath = node.state === "error" ? new vscode.ThemeIcon("warning") : this.metadataIcon(entry);
     if (!node.parent) item.description = entry.project.info.scope.kind === "member"
@@ -374,6 +383,30 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
       if (this.tree === tree) await this.repaint([entry]);
     } catch {
       void vscode.window.showErrorMessage(this.text("filterSaveFailed"));
+    }
+  }
+
+  /** Reorder one project's visible branches without changing backend data or triggering eager loads. */
+  private async toggleSortOrder(entry: Element): Promise<void> {
+    const tree = this.tree;
+    if (!tree || !entry || !("node" in entry) || entry.node.parent || !tree.projects.includes(entry.project)) return;
+    await this.applySortOrder(entry, this.sorting.order(entry.project) === "alphabetical" ? "original" : "alphabetical");
+  }
+
+  /** Persist before repainting; a failed save leaves the existing order intact. */
+  private async applySortOrder(entry: TreeEntry, order: SortOrder): Promise<void> {
+    const tree = this.tree;
+    try {
+      await this.sorting.set(entry.project, order);
+      if (this.tree !== tree || this.disposed) return;
+      const selected = this.view.selection[0];
+      this.changed.fire(entry);
+      if (selected && "node" in selected && selected.project === entry.project) {
+        try { await this.view.reveal(selected, { select: true, focus: false }); }
+        catch (error) { this.output.info(`sort_selection_error code=${error instanceof ExplorerError ? error.code : "requestFailed"}`); }
+      }
+    } catch {
+      void vscode.window.showErrorMessage(this.text("sortSaveFailed"));
     }
   }
 
