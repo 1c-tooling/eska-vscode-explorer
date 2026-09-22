@@ -128,6 +128,12 @@
         "command": "eska.explorer.checkUpdates",
         "title": "%checkUpdates%",
         "category": "ESKA Explorer"
+      },
+      {
+        "command": "eska.explorer.sortObjects",
+        "title": "%sortObjects%",
+        "category": "ESKA Explorer",
+        "icon": "$(sort-precedence)"
       }
     ],
     "views": {
@@ -186,7 +192,7 @@
         },
         {
           "command": "eska.explorer.refreshNode",
-          "when": "view == eska.explorer.projects && (viewItem == eskaFiles || viewItem == eskaMetadata || viewItem == eskaCommonModule || viewItem == eskaModuleObject || viewItem == eskaForm || viewItem == eskaRootFiltered || viewItem == eskaRootUnfiltered)",
+          "when": "view == eska.explorer.projects && (viewItem == eskaFiles || viewItem == eskaMetadata || viewItem == eskaCommonModule || viewItem == eskaModuleObject || viewItem == eskaForm || viewItem == eskaRoot || viewItem == eskaRootFiltered || viewItem == eskaRootUnfiltered)",
           "group": "inline@2"
         },
         {
@@ -203,6 +209,11 @@
           "command": "eska.explorer.resetRootFilter",
           "when": "view == eska.explorer.projects && (viewItem == eskaRootFiltered || viewItem == eskaRootUnfiltered)",
           "group": "filter@1"
+        },
+        {
+          "command": "eska.explorer.sortObjects",
+          "when": "view == eska.explorer.projects && (viewItem == eskaRoot || viewItem == eskaRootFiltered || viewItem == eskaRootUnfiltered)",
+          "group": "inline@3"
         }
       ],
       "commandPalette": [
@@ -228,6 +239,10 @@
         },
         {
           "command": "eska.explorer.resetRootFilter",
+          "when": "false"
+        },
+        {
+          "command": "eska.explorer.sortObjects",
           "when": "false"
         }
       ]

@@ -21,5 +21,6 @@
   "search": "Search metadata",
   "revealActiveFile": "Reveal Active File in eska Tree",
   "checkUpdates": "Check for ESKA updates",
-  "checkForUpdates": "Check for global ESKA updates at most once a day. Installation requires confirmation."
+  "checkForUpdates": "Check for global ESKA updates at most once a day. Installation requires confirmation.",
+  "sortObjects": "Metadata object order…"
 }
