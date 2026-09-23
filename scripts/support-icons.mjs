@@ -1,11 +1,12 @@
-import { readFile, readdir, mkdir, writeFile } from 'node:fs/promises';
+import { readFile, readdir, mkdir, rm, writeFile } from 'node:fs/promises';
 
 const root = new URL('../resources/icons/', import.meta.url);
-const symbols = ['shield_lock', 'privacy_tip', 'encrypted_off'];
+const symbols = ['lock', 'lock_open_right', 'no_encryption'];
 // Bundle composed SVGs so rendering needs neither filesystem reads nor background work.
 for (const theme of ['light', 'dark', 'contrast', 'contrast-light']) {
   const folder = new URL(`${theme}/`, root);
   const output = new URL(`support/generated/${theme}/`, root);
+  await rm(output, { recursive: true, force: true });
   await mkdir(output, { recursive: true });
   for (const filename of await readdir(folder)) {
     const original = await readFile(new URL(filename, folder), 'utf8');

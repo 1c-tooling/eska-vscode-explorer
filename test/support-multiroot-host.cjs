@@ -41,7 +41,7 @@ exports.run = async function () {
   await secondary.disconnect();
   await new Promise(resolve=>setTimeout(resolve,500));
   await explorer.support.serial;
-  assert.equal(explorer.support.provideFileDecoration(two)?.badge,'?');
+  assert.equal(explorer.support.provideFileDecoration(two),undefined);
   const disconnected=await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(two));
   const unchanged=disconnected.document.getText();
   await vscode.commands.executeCommand('type',{text:'must remain blocked'});

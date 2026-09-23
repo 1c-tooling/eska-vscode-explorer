@@ -40,19 +40,20 @@ exports.run = async function () {
   await until(async()=> (await explorer.decorations.provideFileDecoration(explorer.getTreeItem(byName.Locked).resourceUri))?.badge==='M');
   const combined=await explorer.decorations.provideFileDecoration(explorer.getTreeItem(byName.Locked).resourceUri);
   assert.equal(combined.badge,'M');assert.equal(explorer.support.decoration(byName.Supported).badge,'S');
-  assert.equal(explorer.support.decoration(byName.Own),undefined);assert.equal(explorer.support.decoration(byName.Removed),undefined);assert.equal(explorer.support.decoration(byName.Unknown).badge,'?');
-  for (const [name, symbol] of [['Locked','shield_lock'],['Supported','privacy_tip'],['Removed','encrypted_off']]) {
+  assert.equal(explorer.support.decoration(byName.Own),undefined);assert.equal(explorer.support.decoration(byName.Removed),undefined);assert.equal(explorer.support.decoration(byName.Unknown),undefined);
+  for (const [name, symbol] of [['Locked','lock'],['Supported','lock_open_right'],['Removed','no_encryption']]) {
     const item = explorer.getTreeItem(byName[name]);
     assert.ok(item.iconPath.path.endsWith(`-${symbol}.svg`), name);
     assert.match(await fs.readFile(item.iconPath.fsPath,'utf8'), /fill="#f59e0b"/);
   }
   assert.ok(!explorer.getTreeItem(byName.Own).iconPath.path.includes('/support/'));
+  assert.ok(!explorer.getTreeItem(byName.Unknown).iconPath.path.includes('/support/'));
   // The icon is part of the synchronous tree item even with pending Git work.
   const savedSerial = explorer.decorations.serial;
   let releaseGit;
   explorer.decorations.serial = new Promise(resolve=>{releaseGit=resolve;});
   try {
-    for(let i=0;i<1000;i++) assert.ok(explorer.getTreeItem(byName.Locked).iconPath.path.endsWith('-shield_lock.svg'));
+    for(let i=0;i<1000;i++) assert.ok(explorer.getTreeItem(byName.Locked).iconPath.path.endsWith('-lock.svg'));
   } finally { releaseGit(); explorer.decorations.serial = savedSerial; }
   await vscode.commands.executeCommand('eska.explorer.projects.focus');
   await explorer.view.reveal(root,{expand:true,focus:true,select:false});

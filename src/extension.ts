@@ -72,7 +72,6 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
   constructor(private readonly context: vscode.ExtensionContext) {
     this.support = new SupportController(context, () => this.supportRepaint(), text => this.output.warn(text));
     this.supportContexts = new SupportContexts(String(context.extension.packageJSON.version), (trees, pending) => this.support.setAdditionalTrees(trees, pending), () => this.support.invalidate(), text => this.output.info(text));
-    this.decorations.support = entry => this.support.object(entry)?.state === "unknown" ? this.support.decoration(entry) : undefined;
     this.status.name = "ESKA Explorer";
     this.status.command = "eska.explorer.checkUpdates";
     this.disposables.push(this.status, this.decorations);

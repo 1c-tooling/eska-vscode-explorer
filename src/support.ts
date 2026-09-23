@@ -139,19 +139,19 @@ export class SupportController implements vscode.FileDecorationProvider {
   }
 
   /** Select bundled Material artwork from confirmed policy, never infer removal from unrestricted alone. */
-  icon(entry: TreeEntry): 'shield_lock' | 'privacy_tip' | 'encrypted_off' | undefined {
+  icon(entry: TreeEntry): 'lock' | 'lock_open_right' | 'no_encryption' | undefined {
     const policy = this.object(entry);
-    if (policy?.state === 'locked') return 'shield_lock';
-    if (policy?.state === 'editableWithSupport') return 'privacy_tip';
-    if (policy?.state === 'unrestricted' && policy.reason === 'supportRemoved') return 'encrypted_off';
+    if (policy?.state === 'locked') return 'lock';
+    if (policy?.state === 'editableWithSupport') return 'lock_open_right';
+    if (policy?.state === 'unrestricted' && policy.reason === 'supportRemoved') return 'no_encryption';
     return undefined;
   }
 
   /** A single short badge is supported by the public API in all native tree themes. */
   decoration(entry: TreeEntry): vscode.FileDecoration | undefined {
     const policy = this.object(entry);
-    if (!policy || policy.state === 'unrestricted') return undefined;
-    return new vscode.FileDecoration(policy.state === 'locked' ? '🔒' : policy.state === 'editableWithSupport' ? 'S' : '?', this.explanation(entry));
+    if (!policy || policy.state === 'unrestricted' || policy.state === 'unknown') return undefined;
+    return new vscode.FileDecoration(policy.state === 'locked' ? '🔒' : 'S', this.explanation(entry));
   }
 
   /** Standard Explorer uses real file URIs and can request explanations before our tree is visible. */
@@ -161,8 +161,8 @@ export class SupportController implements vscode.FileDecorationProvider {
     if (current) {
       const { file, snapshot } = current;
       const project = [...this.snapshots].find(([, value]) => value === snapshot)?.[0];
-      if (!project || project.info.generation !== snapshot.generation || project.info.eventSequence !== snapshot.eventSequence) return new vscode.FileDecoration('?', supportText('unknown'));
-      if (file.unknown) return new vscode.FileDecoration('?', supportText('unknown') + ': ' + snapshot.diagnostics.join('; '));
+      if (!project || project.info.generation !== snapshot.generation || project.info.eventSequence !== snapshot.eventSequence) return undefined;
+      if (file.unknown) return undefined;
       if (file.readOnly) return new vscode.FileDecoration('🔒', supportText(file.mixed ? 'mixed' : 'vendorLocked'));
       if (file.objects.some(id => snapshot.objects.get(id)?.state === 'editableWithSupport')) return new vscode.FileDecoration('S', supportText('editableWithSupport'));
     }

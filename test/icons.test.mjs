@@ -80,7 +80,7 @@ test("tabular attributes inherit the table color without recoloring other fields
 });
 
 test("support composites preserve themed metadata and bundle only the three orange symbols", async () => {
-  const symbols = ['shield_lock', 'privacy_tip', 'encrypted_off'];
+  const symbols = ['lock', 'lock_open_right', 'no_encryption'];
   for (const theme of ['light', 'dark', 'contrast', 'contrast-light']) {
     const base = new URL(`../resources/icons/${theme}/`, import.meta.url);
     const output = new URL(`../resources/icons/support/generated/${theme}/`, import.meta.url);

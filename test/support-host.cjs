@@ -66,7 +66,7 @@ exports.run = async function () {
   await vscode.commands.executeCommand('type', { text: 'blocked' });
   assert.equal(editor.document.getText(), dirty, 'dirty text preserved and further typing blocked');
   await fs.writeFile(supportPath,'corrupted');
-  await until(()=>explorer.support.provideFileDecoration(uri)?.badge==='?','corrupted support diagnosed');
+  await until(()=>!explorer.support.loading && explorer.support.snapshots.size > 0 && explorer.support.provideFileDecoration(uri) === undefined,'corrupted support diagnosed without icon');
   await vscode.commands.executeCommand('type',{text:'still blocked'});
   assert.equal(editor.document.getText(),dirty,'corruption does not clear prior restriction');
   await fs.writeFile(supportPath,support(0,0));

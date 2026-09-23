@@ -86,7 +86,7 @@ exports.run = async function () {
     const beforeMissing=calls;
     await fs.unlink(file);
     await until(()=>calls>beforeMissing && !explorer.support.loading);
-    assert.equal(explorer.support.provideFileDecoration(uri).badge,'?');
+    assert.equal(explorer.support.provideFileDecoration(uri),undefined);
     const beforeRestored=calls;
     await fs.writeFile(file,rules(0));
     await until(()=>calls>beforeRestored && !explorer.support.loading);
