@@ -23,5 +23,6 @@
   "checkUpdates": "Check for ESKA updates",
   "checkForUpdates": "Check for global ESKA updates at most once a day. Installation requires confirmation.",
   "sortObjects": "Enable alphabetical sorting",
-  "resetSortOrder": "Disable alphabetical sorting"
+  "resetSortOrder": "Disable alphabetical sorting",
+  "supportPolicy": "Check 1C support rules, show support icons and protect restricted files from editing. Disabling removes only ESKA restrictions and skips the support check. Applies immediately to all workspace folders."
 }

@@ -28,6 +28,14 @@ exports.run = async function () {
   const rulesPath=path.join(second.source,'Ext/ParentConfigurations.bin');
   await fs.writeFile(rulesPath,(await fs.readFile(rulesPath,'utf8')).replace(`{6,0,1,${id},0,`,`{6,0,1,${id},1,`));
   await until(()=>explorer.support.provideFileDecoration(two)?.badge==='🔒','secondary folder is locked');
+  const config=vscode.workspace.getConfiguration('eska.explorer');
+  await config.update('supportPolicy',false,vscode.ConfigurationTarget.Workspace);
+  await until(()=>explorer.support.ownedRules().length===0 && explorer.supportContexts.connections.length===0,'disable both folders');
+  assert.equal(explorer.support.provideFileDecoration(one),undefined);
+  assert.equal(explorer.support.provideFileDecoration(two),undefined);
+  assert.deepEqual(vscode.workspace.getConfiguration('files').get('readonlyInclude'),{'**/*.os':true});
+  await config.update('supportPolicy',true,vscode.ConfigurationTarget.Workspace);
+  await until(()=>explorer.support.provideFileDecoration(one)?.badge==='🔒' && explorer.support.provideFileDecoration(two)?.badge==='🔒','re-enable both folders');
   const secondary=explorer.supportContexts.connections[0];
   const target=secondary.state.target;
   await secondary.disconnect();
@@ -45,5 +53,5 @@ exports.run = async function () {
   await vscode.commands.executeCommand('eska.explorer.disconnect');
   await until(()=>Object.keys(vscode.workspace.getConfiguration('files').get('readonlyInclude')).length===1,'cleanup both folders');
   assert.equal(vscode.workspace.getConfiguration('files').get('readonlyInclude')['**/*.os'],true);
-  await fs.writeFile(path.join(first.root,'host-result.json'),JSON.stringify({passed:true,vscode:vscode.version,multiRoot:true,sameUuidIsolated:true,unopenedTree:true,userSettingsPreserved:true,secondaryDisconnectPreservesLock:true,folderRemoval:true}));
+  await fs.writeFile(path.join(first.root,'host-result.json'),JSON.stringify({passed:true,vscode:vscode.version,multiRoot:true,liveToggle:true,sameUuidIsolated:true,unopenedTree:true,userSettingsPreserved:true,secondaryDisconnectPreservesLock:true,folderRemoval:true}));
 };

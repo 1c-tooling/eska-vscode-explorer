@@ -302,6 +302,12 @@
           "default": true,
           "scope": "window",
           "description": "%checkForUpdates%"
+        },
+        "eska.explorer.supportPolicy": {
+          "type": "boolean",
+          "default": true,
+          "scope": "window",
+          "description": "%supportPolicy%"
         }
       }
     },

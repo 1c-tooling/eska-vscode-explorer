@@ -66,11 +66,14 @@ export class SupportController implements vscode.FileDecorationProvider {
     });
   }
 
+  /** One window-wide switch governs both navigation and additional workspace folders. */
+  get enabled(): boolean { return vscode.workspace.getConfiguration('eska.explorer').get<boolean>('supportPolicy', true); }
+
   /** A session change invalidates every queued response before any setting is written. */
   setTree(tree: MetadataTree | undefined, available: boolean, clearRestrictions = false): void {
     this.tree = tree; this.available = available; this.epoch++; this.requested = undefined;
     this.clearRestrictions = clearRestrictions;
-    this.loading = !!tree && available;
+    this.loading = this.enabled && !!tree && available;
     this.failed = false;
     this.snapshots.clear();
     this.invalidate();
@@ -87,7 +90,7 @@ export class SupportController implements vscode.FileDecorationProvider {
   /** Coalesce file events; painting and opening never trigger a project scan. */
   invalidate(): void {
     if (this.stopped) return;
-    const key = JSON.stringify([this.available, this.pendingFolders, [this.tree, ...this.additional].filter(Boolean).map(tree => [tree?.session.sessionId, tree?.projects.map(project => [project.supportGeneration ?? project.info.generation, project.supportEventSequence ?? project.info.eventSequence])])]);
+    const key = JSON.stringify([this.enabled, this.available, this.pendingFolders, [this.tree, ...this.additional].filter(Boolean).map(tree => [tree?.session.sessionId, tree?.projects.map(project => [project.supportGeneration ?? project.info.generation, project.supportEventSequence ?? project.info.eventSequence])])]);
     if (key === this.requested) {
       // A backend-confirmed BSL-only edit advances metadata tokens without changing support.
       for (const [project, snapshot] of this.snapshots) {
@@ -98,8 +101,12 @@ export class SupportController implements vscode.FileDecorationProvider {
     }
     this.requested = key;
     const epoch = ++this.epoch;
-    this.loading = !!this.tree && this.available;
+    this.loading = this.enabled && !!this.tree && this.available;
     this.failed = false;
+    if (!this.enabled) {
+      this.snapshots.clear(); this.fileIndex.clear(); this.mixedObjects.clear();
+      this.changed.fire(undefined);
+    }
     this.repaint();
     clearTimeout(this.timer);
     this.timer = setTimeout(() => {
@@ -113,7 +120,7 @@ export class SupportController implements vscode.FileDecorationProvider {
 
   /** Resolve a tree object's own status, leaving virtual groups undecorated. */
   object(entry: TreeEntry): ObjectPolicy | undefined {
-    if (entry.node.id.kind === 'collection') return undefined;
+    if (!this.enabled || entry.node.id.kind === 'collection') return undefined;
     const id = entry.node.id.kind === 'object' ? entry.node.id.objectId : entry.node.id.owner;
     const snapshot = this.snapshots.get(entry.project);
     const current = snapshot?.generation === entry.project.info.generation && snapshot?.eventSequence === entry.project.info.eventSequence;
@@ -149,7 +156,7 @@ export class SupportController implements vscode.FileDecorationProvider {
 
   /** Standard Explorer uses real file URIs and can request explanations before our tree is visible. */
   provideFileDecoration(uri: vscode.Uri): vscode.FileDecoration | undefined {
-    if (uri.scheme !== 'file') return undefined;
+    if (!this.enabled || uri.scheme !== 'file') return undefined;
     const current = this.fileIndex.get(uri.toString());
     if (current) {
       const { file, snapshot } = current;
@@ -166,8 +173,8 @@ export class SupportController implements vscode.FileDecorationProvider {
   private async refresh(epoch: number): Promise<void> {
     const tree = this.tree;
     if (epoch !== this.epoch) return;
-    if (!tree || !this.available) {
-      if (this.clearRestrictions) { await this.apply([], epoch); this.fileIndex.clear(); }
+    if (!this.enabled || !tree || !this.available) {
+      if (!this.enabled || this.clearRestrictions) { await this.apply([], epoch); this.fileIndex.clear(); }
       this.changed.fire(undefined); this.repaint();
       return;
     }

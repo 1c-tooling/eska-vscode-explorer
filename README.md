@@ -179,6 +179,7 @@ ESKA: 1C Explorer
 | Настройка | Значение по умолчанию | Назначение |
 | --- | --- | --- |
 | `eska.explorer.executable` | `eska` | Глобальная ESKA или путь к backend для разработки |
+| `eska.explorer.supportPolicy` | `true` | Проверять поддержку 1С и защищать файлы; отключение снимает ограничения ESKA без перезапуска |
 | `eska.explorer.checkForUpdates` | `true` | Проверять обновления CLI не чаще раза в сутки |
 | `eska.explorer.treeLanguage` | `auto` | Язык групп: `auto`, `ru-RU` или `en-US` |
 | `eska.explorer.hideEmptyRootGroups` | `true` | Скрывать пустые разделы по умолчанию |

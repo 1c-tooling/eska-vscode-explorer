@@ -20,7 +20,7 @@ export class SupportContexts {
     const cleanup = this.stop();
     const revision = this.revision;
     await cleanup;
-    if (revision !== this.revision) return;
+    if (revision !== this.revision || !vscode.workspace.getConfiguration('eska.explorer').get<boolean>('supportPolicy', true)) return;
     this.pending = new Set(targets.map(target => target.path));
     this.publish([...this.trees], [...this.pending]);
     for (const target of targets) {

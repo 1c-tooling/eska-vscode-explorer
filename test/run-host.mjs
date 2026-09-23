@@ -18,7 +18,7 @@ try {
   if (process.platform === "win32") await cp(binary, join(bin, executableName));
   else await symlink(binary, join(bin, executableName));
   await mkdir(join(fixture.root, ".vscode"), { recursive: true });
-  await writeFile(join(fixture.root, ".vscode/settings.json"), JSON.stringify({ "eska.explorer.checkForUpdates": false }));
+  await writeFile(join(fixture.root, ".vscode/settings.json"), JSON.stringify({ "eska.explorer.checkForUpdates": false, ...(process.env.ESKA_HOST_SUPPORT_DISABLED ? { "eska.explorer.supportPolicy": false } : {}) }));
   const executable = process.env.VSCODE_EXECUTABLE ?? "code";
   let extensionPath = repository;
   if (process.env.ESKA_BSL_EXTENSION) {

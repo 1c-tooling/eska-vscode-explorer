@@ -132,6 +132,14 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
       if (event.affectsConfiguration("eska.explorer.executable", this.selected?.uri)) {
         void this.disconnect();
       }
+      if (event.affectsConfiguration("eska.explorer.supportPolicy")) {
+        this.support.invalidate();
+        const state = this.connection.state;
+        if (state.kind === "ready") {
+          void this.supportContexts.start(this.folders().filter(folder => folder.uri.fsPath !== state.target.path)
+            .map(folder => ({ ...state.target, path: folder.uri.fsPath, name: folder.name })));
+        } else void this.supportContexts.stop();
+      }
       if (event.affectsConfiguration("eska.explorer.hideEmptyRootGroups")) {
         void this.repaint(this.tree?.projects.flatMap((project) => project.root ? [project.root] : []));
       }
