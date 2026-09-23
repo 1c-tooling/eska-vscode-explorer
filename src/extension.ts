@@ -72,7 +72,7 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
   constructor(private readonly context: vscode.ExtensionContext) {
     this.support = new SupportController(context, () => this.supportRepaint(), text => this.output.warn(text));
     this.supportContexts = new SupportContexts(String(context.extension.packageJSON.version), (trees, pending) => this.support.setAdditionalTrees(trees, pending), () => this.support.invalidate(), text => this.output.info(text));
-    this.decorations.support = entry => this.support.decoration(entry);
+    this.decorations.support = entry => this.support.object(entry)?.state === "unknown" ? this.support.decoration(entry) : undefined;
     this.status.name = "ESKA Explorer";
     this.status.command = "eska.explorer.checkUpdates";
     this.disposables.push(this.status, this.decorations);
@@ -283,7 +283,9 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
     const theme = kind === vscode.ColorThemeKind.HighContrast ? "contrast"
       : kind === vscode.ColorThemeKind.HighContrastLight ? "contrast-light"
       : kind === vscode.ColorThemeKind.Light ? "light" : "dark";
-    const key = `${theme}/${sourceIcon ?? iconName(entry.node, entry.project.info.type, this.tree?.parent(entry)?.node)}.svg`;
+    const name = sourceIcon ?? iconName(entry.node, entry.project.info.type, this.tree?.parent(entry)?.node);
+    const support = this.support.icon(entry);
+    const key = support ? `support/generated/${theme}/${name}-${support}.svg` : `${theme}/${name}.svg`;
     let uri = this.iconPaths.get(key);
     if (!uri) {
       uri = vscode.Uri.joinPath(this.context.extensionUri, "resources", "icons", key);

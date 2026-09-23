@@ -34,7 +34,7 @@
     }
   },
   "scripts": {
-    "compile": "tsc -p .",
+    "compile": "node scripts/support-icons.mjs && tsc -p .",
     "check": "tsc -p . --noEmit",
     "test": "bun run --bun compile && bun test",
     "test:node": "npm run compile && node --test test/*.test.mjs",

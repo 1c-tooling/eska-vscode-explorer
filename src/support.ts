@@ -130,6 +130,15 @@ export class SupportController implements vscode.FileDecorationProvider {
     return details.join('\n');
   }
 
+  /** Select bundled Material artwork from confirmed policy, never infer removal from unrestricted alone. */
+  icon(entry: TreeEntry): 'shield_lock' | 'privacy_tip' | 'encrypted_off' | undefined {
+    const policy = this.object(entry);
+    if (policy?.state === 'locked') return 'shield_lock';
+    if (policy?.state === 'editableWithSupport') return 'privacy_tip';
+    if (policy?.state === 'unrestricted' && policy.reason === 'supportRemoved') return 'encrypted_off';
+    return undefined;
+  }
+
   /** A single short badge is supported by the public API in all native tree themes. */
   decoration(entry: TreeEntry): vscode.FileDecoration | undefined {
     const policy = this.object(entry);

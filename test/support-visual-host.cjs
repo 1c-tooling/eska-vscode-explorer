@@ -32,14 +32,28 @@ exports.run = async function () {
   await vscode.commands.executeCommand('eska.explorer.connect');
   const api=(await vscode.extensions.getExtension('vscode.git').activate()).getAPI(1);
   const repository=await api.openRepository(vscode.Uri.file(fixture.root));await repository.status();
+  await until(()=>!explorer.support.loading);
   const roots=await explorer.getChildren();const root=roots.find(item=>item.node);
   const group=(await explorer.getChildren(root)).find(item=>item.node?.id.collection?.metadataKind==='catalog');
   const entries=await explorer.getChildren(group);
   const byName=Object.fromEntries(entries.map(entry=>[entry.node.label.text,entry]));
-  await until(async()=> (await explorer.decorations.provideFileDecoration(explorer.getTreeItem(byName.Locked).resourceUri))?.badge==='🔒');
+  await until(async()=> (await explorer.decorations.provideFileDecoration(explorer.getTreeItem(byName.Locked).resourceUri))?.badge==='M');
   const combined=await explorer.decorations.provideFileDecoration(explorer.getTreeItem(byName.Locked).resourceUri);
-  assert.match(combined.tooltip,/M:/);assert.equal(explorer.support.decoration(byName.Supported).badge,'S');
+  assert.equal(combined.badge,'M');assert.equal(explorer.support.decoration(byName.Supported).badge,'S');
   assert.equal(explorer.support.decoration(byName.Own),undefined);assert.equal(explorer.support.decoration(byName.Removed),undefined);assert.equal(explorer.support.decoration(byName.Unknown).badge,'?');
+  for (const [name, symbol] of [['Locked','shield_lock'],['Supported','privacy_tip'],['Removed','encrypted_off']]) {
+    const item = explorer.getTreeItem(byName[name]);
+    assert.ok(item.iconPath.path.endsWith(`-${symbol}.svg`), name);
+    assert.match(await fs.readFile(item.iconPath.fsPath,'utf8'), /fill="#f59e0b"/);
+  }
+  assert.ok(!explorer.getTreeItem(byName.Own).iconPath.path.includes('/support/'));
+  // The icon is part of the synchronous tree item even with pending Git work.
+  const savedSerial = explorer.decorations.serial;
+  let releaseGit;
+  explorer.decorations.serial = new Promise(resolve=>{releaseGit=resolve;});
+  try {
+    for(let i=0;i<1000;i++) assert.ok(explorer.getTreeItem(byName.Locked).iconPath.path.endsWith('-shield_lock.svg'));
+  } finally { releaseGit(); explorer.decorations.serial = savedSerial; }
   await vscode.commands.executeCommand('eska.explorer.projects.focus');
   await explorer.view.reveal(root,{expand:true,focus:true,select:false});
   await new Promise(resolve=>setTimeout(resolve,500));

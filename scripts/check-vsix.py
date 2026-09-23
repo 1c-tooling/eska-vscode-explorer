@@ -21,7 +21,7 @@ def check(archive):
         assert identity.attrib['Version'] == manifest['version']
         shipped = json.loads(package.read('extension/package.json'))
         assert all(shipped.get(key) == value for key, value in manifest.items()), 'Packaged manifest differs'
-        required = ['package.json', 'package.nls.json', 'package.nls.ru.json', 'README.md', 'CHANGELOG.md', 'LICENSE']
+        required = ['package.json', 'package.nls.json', 'package.nls.ru.json', 'README.md', 'CHANGELOG.md', 'LICENSE', 'resources/icons/support/LICENSE', 'resources/icons/support/NOTICE.md']
         if manifest.get('icon'):
             required.append(manifest['icon'])
         required += [path.relative_to(root).as_posix() for pattern in ['out/*.js', 'resources/icons/**/*.svg', 'docs/*.md', 'docs/measurements/*.json'] for path in root.glob(pattern)]

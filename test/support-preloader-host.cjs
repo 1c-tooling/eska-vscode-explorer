@@ -44,6 +44,8 @@ exports.run = async function () {
     const [root] = rows.filter(row => row.node);
     const decorations = explorer.decorations;
     const oldApi = decorations.api;
+    const oldSupport = decorations.support;
+    decorations.support = entry => explorer.support.decoration(entry);
     const oldSerial = decorations.serial;
     let releaseGit;
     decorations.api = { repositories: [] };
@@ -57,6 +59,7 @@ exports.run = async function () {
       releaseGit();
       await decorations.serial;
       decorations.api = oldApi;
+      decorations.support = oldSupport;
       decorations.serial = oldSerial;
       decorations.invalidate();
     }
