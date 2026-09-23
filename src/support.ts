@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { join } from 'node:path';
+import { createHash } from 'node:crypto';
 import { isRecord, isWirePath } from './protocol.js';
 import { nativePath } from './source.js';
 import type { MetadataTree, ProjectTree, TreeEntry } from './tree.js';
@@ -171,7 +172,7 @@ export class SupportController implements vscode.FileDecorationProvider {
       return;
     }
     const snapshots = new Map<ProjectTree, Snapshot>();
-    const baselineRules = this.context.workspaceState.get<string[]>('supportReadonlyRules.v1', []);
+    const baselineRules = this.ownedRules();
     let published = false;
     for (const context of [tree, ...this.additional]) for (const project of context.projects) {
       const objects = new Map<string, ObjectPolicy>();
@@ -277,15 +278,33 @@ export class SupportController implements vscode.FileDecorationProvider {
     return this.settings().inspect<Record<string, boolean>>('readonlyInclude')?.workspaceValue ?? {};
   }
 
+  /** Resolve journal identities against existing settings instead of storing megabytes of duplicate paths. */
+  private ownedRules(): string[] {
+    const hashes = this.context.workspaceState.get<string[]>('supportReadonlyRules.v2');
+    if (!hashes) return this.context.workspaceState.get<string[]>('supportReadonlyRules.v1', []);
+    const owned = new Set(hashes);
+    return Object.keys(this.readRules()).filter(pattern => owned.has(this.ruleHash(pattern)));
+  }
+
+  /** Hash only ownership identities; settings still contain the exact reversible file patterns. */
+  private ruleHash(pattern: string): string { return createHash('sha256').update(pattern).digest('base64'); }
+
+  /** Save recovery identities before modifying settings and migrate the former full-path journal once. */
+  private async saveOwnedRules(patterns: string[]): Promise<void> {
+    await this.context.workspaceState.update('supportReadonlyRules.v2', [...new Set(patterns.map(pattern => this.ruleHash(pattern)))]);
+    if (this.context.workspaceState.get('supportReadonlyRules.v1') !== undefined) {
+      await this.context.workspaceState.update('supportReadonlyRules.v1', undefined);
+    }
+  }
+
   /** Keep exact absolute patterns in one workspace scope, including multi-folder workspaces. */
   private async apply(patterns: string[], epoch?: number): Promise<void> {
-    const key = 'supportReadonlyRules.v1';
-    const previous = this.context.workspaceState.get<string[]>(key, []);
+    const previous = this.ownedRules();
     const desired = patterns;
     let current = this.readRules();
     let merged = reconcileRules(current, previous, desired);
     // Save a recovery journal before writing configuration, then reread after the await.
-    await this.context.workspaceState.update(key, [...new Set([...previous, ...merged.owned])]);
+    await this.saveOwnedRules([...previous, ...merged.owned]);
     if (epoch !== undefined && epoch !== this.epoch) return;
     current = this.readRules();
     merged = reconcileRules(current, previous, desired);
@@ -308,7 +327,7 @@ export class SupportController implements vscode.FileDecorationProvider {
       expected = next;
     }
     merged.owned = merged.owned.filter(key => !externallyEdited.has(key));
-    await this.context.workspaceState.update(key, merged.owned);
+    await this.saveOwnedRules(merged.owned);
   }
 
   /** Deactivation awaits cleanup; no writeable-in-session command is ever invoked. */

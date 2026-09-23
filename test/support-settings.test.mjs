@@ -21,7 +21,21 @@ test('large policy has bounded keys and literal project-scoped alternatives', ()
   const paths = Array.from({length: 1000}, (_, i) => `/project/src/CommonModules/M${i}/Ext/Module.bsl`);
   const patterns = readonlyPatterns('/project/src', paths);
   assert.equal(patterns.length, 8);
-  assert.ok(patterns.every(pattern => pattern.startsWith('/project/src/{')));
+  assert.ok(patterns.every(pattern => pattern.startsWith('/project/src/CommonModules/M')));
   assert.deepEqual(readonlyPatterns('/project/src', [...paths].reverse()), patterns);
   assert.equal(readonlyPattern('/src/a,b.bsl'), '/src/a[,]b.bsl');
+});
+
+
+test('factoring shared literals retains the exact file set and reduces pattern size', () => {
+  const paths = Array.from({length: 256}, (_, i) => `/project/src/CommonModules/M${i}/Ext/Module.bsl`);
+  const patterns = readonlyPatterns('/project/src', paths);
+  assert.ok(patterns.join('').length < paths.join('').length / 3);
+  assert.ok(patterns.every(pattern => pattern.endsWith('}/Ext/Module.bsl')));
+  const different = [...paths, '/project/src/Catalogs/A/Ext/ObjectModule.bsl', '/project/src/Catalogs/B/Ext/ManagerModule.bsl'];
+  const expanded = readonlyPatterns('/project/src', different).flatMap(pattern => {
+    const match = /^([^{}]*)\{([^{}]*)\}([^{}]*)$/.exec(pattern);
+    return match ? match[2].split(',').map(value => match[1] + value + match[3]) : [pattern];
+  });
+  assert.deepEqual(expanded.sort(), different.sort());
 });

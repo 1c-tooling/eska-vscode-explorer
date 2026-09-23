@@ -24,7 +24,23 @@ export function readonlyPatterns(source: string, paths: readonly string[]): stri
   for (let offset = 0; offset < sorted.length; offset += 128) {
     const batch = sorted.slice(offset, offset + 128);
     const relative = batch.map(path => path.replaceAll('\\', '/').slice(prefix.length));
-    result.push(readonlyPattern(prefix) + '{' + relative.map(readonlyPattern).join(',') + '}');
+    result.push(readonlyPattern(prefix) + exactAlternatives(relative));
   }
   return result;
+}
+
+/** A single brace group factors shared literals without relying on nested editor glob syntax. */
+function exactAlternatives(paths: readonly string[]): string {
+  if (paths.length === 1) return readonlyPattern(paths[0]!);
+  const first = paths[0]!;
+  let prefix = 0;
+  while (paths.every(path => prefix + 1 < path.length && path[prefix] === first[prefix])) prefix++;
+  // Keep Unicode code points intact at both boundaries.
+  if (prefix && /[\uD800-\uDBFF]/.test(first[prefix - 1]!)) prefix--;
+  let suffix = 0;
+  while (paths.every(path => path.length - suffix > prefix + 1 && path[path.length - suffix - 1] === first[first.length - suffix - 1])) suffix++;
+  if (suffix && /[\uDC00-\uDFFF]/.test(first[first.length - suffix]!)) suffix--;
+  return readonlyPattern(first.slice(0, prefix)) + '{' + paths.map(path =>
+    readonlyPattern(path.slice(prefix, suffix ? -suffix : undefined))).join(',') + '}' +
+    (suffix ? readonlyPattern(first.slice(-suffix)) : '');
 }

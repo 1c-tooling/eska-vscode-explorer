@@ -14,13 +14,20 @@ exports.run = async function () {
   const allowed = path.join(fixture.root, 'literal,a1.bsl');
   await fs.writeFile(locked, '// original\n');
   await fs.writeFile(allowed, '// original\n');
-  const patterns = readonlyPatterns(fixture.root, [locked, ...Array.from({length:256}, (_, i) => path.join(fixture.root, `Module${i}.bsl`))]);
+  const nestedLocked = path.join(fixture.root, 'Catalogs/A/Ext/ObjectModule.bsl');
+  const nestedAllowed = path.join(fixture.root, 'Catalogs/A/Ext/ManagerModule.bsl');
+  const otherLocked = path.join(fixture.root, 'Catalogs/B/Ext/ManagerModule.bsl');
+  for (const file of [nestedLocked, nestedAllowed, otherLocked]) {
+    await fs.mkdir(path.dirname(file), { recursive: true });
+    await fs.writeFile(file, '// original\n');
+  }
+  const patterns = readonlyPatterns(fixture.root, [locked, nestedLocked, otherLocked, ...Array.from({length:256}, (_, i) => path.join(fixture.root, `Module${i}.bsl`))]);
   await vscode.workspace.getConfiguration('files').update('readonlyInclude', Object.fromEntries(patterns.map(pattern => [pattern,true])), vscode.ConfigurationTarget.Workspace);
-  for (const file of [locked, allowed]) {
+  for (const file of [locked, allowed, nestedLocked, nestedAllowed, otherLocked]) {
     const editor = await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(vscode.Uri.file(file)));
     const before = editor.document.getText();
     await vscode.commands.executeCommand('type', {text:'// edit\n'});
-    assert.equal(editor.document.getText() === before, file === locked, file);
+    assert.equal(editor.document.getText() === before, [locked, nestedLocked, otherLocked].includes(file), file);
     await vscode.commands.executeCommand('workbench.action.revertAndCloseActiveEditor');
   }
   await fs.writeFile(path.join(fixture.root, 'host-result.json'), JSON.stringify({passed:true, compactLiteralPatterns:true, adjacentFileEditable:true}));
