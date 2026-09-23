@@ -18,12 +18,12 @@ import { FormSources, type FormSource } from "./forms.js";
 import { WorkspaceFiles, fileName, type WorkspaceEntry } from "./workspace-files.js";
 import { ProjectWatcher, watchManifests, watchDirectory } from "./watch.js";
 
-interface Notice { label: string; project?: ProjectTree; parent?: Element }
+interface Notice { label: string; loading?: boolean; supportFailure?: boolean; project?: ProjectTree; parent?: Element }
 type Element = TreeEntry | Notice | FormSource | WorkspaceEntry;
 
 let active: Explorer | undefined;
 
-/** Activation registers only Explorer UI; no backend runs before a view or command needs it. */
+/** Activation starts workspace protection independently of whether the tree is expanded. */
 export function activate(context: vscode.ExtensionContext): unknown {
   active = new Explorer(context);
   context.subscriptions.push(active);
@@ -67,9 +67,10 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
   private connecting: AbortController | undefined;
   private disposed = false;
   private stopping: Promise<void> | undefined;
+  private supportSelection: { tree: MetadataTree; entry: TreeEntry } | undefined;
 
   constructor(private readonly context: vscode.ExtensionContext) {
-    this.support = new SupportController(context, () => { this.decorations.invalidate(); this.changed.fire(undefined); }, text => this.output.warn(text));
+    this.support = new SupportController(context, () => this.supportRepaint(), text => this.output.warn(text));
     this.supportContexts = new SupportContexts(String(context.extension.packageJSON.version), (trees, pending) => this.support.setAdditionalTrees(trees, pending), () => this.support.invalidate(), text => this.output.info(text));
     this.decorations.support = entry => this.support.decoration(entry);
     this.status.name = "ESKA Explorer";
@@ -167,6 +168,8 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
   private async loadChildren(entry?: Element): Promise<Element[]> {
     const tree = this.tree;
     if (tree) {
+      if (this.support.loading) return [{ label: this.text("supportLoading"), loading: true }];
+      if (this.support.failed) return [{ label: this.text("supportFailed"), supportFailure: true }];
       try {
         if (entry && "fileKind" in entry) {
           const children = await this.files?.children(entry) ?? [];
@@ -239,7 +242,12 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
     if (!("node" in entry)) {
       const item = new vscode.TreeItem(entry.label);
       item.id = `${entry.parent && "key" in entry.parent ? entry.parent.key : "connection"}:${entry.project?.key ?? ""}:notice`;
-      item.iconPath = new vscode.ThemeIcon("warning");
+      item.iconPath = new vscode.ThemeIcon(entry.loading ? "loading~spin" : "warning");
+      if (entry.loading) return item;
+      if (entry.supportFailure) {
+        item.command = { command: "eska.explorer.refresh", title: this.text("refresh") };
+        return item;
+      }
       item.command = { command: this.tree ? "eska.explorer.refreshNode" : "eska.explorer.connect",
         title: this.text(this.tree ? "refresh" : "select"), arguments: [entry] };
       return item;
@@ -353,8 +361,37 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
     return false;
   }
 
+  /** Preserve native selection while the support preloader temporarily replaces the roots. */
+  private supportRepaint(): void {
+    const selected = this.view?.selection[0];
+    if (this.support.loading && !this.supportSelection && this.tree && selected && "node" in selected) {
+      this.supportSelection = { tree: this.tree, entry: selected };
+    }
+    this.decorations.invalidate();
+    this.changed.fire(undefined);
+    if (this.support.loading || this.support.failed) return;
+    const saved = this.supportSelection;
+    this.supportSelection = undefined;
+    if (saved && saved.tree === this.tree && (!selected || !("node" in selected))) {
+      void this.restoreSupportSelection(saved.tree, saved.entry);
+    }
+  }
+
+  /** Resolve the surviving selection without focusing an editor or a stale session. */
+  private async restoreSupportSelection(tree: MetadataTree, entry: TreeEntry): Promise<void> {
+    try {
+      const root = await tree.root(entry.project);
+      await tree.children(root);
+      const target = this.hiddenAncestor(entry, tree, this.hideEmptyGroups(entry.project)) ? root : entry;
+      if (this.tree === tree && !this.support.loading && !this.disposed) {
+        await this.view.reveal(target, { select: true, focus: false });
+      }
+    } catch { /* Deleted selections and broken branches have no surviving native target. */ }
+  }
+
   /** Move a disappearing selection before VS Code discards it during the native tree refresh. */
   private async repaint(entries?: TreeEntry[]): Promise<void> {
+    if (this.support.loading) return;
     const tree = this.tree;
     const selected = this.view.selection[0];
     if (tree && selected && "node" in selected && supportsRootFilter(selected.project)

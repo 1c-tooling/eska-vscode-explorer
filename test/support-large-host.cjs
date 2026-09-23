@@ -15,6 +15,8 @@ exports.run = async function () {
   const before=await hashes(),start=Date.now();
   const explorer=await vscode.extensions.all.find(value=>value.packageJSON.name==='eska-explorer').activate();
   while(Date.now()-start<300000 && ![...explorer.support.fileIndex.values()].some(value=>value.file.readOnly)) await new Promise(resolve=>setTimeout(resolve,250));
+  const firstProtectionMs=Date.now()-start;
+  await explorer.support.serial;
   const index=explorer.support.fileIndex;
   assert.ok(index.size>10000,'large policy published');
   const settings=vscode.workspace.getConfiguration('files').get('readonlyInclude');
@@ -30,7 +32,7 @@ exports.run = async function () {
   const roots=await explorer.getChildren();
   assert.ok(roots.some(item=>item.node));
   assert.deepEqual(await hashes(),before);
-  const result={passed:true,vscode:vscode.version,files:index.size,readonlyRules:Object.keys(settings).length,initialMs:Date.now()-start,rootMs:Date.now()-tick,rootAndSupportBytesUnchanged:true};
+  const result={passed:true,vscode:vscode.version,files:index.size,readonlyRules:Object.keys(settings).length,initialMs:Date.now()-start,firstProtectionMs,rootMs:Date.now()-tick,rootAndSupportBytesUnchanged:true};
   await vscode.commands.executeCommand('eska.explorer.disconnect');
   await fs.writeFile(path.join(fixture.root,'host-result.json'),JSON.stringify(result));
 };

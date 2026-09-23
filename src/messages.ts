@@ -1,6 +1,8 @@
 import type { FailureCode } from "./protocol.js";
 
 const en = {
+  supportLoading: "Checking 1C support rules…",
+  supportFailed: "Support check failed. Refresh the tree to retry.",
   sortSaveFailed: "Could not save the project's sort order. Try again.",
   cliMissing: "ESKA is not installed for this user. Install version {1} for the editor and terminal?",
   cliIncompatible: "Global ESKA {0} is incompatible with Explorer. Install version {1}?",
@@ -62,6 +64,8 @@ const en = {
 } as const;
 
 const ru: Record<keyof typeof en, string> = {
+  supportLoading: "Проверка правил поддержки 1С…",
+  supportFailed: "Не удалось проверить поддержку. Обновите дерево для повторной проверки.",
   sortSaveFailed: "Не удалось сохранить порядок сортировки проекта. Попробуйте ещё раз.",
   cliMissing: "ESKA не установлена для текущего пользователя. Установить версию {1} для редактора и терминала?",
   cliIncompatible: "Глобальная ESKA {0} несовместима с Explorer. Установить версию {1}?",

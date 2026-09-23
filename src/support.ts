@@ -44,6 +44,8 @@ export class SupportController implements vscode.FileDecorationProvider {
   private writing: { baseline: Record<string, boolean>; expected: Record<string, boolean>; edits: Map<string, boolean | undefined> } | undefined;
   private stopped = false;
   private available = false;
+  loading = false;
+  failed = false;
   private clearRestrictions = false;
   private requested: string | undefined;
   private readonly mixedObjects = new Map<ProjectTree, Set<string>>();
@@ -67,6 +69,8 @@ export class SupportController implements vscode.FileDecorationProvider {
   setTree(tree: MetadataTree | undefined, available: boolean, clearRestrictions = false): void {
     this.tree = tree; this.available = available; this.epoch++; this.requested = undefined;
     this.clearRestrictions = clearRestrictions;
+    this.loading = !!tree && available;
+    this.failed = false;
     this.snapshots.clear();
     this.invalidate();
   }
@@ -82,13 +86,27 @@ export class SupportController implements vscode.FileDecorationProvider {
   /** Coalesce file events; painting and opening never trigger a project scan. */
   invalidate(): void {
     if (this.stopped) return;
-    const key = JSON.stringify([this.available, this.pendingFolders, [this.tree, ...this.additional].filter(Boolean).map(tree => [tree?.session.sessionId, tree?.projects.map(project => [project.info.generation, project.info.eventSequence])])]);
-    if (key === this.requested) return;
+    const key = JSON.stringify([this.available, this.pendingFolders, [this.tree, ...this.additional].filter(Boolean).map(tree => [tree?.session.sessionId, tree?.projects.map(project => [project.supportGeneration ?? project.info.generation, project.supportEventSequence ?? project.info.eventSequence])])]);
+    if (key === this.requested) {
+      // A backend-confirmed BSL-only edit advances metadata tokens without changing support.
+      for (const [project, snapshot] of this.snapshots) {
+        snapshot.generation = project.info.generation;
+        snapshot.eventSequence = project.info.eventSequence;
+      }
+      return;
+    }
     this.requested = key;
     const epoch = ++this.epoch;
+    this.loading = !!this.tree && this.available;
+    this.failed = false;
+    this.repaint();
     clearTimeout(this.timer);
     this.timer = setTimeout(() => {
-      this.serial = this.serial.then(() => this.refresh(epoch)).catch(error => { this.requested = undefined; this.log(`support_update_failed ${String(error)}`); });
+      this.serial = this.serial.then(() => this.refresh(epoch)).catch(error => {
+        if (epoch !== this.epoch) return;
+        this.requested = undefined; this.loading = false; this.failed = true;
+        this.log(`support_update_failed ${String(error)}`); this.repaint();
+      });
     }, 100);
   }
 
@@ -144,14 +162,20 @@ export class SupportController implements vscode.FileDecorationProvider {
       return;
     }
     const snapshots = new Map<ProjectTree, Snapshot>();
+    const baselineRules = this.context.workspaceState.get<string[]>('supportReadonlyRules.v1', []);
+    let published = false;
     for (const context of [tree, ...this.additional]) for (const project of context.projects) {
       const objects = new Map<string, ObjectPolicy>();
       const files: FilePolicy[] = [];
       const diagnostics: string[] = [];
+      const snapshot = { generation: project.info.generation, eventSequence: project.info.eventSequence, objects, files, diagnostics };
+      snapshots.set(project, snapshot);
       let offset: number | null = 0;
       do {
         const result = await context.request(project, 'metadata/support', { offset });
         if (epoch !== this.epoch || this.stopped) return;
+        snapshot.generation = project.info.generation;
+        snapshot.eventSequence = project.info.eventSequence;
         if (!Array.isArray(result.objects) || !Array.isArray(result.files) || !Array.isArray(result.diagnostics)) throw new Error('invalid support snapshot');
         for (const item of result.objects) {
           if (!isRecord(item) || typeof item.objectId !== 'string' || typeof item.uuid !== 'string' || typeof item.reason !== 'string' || !['locked', 'editableWithSupport', 'unrestricted', 'unknown'].includes(String(item.state))) throw new Error('invalid object policy');
@@ -166,12 +190,28 @@ export class SupportController implements vscode.FileDecorationProvider {
         diagnostics.push(...result.diagnostics.map(String));
         if (result.nextOffset !== null && (!Number.isSafeInteger(result.nextOffset) || (result.nextOffset as number) <= offset)) throw new Error('invalid support cursor');
         offset = result.nextOffset as number | null;
+        // Protect the first confirmed files without repeatedly rewriting large editor settings.
+        if (!published) {
+          await this.publish(snapshots, epoch, false, baselineRules);
+          if (epoch !== this.epoch || this.stopped) return;
+          published = true;
+        }
+        // Yield between bounded pages so file-change notifications can cancel stale work.
+        await new Promise(resolve => setTimeout(resolve, 0));
       } while (offset !== null);
-      snapshots.set(project, { generation: project.info.generation, eventSequence: project.info.eventSequence, objects, files, diagnostics });
     }
+    await this.publish(snapshots, epoch, true, baselineRules);
+    if (epoch === this.epoch && !this.stopped) {
+      this.loading = false;
+      this.repaint();
+    }
+  }
+
+  /** Publish validated partial snapshots; remove old restrictions only after a complete pass. */
+  private async publish(snapshots: Map<ProjectTree, Snapshot>, epoch: number, complete: boolean, baselineRules: string[]): Promise<void> {
     if (epoch !== this.epoch || this.stopped) return;
     const previousRoots = this.context.workspaceState.get<Record<string, string>>('supportRoots.v1', {});
-    const nextRoots: Record<string, string> = {};
+    const nextRoots: Record<string, string> = complete ? {} : { ...previousRoots };
     const preserve: string[] = [];
     const pendingSources = Object.keys(previousRoots).filter(source => {
       const folder = vscode.workspace.getWorkspaceFolder(vscode.Uri.file(source));
@@ -180,6 +220,10 @@ export class SupportController implements vscode.FileDecorationProvider {
     for (const source of pendingSources) {
       preserve.push(readonlyPattern(source) + '/');
       nextRoots[source] = previousRoots[source]!;
+    }
+    if (!complete) {
+      for (const source of Object.keys(previousRoots)) preserve.push(readonlyPattern(source) + '/');
+      for (const project of snapshots.keys()) preserve.push(readonlyPattern(nativePath(project.info.sourcePath)) + '/');
     }
     for (const [project, snapshot] of snapshots) {
       const source = nativePath(project.info.sourcePath);
@@ -190,12 +234,14 @@ export class SupportController implements vscode.FileDecorationProvider {
         preserve.push(readonlyPattern(source) + '/');
       }
     }
-    await this.apply([...snapshots].flatMap(([project, snapshot]) => readonlyPatterns(nativePath(project.info.sourcePath), snapshot.files.filter(file => file.readOnly).map(file => file.path))), epoch, preserve);
+    const patterns = [...snapshots].flatMap(([project, snapshot]) => readonlyPatterns(nativePath(project.info.sourcePath), snapshot.files.filter(file => file.readOnly).map(file => file.path)));
+    const retained = baselineRules.filter(pattern => preserve.some(prefix => pattern.startsWith(prefix)));
+    await this.apply([...patterns, ...retained], epoch);
     if (epoch !== this.epoch || this.stopped) return;
     await this.context.workspaceState.update('supportRoots.v1', nextRoots);
     if (epoch !== this.epoch || this.stopped) return;
     const previouslyLocked = new Set([...this.fileIndex].filter(([, value]) => value.file.readOnly).map(([uri]) => uri));
-    const pendingFiles = [...this.fileIndex].filter(([, value]) => pendingSources.some(source => value.file.path.startsWith(join(source, '/'))));
+    const pendingFiles = [...this.fileIndex].filter(([, value]) => !complete || pendingSources.some(source => value.file.path.startsWith(join(source, '/'))));
     this.snapshots.clear(); this.fileIndex.clear(); this.mixedObjects.clear();
     for (const [uri, value] of pendingFiles) this.fileIndex.set(uri, value);
     for (const [project, snapshot] of snapshots) {
@@ -223,10 +269,10 @@ export class SupportController implements vscode.FileDecorationProvider {
   }
 
   /** Keep exact absolute patterns in one workspace scope, including multi-folder workspaces. */
-  private async apply(patterns: string[], epoch?: number, preserve: string[] = []): Promise<void> {
+  private async apply(patterns: string[], epoch?: number): Promise<void> {
     const key = 'supportReadonlyRules.v1';
     const previous = this.context.workspaceState.get<string[]>(key, []);
-    const desired = [...patterns, ...previous.filter(pattern => preserve.some(prefix => pattern.startsWith(prefix)))];
+    const desired = patterns;
     let current = this.readRules();
     let merged = reconcileRules(current, previous, desired);
     // Save a recovery journal before writing configuration, then reread after the await.

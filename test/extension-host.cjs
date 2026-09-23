@@ -32,6 +32,11 @@ exports.run = async function () {
   const { addCommonModules } = await import("./fixture.mjs");
   await addCommonModules(fixture);
   const explorer = await extension.activate();
+  /** The native tree exposes configuration nodes only after the support pass completes. */
+  async function children(entry) {
+    await until(() => !explorer.support.loading, 'support preloader completed');
+    return explorer.getChildren(entry);
+  }
   await vscode.commands.executeCommand('eska.explorer.disconnect');
   // Disconnect must also invalidate preflight, before Connection owns a child.
   const ensure = explorer.setup.ensure.bind(explorer.setup);
@@ -58,15 +63,15 @@ exports.run = async function () {
   finally { explorer.setup.check = checkUpdates; }
   assert.equal(manualCheck, true, 'status bar invokes the manual update check');
   assert.ok(!explorer.view.message, 'connection status does not occupy the tree');
-  const top = await explorer.getChildren();
+  const top = await children();
   const [root] = top;
   const settings = top.find(row => row.kind === 'settings');
   assert.ok(settings, 'standalone settings are beside the configuration');
   assert.equal(explorer.getParent(settings), undefined);
-  assert.ok((await explorer.getChildren(root)).every(row => row.node), 'no synthetic structure or file groups in standalone metadata');
-  const catalogs = named(await explorer.getChildren(root), 'Справочники');
+  assert.ok((await children(root)).every(row => row.node), 'no synthetic structure or file groups in standalone metadata');
+  const catalogs = named(await children(root), 'Справочники');
   assert.equal(explorer.getParent(catalogs), root);
-  const objects = await explorer.getChildren(catalogs);
+  const objects = await children(catalogs);
   const goods = named(objects, 'Товары');
   const customers = named(objects, 'Покупатели');
   assert.equal(goods.children, undefined, 'listing does not expand descriptors');
@@ -102,14 +107,14 @@ exports.run = async function () {
   await vscode.commands.executeCommand('workbench.action.closeQuickOpen');
   await until(() => !explorer.searchView, 'search Escape');
   await explorer.view.reveal(goods, { expand: true, select: true, focus: true });
-  const groups = await explorer.getChildren(goods);
+  const groups = await children(goods);
   const modules = named(groups, 'Модули');
   assert.equal(groups[0], modules);
   assert.equal(explorer.getTreeItem(modules).collapsibleState, vscode.TreeItemCollapsibleState.Expanded);
-  const scripts = await explorer.getChildren(modules);
+  const scripts = await children(modules);
   assert.equal(scripts.length, 1, 'bin-only manager is hidden');
   const attributes = named(groups, 'Реквизиты');
-  const article = named(await explorer.getChildren(attributes), 'Артикул');
+  const article = named(await children(attributes), 'Артикул');
   await explorer.view.reveal(article, { select: true, focus: true });
   await vscode.commands.executeCommand('eska.explorer.openSource', article);
   assert.equal(vscode.window.activeTextEditor.document.uri.fsPath, fixture.descriptor);
@@ -117,13 +122,13 @@ exports.run = async function () {
   await vscode.commands.executeCommand('eska.explorer.openSource', scripts[0]);
   assert.equal(vscode.window.activeTextEditor.document.uri.fsPath, fixture.module);
 
-  const common = named(await explorer.getChildren(root), 'Общие');
-  const commonGroup = named(await explorer.getChildren(common), 'Общие модули');
-  const commonModule = named(await explorer.getChildren(commonGroup), 'Обмен');
+  const common = named(await children(root), 'Общие');
+  const commonGroup = named(await children(common), 'Общие модули');
+  const commonModule = named(await children(commonGroup), 'Обмен');
   const commonItem = explorer.getTreeItem(commonModule);
   assert.equal(commonItem.collapsibleState, vscode.TreeItemCollapsibleState.None);
   assert.equal(commonItem.contextValue, 'eskaCommonModule');
-  assert.deepEqual(await explorer.getChildren(commonModule), []);
+  assert.deepEqual(await children(commonModule), []);
   await explorer.view.reveal(commonModule, { select: true, focus: true });
   await vscode.commands.executeCommand(commonItem.command.command, ...commonItem.command.arguments);
   assert.equal(vscode.window.activeTextEditor.document.uri.fsPath, path.join(fixture.source, 'CommonModules', 'Обмен', 'Ext', 'Module.bsl'));
@@ -156,7 +161,7 @@ exports.run = async function () {
     assert.equal(explorer.getTreeItem(modules).collapsibleState, vscode.TreeItemCollapsibleState.Collapsed);
     assert.equal(explorer.tree, languageTree);
     assert.equal(explorer.connection.state.session.sessionId, sessionId);
-    assert.equal((await explorer.getChildren(modules))[0], scripts[0], 'reuse cached module nodes');
+    assert.equal((await children(modules))[0], scripts[0], 'reuse cached module nodes');
     await explorer.view.reveal(customers, { select: false });
     assert.equal(explorer.view.selection[0].key, selected);
   }
@@ -165,22 +170,22 @@ exports.run = async function () {
   const generation = goods.project.info.generation;
   await fs.writeFile(fixture.descriptor, original.replace('<Name>Артикул</Name>', '<Name>НовыйАртикул</Name>'));
   await until(() => goods.project.info.generation !== generation, 'external file watcher invalidation');
-  const updatedGroups = await explorer.getChildren(goods);
-  named(await explorer.getChildren(named(updatedGroups, 'Реквизиты')), 'НовыйАртикул');
+  const updatedGroups = await children(goods);
+  named(await children(named(updatedGroups, 'Реквизиты')), 'НовыйАртикул');
   await until(() => explorer.view.selection[0]?.key === selected, 'unrelated selection retained after native refresh');
   assert.equal(explorer.getTreeItem(named(updatedGroups, 'Модули')).collapsibleState, vscode.TreeItemCollapsibleState.Collapsed);
 
   const beforeBroken = goods.project.info.generation;
   await fs.writeFile(fixture.descriptor, '<broken');
   await until(() => goods.project.info.generation !== beforeBroken, 'broken file invalidation');
-  const errors = await explorer.getChildren(goods);
+  const errors = await children(goods);
   assert.equal(errors.length, 1);
   assert.ok(!errors[0].node && errors[0].parent === goods, 'local error row');
-  assert.ok((await explorer.getChildren(customers)).some(entry => entry.node), 'other branch remains usable');
+  assert.ok((await children(customers)).some(entry => entry.node), 'other branch remains usable');
   const beforeFixed = goods.project.info.generation;
   await fs.writeFile(fixture.descriptor, original);
   await until(() => goods.project.info.generation !== beforeFixed, 'fixed file invalidation');
-  named(await explorer.getChildren(goods), 'Реквизиты');
+  named(await children(goods), 'Реквизиты');
 
   // Native tree presentation works with all built-in theme families and editor zoom.
   for (const theme of ['Default Light Modern', 'Default Dark Modern', 'Default High Contrast']) {
@@ -191,15 +196,15 @@ exports.run = async function () {
   await vscode.commands.executeCommand('workbench.action.zoomIn');
   await vscode.commands.executeCommand('workbench.action.zoomReset');
   await vscode.commands.executeCommand('eska.explorer.refreshNode', goods);
-  assert.equal(explorer.getTreeItem(named(await explorer.getChildren(goods), 'Модули')).collapsibleState, vscode.TreeItemCollapsibleState.Collapsed);
+  assert.equal(explorer.getTreeItem(named(await children(goods), 'Модули')).collapsibleState, vscode.TreeItemCollapsibleState.Collapsed);
   // Filter toggles reuse loaded nodes; a selected hidden descendant falls back to the root.
   const filterTree = explorer.tree;
   const filterGeneration = root.project.info.generation;
   const filterChildren = root.children;
   assert.equal(explorer.getTreeItem(root).contextValue, 'eskaRootFiltered');
-  assert.ok(!(await explorer.getChildren(root)).some(entry => entry.node?.label.translations?.['ru-RU'] === 'Константы'));
+  assert.ok(!(await children(root)).some(entry => entry.node?.label.translations?.['ru-RU'] === 'Константы'));
   await vscode.commands.executeCommand('eska.explorer.showEmptyGroups', root);
-  const constants = named(await explorer.getChildren(root), 'Константы');
+  const constants = named(await children(root), 'Константы');
   // TreeDataProvider refresh is asynchronous; await native visibility after the filter command.
   await until(async () => {
     try { await explorer.view.reveal(constants, { select: true, focus: true }); return true; }
@@ -214,7 +219,7 @@ exports.run = async function () {
   assert.equal(explorer.getTreeItem(root).contextValue, 'eskaRootFiltered', 'saved project choice overrides default');
   await vscode.commands.executeCommand('eska.explorer.resetRootFilter', root);
   assert.equal(explorer.getTreeItem(root).contextValue, 'eskaRootUnfiltered', 'reset uses workspace setting');
-  named(await explorer.getChildren(root), 'Константы');
+  named(await children(root), 'Константы');
   await vscode.workspace.getConfiguration('eska.explorer').update('hideEmptyRootGroups', true, vscode.ConfigurationTarget.Workspace);
   await until(() => explorer.getTreeItem(root).contextValue === 'eskaRootFiltered', 'default setting updates inherited filter');
   await vscode.commands.executeCommand('eska.explorer.showEmptyGroups', root);
@@ -226,23 +231,23 @@ exports.run = async function () {
   const rootXml = await fs.readFile(rootFile, 'utf8');
   await fs.writeFile(rootFile, '<broken');
   await until(() => root.project.info.requiresRefresh, 'root invalidation');
-  await until(async () => !(await explorer.getChildren())[0].node, 'root error row');
+  await until(async () => !(await children())[0].node, 'root error row');
   await new Promise(resolve => setTimeout(resolve, 400));
   const failedGeneration = root.project.info.generation;
-  await explorer.getChildren();
+  await children();
   await new Promise(resolve => setTimeout(resolve, 300));
   assert.equal(root.project.info.generation, failedGeneration, 'broken root does not cause a retry loop');
   await fs.writeFile(rootFile, rootXml);
   await until(() => !root.project.info.requiresRefresh, 'root correction refresh');
-  assert.ok((await explorer.getChildren())[0].node);
+  assert.ok((await children())[0].node);
 
   console.log("ESKA_HOST_ROOT_RECOVERY_PASSED");
   const previousTree = explorer.tree;
   await fs.appendFile(path.join(fixture.root, 'eska.toml'), '\n# External manifest update\n');
   await until(() => explorer.tree && explorer.tree !== previousTree, 'manifest reconnect');
-  const [reconnectedRoot] = await explorer.getChildren();
+  const [reconnectedRoot] = await children();
   assert.equal(explorer.getTreeItem(reconnectedRoot).contextValue, 'eskaRootUnfiltered', 'project filter survives reconnect');
-  named(await explorer.getChildren(reconnectedRoot), 'Константы');
+  named(await children(reconnectedRoot), 'Константы');
   await vscode.commands.executeCommand('eska.explorer.search');
   await vscode.commands.executeCommand('eska.explorer.disconnect');
   assert.equal(explorer.searchView, undefined, 'disconnect disposes search input');
