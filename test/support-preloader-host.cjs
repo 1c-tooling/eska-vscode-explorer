@@ -40,6 +40,26 @@ exports.run = async function () {
     assert.ok(rows.some(row=>row.node));
     const uri=vscode.Uri.file(fixture.module);
     assert.equal(explorer.support.provideFileDecoration(uri).badge,'🔒');
+    // A busy Git queue must not delay already computed support badges during scrolling.
+    const [root] = rows.filter(row => row.node);
+    const decorations = explorer.decorations;
+    const oldApi = decorations.api;
+    const oldSerial = decorations.serial;
+    let releaseGit;
+    decorations.api = { repositories: [] };
+    decorations.serial = new Promise(resolve => { releaseGit = resolve; });
+    decorations.invalidate();
+    try {
+      const badge = decorations.provideFileDecoration(explorer.getTreeItem(root).resourceUri);
+      assert.ok(!(badge instanceof Promise), 'support returns synchronously while Git is blocked');
+      assert.equal(badge.badge, '🔒');
+    } finally {
+      releaseGit();
+      await decorations.serial;
+      decorations.api = oldApi;
+      decorations.serial = oldSerial;
+      decorations.invalidate();
+    }
     const beforeBsl=calls;
     await fs.appendFile(fixture.module,'\n// changed content\n');
     await new Promise(resolve=>setTimeout(resolve,800));

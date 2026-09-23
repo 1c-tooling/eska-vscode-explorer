@@ -34,6 +34,7 @@ export class GitDecorations implements vscode.FileDecorationProvider, vscode.Dis
   private readonly entries = new Map<string, WeakRef<Entry>>();
   private readonly snapshots = new Map<ProjectTree, Snapshot>();
   private results = new Map<string, Promise<vscode.FileDecoration | undefined>>();
+  private readonly resolved = new Map<string, vscode.FileDecoration | undefined>();
   private api: GitApi | undefined;
   private tree: MetadataTree | undefined;
   private epoch = 0;
@@ -94,6 +95,7 @@ export class GitDecorations implements vscode.FileDecorationProvider, vscode.Dis
     this.epoch++;
     this.snapshots.clear();
     this.results = new Map();
+    this.resolved.clear();
     for (const [key, reference] of this.entries) {
       const entry = reference.deref();
       const owner = entry && ("owner" in entry ? entry.owner : entry);
@@ -111,15 +113,16 @@ export class GitDecorations implements vscode.FileDecorationProvider, vscode.Dis
   }
 
   /** Resolve only requested visible decorations; serialize reads to protect the backend queue. */
-  provideFileDecoration(uri: vscode.Uri): Promise<vscode.FileDecoration | undefined> | undefined {
+  provideFileDecoration(uri: vscode.Uri): vscode.FileDecoration | Promise<vscode.FileDecoration | undefined> | undefined {
     if (uri.scheme !== "eska-decoration" || !this.tree || this.disposed) return undefined;
     const key = decodeURIComponent(uri.path.slice(1));
     const entry = this.entries.get(key)?.deref();
     if (!entry) return undefined;
     const support = this.support?.("owner" in entry ? entry.owner : entry);
-    if (!this.api || !vscode.workspace.getConfiguration("git").get<boolean>("decorations.enabled", true)) return Promise.resolve(support);
+    if (!this.api || !vscode.workspace.getConfiguration("git").get<boolean>("decorations.enabled", true)) return support;
+    if (this.resolved.has(key)) return this.resolved.get(key);
     const cached = this.results.get(key);
-    if (cached) return cached;
+    if (cached) return support ?? cached;
     const tree = this.tree;
     const epoch = this.epoch;
     const result = this.serial.then(async () => {
@@ -133,7 +136,12 @@ export class GitDecorations implements vscode.FileDecorationProvider, vscode.Dis
     });
     this.serial = result;
     this.results.set(key, result);
-    return result;
+    void result.then(decoration => {
+      if (epoch !== this.epoch || this.disposed) return;
+      this.resolved.set(key, decoration);
+      if (support) this.changed.fire([uri]);
+    });
+    return support ?? result;
   }
 
   /** Index only Git's changed paths once per project snapshot, never scan source directories. */
@@ -215,7 +223,7 @@ export class GitDecorations implements vscode.FileDecorationProvider, vscode.Dis
     for (const subscription of this.subscriptions) subscription.dispose();
     for (const subscription of this.apiSubscriptions) subscription.dispose();
     for (const subscription of this.repositories.values()) subscription.dispose();
-    this.repositories.clear(); this.entries.clear(); this.snapshots.clear(); this.results.clear();
+    this.repositories.clear(); this.entries.clear(); this.snapshots.clear(); this.results.clear(); this.resolved.clear();
     this.changed.dispose();
   }
 }
