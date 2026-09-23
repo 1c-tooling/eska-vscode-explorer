@@ -49,22 +49,29 @@ try {
     // Test mode exposes the provider only for acceptance. All runtime files come from the installed VSIX.
   }
   let workspace = fixture.root;
+  let secondFixture;
+  if (process.env.ESKA_HOST_MULTI_ROOT) {
+    secondFixture = await createTreeProject(join(root, "second"));
+    workspace = join(root, "support.code-workspace");
+    await writeFile(workspace, JSON.stringify({ folders: [{ path: fixture.root }, { path: secondFixture.root }], settings: { "eska.explorer.checkForUpdates": false } }));
+  }
   if (process.env.ESKA_PERF_PROJECT) {
     if (!isAbsolute(process.env.ESKA_PERF_PROJECT)) throw new Error("ESKA_PERF_PROJECT must be absolute.");
     workspace = join(root, "performance.code-workspace");
     await writeFile(workspace, JSON.stringify({ folders: [{ path: process.env.ESKA_PERF_PROJECT }], settings: { "eska.explorer.checkForUpdates": false } }));
   }
-  const child = spawn(executable, ["--verbose", "--wait",
+  const child = spawn(executable, ["--verbose", "--wait", ...(process.env.ESKA_HOST_DEBUG_PORT ? [`--remote-debugging-port=${process.env.ESKA_HOST_DEBUG_PORT}`] : []),
     `--extensionDevelopmentPath=${extensionPath}`, `--extensionTestsPath=${resolve(repository, process.argv[2] ?? "test/extension-host.cjs")}`,
     `--user-data-dir=${join(root, "profile")}`, `--extensions-dir=${join(root, "extensions")}`,
     "--disable-workspace-trust", ...(process.env.ESKA_BSL_EXTENSION ? [] : ["--disable-extensions"]), "--disable-gpu", "--new-window", workspace],
-  { env: { ...process.env, PATH: bin + (process.platform === "win32" ? ";" : ":") + (process.env.PATH ?? ""), ESKA_HOST_FIXTURE: JSON.stringify(fixture) }, stdio: ["ignore", "pipe", "pipe"] });
+  { env: { ...process.env, PATH: bin + (process.platform === "win32" ? ";" : ":") + (process.env.PATH ?? ""), ESKA_HOST_FIXTURE: JSON.stringify(fixture), ESKA_HOST_SECOND_FIXTURE: JSON.stringify(secondFixture) }, stdio: ["ignore", "pipe", "pipe"] });
   let output = "";
   /** Retain bounded diagnostic output; host startup can be verbose. */
   const capture = (data) => { output = (output + data.toString()).slice(-32000); };
   child.stdout.on("data", capture);
   child.stderr.on("data", capture);
   const code = await new Promise((resolve, reject) => { child.once("error", reject); child.once("close", resolve); });
+  if (process.env.ESKA_HOST_LOG) await writeFile(process.env.ESKA_HOST_LOG, output);
   if (code !== 0) throw new Error(`Extension host exited ${code}\n${output}`);
   try {
     const result = JSON.parse(await readFile(join(fixture.root, "host-result.json"), "utf8"));

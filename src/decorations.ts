@@ -25,6 +25,7 @@ function comparable(value: string): string { return process.platform === "win32"
 
 /** Decorate only private tree URIs, never other explorers, tabs or language providers. */
 export class GitDecorations implements vscode.FileDecorationProvider, vscode.Disposable {
+  support: ((entry: TreeEntry) => vscode.FileDecoration | undefined) | undefined;
   private readonly changed = new vscode.EventEmitter<vscode.Uri[] | undefined>();
   readonly onDidChangeFileDecorations = this.changed.event;
   private readonly subscriptions: vscode.Disposable[] = [];
@@ -111,11 +112,12 @@ export class GitDecorations implements vscode.FileDecorationProvider, vscode.Dis
 
   /** Resolve only requested visible decorations; serialize reads to protect the backend queue. */
   provideFileDecoration(uri: vscode.Uri): Promise<vscode.FileDecoration | undefined> | undefined {
-    if (uri.scheme !== "eska-decoration" || !this.tree || !this.api || this.disposed
-      || !vscode.workspace.getConfiguration("git").get<boolean>("decorations.enabled", true)) return undefined;
+    if (uri.scheme !== "eska-decoration" || !this.tree || this.disposed) return undefined;
     const key = decodeURIComponent(uri.path.slice(1));
     const entry = this.entries.get(key)?.deref();
     if (!entry) return undefined;
+    const support = this.support?.("owner" in entry ? entry.owner : entry);
+    if (!this.api || !vscode.workspace.getConfiguration("git").get<boolean>("decorations.enabled", true)) return Promise.resolve(support);
     const cached = this.results.get(key);
     if (cached) return cached;
     const tree = this.tree;
@@ -124,8 +126,10 @@ export class GitDecorations implements vscode.FileDecorationProvider, vscode.Dis
       if (epoch !== this.epoch || this.disposed) return undefined;
       try {
         const decoration = await this.resolve(tree, entry, epoch);
-        return epoch === this.epoch && !this.disposed ? decoration : undefined;
-      } catch { return undefined; } // A broken descriptor must remain navigable without decorations.
+        if (epoch !== this.epoch || this.disposed) return undefined;
+        if (support) return new vscode.FileDecoration(support.badge, [support.tooltip, decoration && `${decoration.badge}: ${decoration.tooltip}`].filter(Boolean).join(" · "), decoration?.color);
+        return decoration;
+      } catch { return epoch === this.epoch && !this.disposed ? support : undefined; } // Git failures must not hide support diagnostics.
     });
     this.serial = result;
     this.results.set(key, result);

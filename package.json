@@ -20,7 +20,8 @@
     "workspace"
   ],
   "activationEvents": [
-    "onView:eska.explorer.projects"
+    "onView:eska.explorer.projects",
+    "workspaceContains:**/eska.toml"
   ],
   "capabilities": {
     "untrustedWorkspaces": {

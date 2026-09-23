@@ -1,12 +1,12 @@
 import { isAbsolute } from "node:path";
 import { diagnostic, errorContext, type DiagnosticLog } from "./diagnostics.js";
 import { BackendProcess, type ProcessOptions } from "./process.js";
-import { API_VERSION, ExplorerError, parseHandshake, parseWorkspace, type WorkspaceSession } from "./protocol.js";
+import { API_VERSION, ExplorerError, isRecord, parseHandshake, parseWorkspace, type WorkspaceSession } from "./protocol.js";
 
 export interface ConnectionTarget { executable: string; path: string; name: string; locale: "ru-RU" | "en-US" }
 export type ConnectionState =
   | { kind: "disconnected" | "connecting" | "stopping" }
-  | { kind: "ready"; session: WorkspaceSession; version: string; target: ConnectionTarget }
+  | { kind: "ready"; session: WorkspaceSession; version: string; supportPolicy: boolean; target: ConnectionTarget }
   | { kind: "error"; error: ExplorerError };
 
 /** Own the lifecycle independently of VS Code so restarts can be tested with real pipes. */
@@ -98,7 +98,7 @@ export class Connection {
           diagnostic(this.log, "connection_ready", { backendVersion: version, sessionId: session.sessionId,
             projects: session.projects.map((project) => ({ projectId: project.projectId, type: project.type,
               rootPath: project.rootPath, sourcePath: project.sourcePath, generation: project.generation })) });
-          this.set({ kind: "ready", session, version, target });
+          this.set({ kind: "ready", session, version, supportPolicy: isRecord(response) && isRecord(response.capabilities) && response.capabilities.supportPolicy === true, target });
         }
       } catch (error) {
         if (!negotiated && error instanceof ExplorerError

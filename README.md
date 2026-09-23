@@ -263,3 +263,5 @@ IDE API и обязательные возможности дерева, пои�
 
 [Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0).
 Полный текст находится в файле `LICENSE` репозитория и включён в VSIX как `LICENSE.txt`.
+
+Правила поддержки 1С: [индикаторы, read-only и ограничения](docs/support-policy.md).
