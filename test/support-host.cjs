@@ -33,7 +33,7 @@ exports.run = async function () {
   await files.update('readonlyInclude', { '**/*.os': true }, vscode.ConfigurationTarget.Workspace);
   const explorer = await vscode.extensions.all.find(value => value.packageJSON.name === 'eska-explorer').activate();
   await until(() => explorer.support.provideFileDecoration(vscode.Uri.file(fixture.descriptor))?.badge === '🔒', 'mixed XML policy without expanding tree');
-  assert.equal(explorer.support.provideFileDecoration(uri)?.badge, 'S');
+  await until(() => explorer.support.provideFileDecoration(uri)?.badge === 'S', 'module policy is requested independently of XML');
   await until(() => !explorer.support.loading, 'complete initial publication');
   const journal = explorer.support.context.workspaceState;
   const owned = explorer.support.ownedRules();

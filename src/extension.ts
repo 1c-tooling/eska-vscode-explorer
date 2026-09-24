@@ -178,8 +178,6 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
   private async loadChildren(entry?: Element): Promise<Element[]> {
     const tree = this.tree;
     if (tree) {
-      if (this.support.loading) return [{ label: this.text("supportLoading"), loading: true }];
-      if (this.support.failed) return [{ label: this.text("supportFailed"), supportFailure: true }];
       try {
         if (entry && "fileKind" in entry) {
           const children = await this.files?.children(entry) ?? [];
@@ -518,7 +516,9 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
     try {
       const source = await resolveSource(tree, entry, target);
       if (opening !== this.opening || tree !== this.tree) return;
-      const document = await vscode.workspace.openTextDocument(this.support.openUri(source.path));
+      const uri = await this.support.resolveUri(source.path);
+      if (opening !== this.opening || tree !== this.tree) return;
+      const document = await vscode.workspace.openTextDocument(uri);
       if (opening !== this.opening || tree !== this.tree) return;
       if (source.position && (document.isDirty || document.getText() !== source.position.text)) throw new ExplorerError("sourceChanged");
       const editor = await vscode.window.showTextDocument(document, { preview: true, preserveFocus: false });
@@ -537,7 +537,7 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
   private async openFile(entry: WorkspaceEntry): Promise<void> {
     if (entry?.fileKind !== "entry" || entry.directory || !this.files?.scopes.some(scope =>
       relativeFile(scope.path, entry.path) !== undefined)) return;
-    const uri = this.support.openUri(entry.path);
+    const uri = await this.support.resolveUri(entry.path);
     if (uri.scheme === "file") await vscode.commands.executeCommand("vscode.open", uri);
     else await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(uri), { preview: true });
   }
@@ -615,7 +615,7 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
         this.watchers.push(watchManifests(state.target.path, tree.projects, () => { void this.connect(false); }));
       } catch (error) { this.showError(error instanceof ExplorerError ? error : new ExplorerError("unsupportedPath")); }
     }
-    this.support.setTree(this.tree, state.kind === "ready" && state.supportPolicy, state.kind === "disconnected" || state.kind === "stopping");
+    this.support.setTree(this.tree, state.kind === "ready" && state.supportPolicy, state.kind === "disconnected" || state.kind === "stopping", state.kind === "ready" && state.supportFiles);
     if (state.kind === "ready") {
       void this.supportContexts.start(this.folders().filter(folder => folder.uri.fsPath !== state.target.path)
         .map(folder => ({ ...state.target, path: folder.uri.fsPath, name: folder.name })));
