@@ -6,6 +6,11 @@ const vscode = require('vscode');
 /** Exercise object-scoped webview tabs and their XML action in VSCodium. */
 exports.run = async function () {
   const fixture = JSON.parse(process.env.ESKA_HOST_FIXTURE);
+  const xml = await fs.readFile(fixture.descriptor, 'utf8');
+  assert.ok(xml.includes('<Comment>😀 Кириллица</Comment>'));
+  await fs.writeFile(fixture.descriptor, xml.replace('<Comment>😀 Кириллица</Comment>',
+    '<Comment>😀 Кириллица</Comment><Hierarchical>true</Hierarchical><CheckUnique>false</CheckUnique>'
+      + '<Flags><Visible>true</Visible><Hidden>false</Hidden></Flags>'));
   await vscode.workspace.getConfiguration('eska.explorer').update('executable', process.env.ESKA_TEST_BINARY, vscode.ConfigurationTarget.Workspace);
   await vscode.workspace.getConfiguration('eska.explorer').update('treeLanguage', 'ru-RU', vscode.ConfigurationTarget.Workspace);
   const extension = vscode.extensions.all.find(value => value.packageJSON.name === 'eska-explorer');
@@ -33,6 +38,10 @@ exports.run = async function () {
   assert.equal(first.state.names.Comment, 'Комментарий');
   assert.equal(first.state.properties.find(property => property.key.name === 'Comment').key.namespace,
     'http://v8.1c.ru/8.3/MDClasses');
+  assert.equal(first.state.properties.find(property => property.key.name === 'Hierarchical').value.text, 'true');
+  assert.equal(first.state.properties.find(property => property.key.name === 'CheckUnique').value.text, 'false');
+  assert.deepEqual(first.state.properties.find(property => property.key.name === 'Flags').value.fields
+    .map(field => field.value.text), ['true', 'false']);
   assert.ok(first.panel.visible);
   assert.ok(first.panel.webview.html.includes('Content-Security-Policy'));
   assert.ok(first.panel.webview.html.includes('view.css'));

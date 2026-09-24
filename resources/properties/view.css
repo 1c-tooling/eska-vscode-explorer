@@ -50,6 +50,11 @@ button:focus-visible, summary:focus-visible { outline: 1px solid var(--vscode-fo
 .property { padding: 18px 0 20px; border-bottom: 1px solid var(--vscode-settings-headerBorder, var(--vscode-panel-border)); }
 .property-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; }
 .property-name { margin: 0 0 10px; font-size: 1.02em; font-weight: 600; overflow-wrap: anywhere; }
+.boolean-property .property-name { margin-bottom: 0; }
+.property-name, .field-name { display: flex; align-items: center; gap: 9px; }
+.name-text { min-width: 0; }
+.boolean-checkbox { flex: none; width: 16px; height: 16px; margin: 0; opacity: 1; pointer-events: none;
+  accent-color: var(--vscode-checkbox-selectBackground, var(--vscode-focusBorder)); }
 .technical-name { margin-left: 10px; color: var(--vscode-descriptionForeground); font-size: 0.85em; font-weight: 400; }
 .source-button { flex: none; padding: 3px 0; color: var(--vscode-textLink-foreground);
   background: transparent; border: 0; }

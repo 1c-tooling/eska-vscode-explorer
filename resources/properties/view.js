@@ -34,6 +34,33 @@ function appendPropertyName(container, key) {
   if (translated) container.append(element("span", "technical-name", key.name));
 }
 
+/** Designer's exact boolean text is a display hint; other scalar text stays unchanged. */
+function booleanValue(value) {
+  if (value?.kind !== "text") return undefined;
+  if (value.text === "true") return true;
+  if (value.text === "false") return false;
+  return undefined;
+}
+
+/** A disabled native checkbox exposes the value without suggesting it can be edited. */
+function propertyName(tag, className, key, value) {
+  const container = element(tag, className);
+  const checked = booleanValue(value);
+  if (checked !== undefined) {
+    const checkbox = element("input", "boolean-checkbox");
+    checkbox.type = "checkbox";
+    checkbox.checked = checked;
+    checkbox.disabled = true;
+    checkbox.setAttribute("aria-label", key.name);
+    container.append(checkbox);
+  }
+  const name = element("span", "name-text");
+  appendPropertyName(name, key);
+  container.append(name);
+  container.title = key.namespace ?? "";
+  return container;
+}
+
 /** Find nested record fields and localized values through the same search box. */
 function searchable(value, depth = 0) {
   if (!value || depth > 32) return "";
@@ -65,10 +92,8 @@ function valueView(value, labels, depth = 0) {
     const fields = element("div", "fields");
     for (const field of value.fields) {
       const row = element("div", "field");
-      const name = element("div", "field-name");
-      appendPropertyName(name, field.key);
-      name.title = field.key.namespace ?? "";
-      row.append(name, valueView(field.value, labels, depth + 1));
+      row.append(propertyName("div", "field-name", field.key, field.value));
+      if (booleanValue(field.value) === undefined) row.append(valueView(field.value, labels, depth + 1));
       if (field.qualifiers.length) row.append(qualifiersView(field.qualifiers));
       fields.append(row);
     }
@@ -92,15 +117,16 @@ function qualifiersView(qualifiers) {
 /** A settings-style row has one explicit source action and a full structured value. */
 function propertyView(property, labels) {
   const card = element("article", "property");
+  const checked = booleanValue(property.value);
+  if (checked !== undefined) card.classList.add("boolean-property");
   const head = element("div", "property-head");
-  const title = element("h2", "property-name");
-  appendPropertyName(title, property.key);
-  title.title = property.key.namespace ?? "";
+  const title = propertyName("h2", "property-name", property.key, property.value);
   const button = element("button", "source-button", labels.openXml);
   button.type = "button";
   button.addEventListener("click", () => vscode.postMessage({ type: "openXml", index: property.index }));
   head.append(title, button);
-  card.append(head, valueView(property.value, labels));
+  card.append(head);
+  if (checked === undefined) card.append(valueView(property.value, labels));
   if (property.qualifiers.length) card.append(qualifiersView(property.qualifiers));
   return card;
 }
