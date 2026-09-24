@@ -5,6 +5,7 @@ import { isRecord, isWirePath } from './protocol.js';
 import { nativePath } from './source.js';
 import type { MetadataTree, ProjectTree, TreeEntry } from './tree.js';
 import { reconcileRules, readonlyPattern, readonlyPatterns } from './support-settings.js';
+import { ProtectedSources } from './protected-source.js';
 
 type State = 'locked' | 'editableWithSupport' | 'unrestricted' | 'unknown';
 interface ObjectPolicy { objectId: string; uuid: string; state: State; reason: string }
@@ -167,6 +168,13 @@ export class SupportController implements vscode.FileDecorationProvider {
       if (file.objects.some(id => snapshot.objects.get(id)?.state === 'editableWithSupport')) return new vscode.FileDecoration('S', supportText('editableWithSupport'));
     }
     return undefined;
+  }
+
+  /** ESKA navigation uses an immutable readonly provider for confirmed locked sources. */
+  openUri(path: string): vscode.Uri {
+    const source = vscode.Uri.file(path);
+    const policy = this.enabled ? this.fileIndex.get(source.toString())?.file : undefined;
+    return policy?.readOnly ? ProtectedSources.protectedUri(source) : source;
   }
 
   /** Validate a complete batch before publishing it or writing settings. */
