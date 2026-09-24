@@ -12,10 +12,11 @@ import { Connection, type ConnectionState } from "./connection.js";
 import { assertHost } from "./host.js";
 import { message, type MessageKey } from "./messages.js";
 import { ExplorerError } from "./protocol.js";
+import { propertyChoices, type PropertyChoice } from "./properties.js";
 import { MetadataTree, type TreeEntry, type ProjectTree } from "./tree.js";
 import { ProjectSorting, type SortOrder } from "./sorting.js";
 import { ProjectFilters, isHiddenSection, supportsRootFilter } from "./filter.js";
-import { nativePath, isCommonModule, directModuleRole, isModuleLeaf, isForm, resolveSource, type SourceTarget } from "./source.js";
+import { nativePath, isCommonModule, directModuleRole, isModuleLeaf, isForm, resolveSource, resolvePropertySource, type SourceTarget } from "./source.js";
 import { FormSources, type FormSource } from "./forms.js";
 import { WorkspaceFiles, fileName, type WorkspaceEntry } from "./workspace-files.js";
 import { ProjectWatcher, watchManifests, watchDirectory } from "./watch.js";
@@ -103,6 +104,7 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
     this.disposables.push(vscode.commands.registerCommand("eska.explorer.refreshNode", (entry: Element) => this.refresh(entry)));
     this.disposables.push(vscode.commands.registerCommand("eska.explorer.openSource", (entry: TreeEntry) => this.open(entry)));
     this.disposables.push(vscode.commands.registerCommand("eska.explorer.openXml", (entry: TreeEntry) => this.open(entry, "xml")));
+    this.disposables.push(vscode.commands.registerCommand("eska.explorer.properties", (entry: TreeEntry) => this.showProperties(entry)));
     this.disposables.push(vscode.commands.registerCommand("eska.explorer.openFormSource", (entry: FormSource) =>
       this.open(entry.owner, entry.target)));
     this.disposables.push(vscode.commands.registerCommand("eska.explorer.openFile", (entry: WorkspaceEntry) => this.openFile(entry)));
@@ -277,7 +279,8 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
       ? supportsRootFilter(entry.project)
         ? this.hideEmptyGroups(entry.project) ? "eskaRootFiltered" : "eskaRootUnfiltered"
         : "eskaRoot"
-      : commonModule ? "eskaCommonModule" : directModuleRole(entry) ? "eskaModuleObject" : isForm(entry) ? "eskaForm" : "eskaMetadata";
+      : node.id.kind === "collection" ? "eskaMetadataGroup"
+        : commonModule ? "eskaCommonModule" : directModuleRole(entry) ? "eskaModuleObject" : isForm(entry) ? "eskaForm" : "eskaMetadata";
     if (!node.parent && this.sorting.order(entry.project) === "alphabetical") item.contextValue += "Sorted";
     item.accessibilityInformation = { label: support ? `${label}. ${this.support.explanation(entry)}` : label };
     item.iconPath = node.state === "error" ? new vscode.ThemeIcon("warning") : this.metadataIcon(entry);
@@ -511,12 +514,12 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
   }
 
   /** Open only resolved existing sources, preserving unsaved buffers and rejecting stale positions. */
-  private async open(entry: TreeEntry, target: SourceTarget = "default"): Promise<void> {
+  private async open(entry: TreeEntry, target: SourceTarget = "default", property?: PropertyChoice): Promise<void> {
     const tree = this.tree;
     if (!tree || !entry || !("node" in entry) || !tree.projects.includes(entry.project)) return;
     const opening = ++this.opening;
     try {
-      const source = await resolveSource(tree, entry, target);
+      const source = property ? await resolvePropertySource(tree, entry, property) : await resolveSource(tree, entry, target);
       if (opening !== this.opening || tree !== this.tree) return;
       const uri = await this.support.resolveUri(source.path);
       if (opening !== this.opening || tree !== this.tree) return;
@@ -532,6 +535,30 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
       if (opening === this.opening && tree === this.tree) {
         this.showError(error instanceof ExplorerError ? error : new ExplorerError("sourceMissing"));
       }
+    }
+  }
+
+  /** Native picker keeps large property sets searchable and opens the chosen XML element. */
+  private async showProperties(entry: TreeEntry): Promise<void> {
+    const tree = this.tree;
+    if (!tree || !entry || entry.node?.id.kind !== "object" || !tree.projects.includes(entry.project)) return;
+    try {
+      const result = await tree.request(entry.project, "metadata/properties", { objectId: entry.node.id.objectId });
+      if (tree !== this.tree) return;
+      const choices = propertyChoices(result, vscode.env.language);
+      if (!choices.length) {
+        void vscode.window.showInformationMessage(this.text("propertyEmpty"));
+        return;
+      }
+      const label = entry.node.label.kind === "name" ? entry.node.label.text : entry.node.label.translations[this.treeLanguage];
+      const choice = await vscode.window.showQuickPick(choices, {
+        title: `${this.text("properties")}: ${label}`,
+        placeHolder: this.text("propertyPlaceholder"),
+        matchOnDescription: true,
+      });
+      if (choice && tree === this.tree) await this.open(entry, "xml", choice);
+    } catch (error) {
+      if (tree === this.tree) this.showError(error instanceof ExplorerError ? error : new ExplorerError("requestFailed"));
     }
   }
 

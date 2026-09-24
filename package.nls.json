@@ -4,6 +4,7 @@
   "resetRootFilter": "Use Default Filter",
   "hideEmptyRootGroups": "Hide empty root sections and sections inside Common in configurations and extensions by default. Groups inside objects remain visible. A saved project choice overrides this setting; use Use Default Filter to reset it.",
   "openXml": "Open XML",
+  "properties": "Properties…",
   "description": "Explore 1C metadata through eska.",
   "connect": "Choose Project and Connect",
   "restart": "Restart Connection",

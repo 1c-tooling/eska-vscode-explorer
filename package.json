@@ -99,6 +99,11 @@
         "category": "ESKA Explorer"
       },
       {
+        "command": "eska.explorer.properties",
+        "title": "%properties%",
+        "category": "ESKA Explorer"
+      },
+      {
         "command": "eska.explorer.search",
         "title": "%search%",
         "category": "ESKA Explorer",
@@ -197,13 +202,18 @@
       ],
       "view/item/context": [
         {
+          "command": "eska.explorer.properties",
+          "when": "view == eska.explorer.projects && (viewItem == eskaMetadata || viewItem == eskaCommonModule || viewItem == eskaModuleObject || viewItem == eskaForm || viewItem =~ /^eskaRoot(Filtered|Unfiltered)?(Sorted)?$/)",
+          "group": "navigation@1"
+        },
+        {
           "command": "eska.explorer.openXml",
           "when": "view == eska.explorer.projects && (viewItem == eskaCommonModule || viewItem == eskaModuleObject || viewItem == eskaForm)",
-          "group": "navigation"
+          "group": "navigation@2"
         },
         {
           "command": "eska.explorer.refreshNode",
-          "when": "view == eska.explorer.projects && (viewItem == eskaFiles || viewItem == eskaMetadata || viewItem == eskaCommonModule || viewItem == eskaModuleObject || viewItem == eskaForm || viewItem =~ /^eskaRoot(Sorted)?$/ || viewItem =~ /^eskaRootFiltered(Sorted)?$/ || viewItem =~ /^eskaRootUnfiltered(Sorted)?$/)",
+          "when": "view == eska.explorer.projects && (viewItem == eskaFiles || viewItem == eskaMetadataGroup || viewItem == eskaMetadata || viewItem == eskaCommonModule || viewItem == eskaModuleObject || viewItem == eskaForm || viewItem =~ /^eskaRoot(Sorted)?$/ || viewItem =~ /^eskaRootFiltered(Sorted)?$/ || viewItem =~ /^eskaRootUnfiltered(Sorted)?$/)",
           "group": "inline@3"
         },
         {
@@ -233,6 +243,10 @@
         }
       ],
       "commandPalette": [
+        {
+          "command": "eska.explorer.properties",
+          "when": "false"
+        },
         {
           "command": "eska.explorer.openXml",
           "when": "false"

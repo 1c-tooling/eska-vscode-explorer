@@ -3,6 +3,7 @@ import { isAbsolute, relative, resolve, sep } from "node:path";
 import { ExplorerError, isRecord, isWirePath, type WirePath } from "./protocol.js";
 import { MetadataTree, type TreeEntry } from "./tree.js";
 import { eventHandler, handlerRange } from "./event-handler.js";
+import { propertyFingerprint, type PropertyChoice } from "./properties.js";
 
 /** Decode only paths representable without loss on this extension host and in a VS Code URI. */
 export function nativePath(path: WirePath): string {
@@ -136,4 +137,20 @@ export async function resolveSource(tree: MetadataTree, entry: TreeEntry, target
     throw new ExplorerError("sourceChanged");
   }
   return { path, position: editorRange(before, names[0].range.start, names[0].range.end) };
+}
+
+/** Recheck the selected property after the picker closes, then reuse safe descriptor opening. */
+export async function resolvePropertySource(tree: MetadataTree, entry: TreeEntry, choice: PropertyChoice): Promise<OpenSource> {
+  if (entry.node.id.kind !== "object") throw new ExplorerError("sourceMissing");
+  const generation = entry.project.info.generation;
+  const event = entry.project.info.eventSequence;
+  const result = await tree.request(entry.project, "metadata/properties", { objectId: entry.node.id.objectId });
+  if (!Array.isArray(result.properties)) throw new ExplorerError("protocolInvalid");
+  const current = result.properties[choice.index];
+  if (current === undefined || propertyFingerprint(current) !== choice.fingerprint) throw new ExplorerError("sourceChanged");
+  const source = await resolveSource(tree, entry, "xml");
+  const position = editorRange(await readFile(source.path), choice.range.start, choice.range.end);
+  if (generation !== entry.project.info.generation || event !== entry.project.info.eventSequence
+    || position.text !== source.position?.text) throw new ExplorerError("sourceChanged");
+  return { path: source.path, position };
 }
