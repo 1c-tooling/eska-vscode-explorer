@@ -12,7 +12,8 @@ import { Connection, type ConnectionState } from "./connection.js";
 import { assertHost } from "./host.js";
 import { message, type MessageKey } from "./messages.js";
 import { ExplorerError } from "./protocol.js";
-import { propertyChoices, type PropertyChoice } from "./properties.js";
+import type { PropertyChoice } from "./properties.js";
+import { PropertyTabs } from "./properties-view.js";
 import { MetadataTree, type TreeEntry, type ProjectTree } from "./tree.js";
 import { ProjectSorting, type SortOrder } from "./sorting.js";
 import { ProjectFilters, isHiddenSection, supportsRootFilter } from "./filter.js";
@@ -62,6 +63,7 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
   private readonly sorting: ProjectSorting;
   private readonly expanded = new Map<string, boolean>();
   private readonly forms = new FormSources();
+  private readonly propertiesTabs: PropertyTabs;
   private readonly recovering = new Set<ProjectTree>();
   private treeLanguage = this.resolveTreeLanguage();
   private opening = 0;
@@ -82,6 +84,9 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
     this.disposables.push(new ProtectedLanguageFeatures(error => this.output.warn(String(error))));
     this.filters = new ProjectFilters(context.workspaceState);
     this.sorting = new ProjectSorting(context.workspaceState);
+    this.propertiesTabs = new PropertyTabs(context, () => this.treeLanguage, () => this.tree,
+      (entry, choice) => this.open(entry, "xml", choice));
+    this.disposables.push(this.propertiesTabs);
     this.connection = new Connection(String(context.extension.packageJSON.version),
       (state) => this.update(state), (text, level) => this.output[level ?? "info"](text));
     this.setup = new BackendSetup(context, (text, level) => { if (!this.disposed) this.output[level ?? "info"](text); },
@@ -152,6 +157,7 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
       if (event.affectsConfiguration("eska.explorer.treeLanguage")) {
         this.treeLanguage = this.resolveTreeLanguage();
         this.searchView?.refreshLabels();
+        this.propertiesTabs.relabel();
         // Labels already contain both translations; reuse nodes and their expansion state.
         this.changed.fire(undefined);
       }
@@ -538,25 +544,12 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
     }
   }
 
-  /** Native picker keeps large property sets searchable and opens the chosen XML element. */
+  /** Open a dedicated settings-style editor tab for this metadata object. */
   private async showProperties(entry: TreeEntry): Promise<void> {
     const tree = this.tree;
     if (!tree || !entry || entry.node?.id.kind !== "object" || !tree.projects.includes(entry.project)) return;
     try {
-      const result = await tree.request(entry.project, "metadata/properties", { objectId: entry.node.id.objectId });
-      if (tree !== this.tree) return;
-      const choices = propertyChoices(result, vscode.env.language);
-      if (!choices.length) {
-        void vscode.window.showInformationMessage(this.text("propertyEmpty"));
-        return;
-      }
-      const label = entry.node.label.kind === "name" ? entry.node.label.text : entry.node.label.translations[this.treeLanguage];
-      const choice = await vscode.window.showQuickPick(choices, {
-        title: `${this.text("properties")}: ${label}`,
-        placeHolder: this.text("propertyPlaceholder"),
-        matchOnDescription: true,
-      });
-      if (choice && tree === this.tree) await this.open(entry, "xml", choice);
+      await this.propertiesTabs.show(tree, entry);
     } catch (error) {
       if (tree === this.tree) this.showError(error instanceof ExplorerError ? error : new ExplorerError("requestFailed"));
     }
@@ -623,6 +616,7 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
     if (this.disposed) return;
     void this.supportContexts.stop();
     this.searchView?.dispose();
+    this.propertiesTabs.stale();
     this.tree?.dispose();
     this.files?.dispose();
     this.files = undefined;
@@ -632,7 +626,8 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
     this.opening++;
     if (state.kind === "ready") {
       const tree = new MetadataTree(this.connection, state.session,
-        (entries) => { this.support.invalidate(); this.decorations.invalidate(); void this.repaint(entries); }, (project, reopen) => this.recover(project, reopen));
+        (entries) => { this.support.invalidate(); this.decorations.invalidate(); this.propertiesTabs.changed(tree, entries);
+          void this.repaint(entries); }, (project, reopen) => this.recover(project, reopen));
       this.tree = tree;
       this.files = new WorkspaceFiles(tree.projects, state.target.path, watchDirectory, entry => {
         if (this.tree !== tree) return;

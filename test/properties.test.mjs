@@ -8,29 +8,36 @@ import { Connection } from "../out/connection.js";
 import { MetadataTree } from "../out/tree.js";
 import { createTreeProject } from "./fixture.mjs";
 
-/** Property previews stay concise while values and ranges remain backend-owned. */
-test("property picker preserves order, repeated names and value summaries", () => {
+/** Property previews stay concise while full values and ranges remain backend-owned. */
+test("property tab data preserves order, repeated names and structured values", () => {
   const range = { start: 3, end: 12 };
   const key = { namespace: null, name: "Name" };
   const properties = [
     { key, range, value: { kind: "text", text: "😀\n длинное значение" } },
     { key, range, value: { kind: "localized", items: [{ language: "ru", content: "Товар" }, { language: "en", content: "Goods" }] } },
-    { key: { ...key, name: "Type" }, range, value: { kind: "record", fields: [{ key, value: { kind: "text", text: "String" } }] } },
+    { key: { ...key, name: "Type" }, range, value: { kind: "record", fields: [
+      { key, qualifiers: [{ key: { namespace: "urn:test", name: "type" }, value: "String" }], value: { kind: "text", text: "String" } },
+      { key, value: { kind: "text", text: "Number" } },
+    ] } },
     { key: { ...key, name: "Other" }, range, value: { kind: "unsupported", issue: "mixed_content" } },
   ];
   const choices = propertyChoices({ properties }, "ru-RU");
   assert.deepEqual(choices.map(choice => choice.label), ["Name", "Name", "Type", "Other"]);
   assert.equal(choices[0].description, "😀 длинное значение");
   assert.equal(choices[1].description, "ru: Товар · en: Goods");
-  assert.equal(choices[2].description, "Полей: 1");
+  assert.equal(choices[2].description, "Полей: 2");
+  assert.deepEqual(choices[2].value.fields.map(field => field.key.name), ["Name", "Name"]);
+  assert.equal(choices[2].value.fields[0].qualifiers[0].key.namespace, "urn:test");
   assert.equal(choices[3].description, "Смотрите в XML");
   assert.equal(choices[1].index, 1);
   assert.throws(() => propertyChoices({ properties: [{ ...properties[0], range: { start: 12, end: 3 } }] }, "en-US"),
     { code: "protocolInvalid" });
+  assert.throws(() => propertyChoices({ properties: [{ ...properties[2], value: { kind: "record", fields: [{ key, value: null }] } }] }, "en-US"),
+    { code: "protocolInvalid" });
 });
 
 /** Real Designer mappings select the intended property for root, object and inline child. */
-test("property selection opens exact XML and rejects a stale picker result", { skip: !process.env.ESKA_TEST_BINARY }, async t => {
+test("property action opens exact XML and rejects a stale tab result", { skip: !process.env.ESKA_TEST_BINARY }, async t => {
   const directory = await mkdtemp(join(process.env.ESKA_TEST_ROOT ?? resolve("../eska-playground"), "explorer-properties-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const fixture = await createTreeProject(join(directory, "project"));

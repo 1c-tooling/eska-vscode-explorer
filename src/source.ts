@@ -139,7 +139,7 @@ export async function resolveSource(tree: MetadataTree, entry: TreeEntry, target
   return { path, position: editorRange(before, names[0].range.start, names[0].range.end) };
 }
 
-/** Recheck the selected property after the picker closes, then reuse safe descriptor opening. */
+/** Recheck a property selected in its tab, then reuse safe descriptor opening. */
 export async function resolvePropertySource(tree: MetadataTree, entry: TreeEntry, choice: PropertyChoice): Promise<OpenSource> {
   if (entry.node.id.kind !== "object") throw new ExplorerError("sourceMissing");
   const generation = entry.project.info.generation;

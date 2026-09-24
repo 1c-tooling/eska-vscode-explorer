@@ -1,0 +1,77 @@
+:root {
+  color: var(--vscode-foreground);
+  background: var(--vscode-editor-background);
+  font-family: var(--vscode-font-family);
+  font-size: var(--vscode-font-size);
+}
+
+* { box-sizing: border-box; }
+
+body { margin: 0; }
+
+.page {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 32px clamp(20px, 5vw, 64px) 64px;
+}
+
+.heading { margin-bottom: 24px; }
+.breadcrumb { color: var(--vscode-descriptionForeground); font-size: 0.9em; overflow-wrap: anywhere; }
+.title-row { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+h1 { font-size: 1.65em; font-weight: 600; line-height: 1.3; margin: 8px 0 0; overflow-wrap: anywhere; }
+.badge {
+  margin-top: 8px;
+  padding: 3px 8px;
+  color: var(--vscode-descriptionForeground);
+  border: 1px solid var(--vscode-settings-headerBorder, var(--vscode-panel-border));
+  border-radius: 4px;
+  font-size: 0.85em;
+}
+
+.toolbar { display: flex; align-items: center; gap: 10px; position: sticky; top: 0; z-index: 1;
+  padding: 12px 0; background: var(--vscode-editor-background); }
+input[type="search"] {
+  flex: 1; min-width: 0; height: 30px; padding: 0 10px;
+  color: var(--vscode-input-foreground); background: var(--vscode-input-background);
+  border: 1px solid var(--vscode-input-border, transparent); border-radius: 2px;
+  font: inherit;
+}
+input[type="search"]:focus { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
+button { font: inherit; cursor: pointer; }
+#refresh { height: 30px; padding: 0 12px; color: var(--vscode-button-secondaryForeground);
+  background: var(--vscode-button-secondaryBackground); border: 0; border-radius: 2px; }
+#refresh:hover { background: var(--vscode-button-secondaryHoverBackground); }
+button:focus-visible, summary:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 2px; }
+
+.count { margin: 8px 0 4px; color: var(--vscode-descriptionForeground); font-size: 0.9em; }
+.notice { margin: 12px 0; color: var(--vscode-descriptionForeground); }
+.notice:empty { display: none; }
+.items { border-top: 1px solid var(--vscode-settings-headerBorder, var(--vscode-panel-border)); }
+.property { padding: 18px 0 20px; border-bottom: 1px solid var(--vscode-settings-headerBorder, var(--vscode-panel-border)); }
+.property-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; }
+.property-name { margin: 0 0 10px; font-size: 1.02em; font-weight: 600; overflow-wrap: anywhere; }
+.technical-name { margin-left: 10px; color: var(--vscode-descriptionForeground); font-size: 0.85em; font-weight: 400; }
+.source-button { flex: none; padding: 3px 0; color: var(--vscode-textLink-foreground);
+  background: transparent; border: 0; }
+.source-button:hover { color: var(--vscode-textLink-activeForeground); text-decoration: underline; }
+.value { color: var(--vscode-foreground); }
+.text-value { white-space: pre-wrap; overflow-wrap: anywhere; }
+.unsupported { color: var(--vscode-descriptionForeground); font-style: italic; }
+.localized { display: grid; gap: 6px; }
+.localized-row { display: grid; grid-template-columns: minmax(52px, auto) 1fr; gap: 12px; }
+.language { color: var(--vscode-descriptionForeground); font-size: 0.9em; }
+.record { margin: 0; }
+.record-summary { width: fit-content; color: var(--vscode-textLink-foreground); cursor: pointer; }
+.fields { margin: 12px 0 0 8px; padding-left: 16px; border-left: 1px solid var(--vscode-settings-headerBorder, var(--vscode-panel-border)); }
+.field { display: grid; grid-template-columns: minmax(120px, 30%) 1fr; gap: 8px 20px; margin: 10px 0; }
+.field-name { color: var(--vscode-descriptionForeground); overflow-wrap: anywhere; }
+.qualifiers { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; }
+.qualifier { padding: 2px 6px; border-radius: 2px; color: var(--vscode-descriptionForeground);
+  background: var(--vscode-editorWidget-background, var(--vscode-input-background)); font-size: 0.85em; overflow-wrap: anywhere; }
+.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; }
+
+@media (max-width: 560px) {
+  .page { padding: 20px 16px 40px; }
+  .field { display: block; }
+  .field-name { margin-bottom: 4px; }
+}

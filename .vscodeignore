@@ -6,6 +6,8 @@
 !CHANGELOG.md
 !out/*.js
 !resources/icons/**/*.svg
+!resources/properties/*.css
+!resources/properties/*.js
 !docs/*.md
 !docs/measurements/*.json
 !resources/icon.png

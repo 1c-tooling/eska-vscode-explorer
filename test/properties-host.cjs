@@ -3,16 +3,19 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const vscode = require('vscode');
 
-/** Exercise the contributed action, native picker and final XML selection in VSCodium. */
+/** Exercise object-scoped webview tabs and their XML action in VSCodium. */
 exports.run = async function () {
   const fixture = JSON.parse(process.env.ESKA_HOST_FIXTURE);
   await vscode.workspace.getConfiguration('eska.explorer').update('executable', process.env.ESKA_TEST_BINARY, vscode.ConfigurationTarget.Workspace);
+  await vscode.workspace.getConfiguration('eska.explorer').update('treeLanguage', 'ru-RU', vscode.ConfigurationTarget.Workspace);
   const extension = vscode.extensions.all.find(value => value.packageJSON.name === 'eska-explorer');
   const explorer = await extension.activate();
   await vscode.commands.executeCommand('eska.explorer.connect');
   const [root] = (await explorer.getChildren()).filter(entry => entry.node);
   const catalogs = (await explorer.getChildren(root)).find(entry => entry.node.id.collection?.metadataKind === 'catalog');
-  const goods = (await explorer.getChildren(catalogs)).find(entry => entry.node.label.text === 'Товары');
+  const objects = await explorer.getChildren(catalogs);
+  const goods = objects.find(entry => entry.node.label.text === 'Товары');
+  const customers = objects.find(entry => entry.node.label.text === 'Покупатели');
   const modules = (await explorer.getChildren(goods)).find(entry => entry.node.id.collection?.kind === 'modules');
   const [module] = await explorer.getChildren(modules);
   assert.equal(explorer.getTreeItem(catalogs).contextValue, 'eskaMetadataGroup');
@@ -22,14 +25,36 @@ exports.run = async function () {
   const action = manifest.contributes.menus['view/item/context'].find(item => item.command === 'eska.explorer.properties');
   assert.ok(action.when.includes('viewItem == eskaMetadata'));
   assert.ok(!action.when.includes('eskaMetadataGroup'));
-  const opening = vscode.commands.executeCommand(action.command, goods);
-  await new Promise(resolve => setTimeout(resolve, 500));
-  await vscode.commands.executeCommand('workbench.action.quickOpenSelectNext');
-  await vscode.commands.executeCommand('workbench.action.acceptSelectedQuickOpenItem');
-  await opening;
+  await vscode.commands.executeCommand(action.command, goods);
+  const [first] = explorer.propertiesTabs.tabs.values();
+  assert.equal(explorer.propertiesTabs.tabs.size, 1);
+  assert.equal(first.state.status, 'ready');
+  assert.equal(first.state.names.Name, 'Имя');
+  assert.equal(first.state.names.Comment, 'Комментарий');
+  assert.equal(first.state.properties.find(property => property.key.name === 'Comment').key.namespace,
+    'http://v8.1c.ru/8.3/MDClasses');
+  assert.ok(first.panel.visible);
+  assert.ok(first.panel.webview.html.includes('Content-Security-Policy'));
+  assert.ok(first.panel.webview.html.includes('view.css'));
+  assert.ok(first.choices.some(choice => choice.label === 'Comment'));
+  await vscode.commands.executeCommand(action.command, goods);
+  assert.equal([...explorer.propertiesTabs.tabs.values()][0], first, 'the same object reuses its editor tab');
+  await vscode.commands.executeCommand(action.command, customers);
+  assert.equal(explorer.propertiesTabs.tabs.size, 2, 'another object gets a separate tab');
+  let webviews = [];
+  for (let attempt = 0; attempt < 50; attempt++) {
+    webviews = vscode.window.tabGroups.all.flatMap(group => group.tabs)
+      .filter(tab => / · (Properties|Свойства)$/.test(tab.label));
+    if (webviews.length === 2) break;
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+  assert.equal(webviews.length, 2, JSON.stringify(vscode.window.tabGroups.all.flatMap(group => group.tabs.map(tab => tab.label))));
+  const comment = first.choices.find(choice => choice.label === 'Comment');
+  await first.receive({ type: 'openXml', index: comment.index });
   const editor = vscode.window.activeTextEditor;
   assert.equal(editor.document.uri.fsPath, fixture.descriptor);
   assert.equal(editor.document.getText(editor.selection), '<Comment>😀 Кириллица</Comment>');
+  assert.equal(explorer.propertiesTabs.tabs.size, 2, 'opening XML leaves property tabs in place');
   await vscode.commands.executeCommand('eska.explorer.disconnect');
   await fs.writeFile(path.join(fixture.root, 'host-result.json'), JSON.stringify({ passed: true, suite: 'properties', vscode: vscode.version }));
 };
