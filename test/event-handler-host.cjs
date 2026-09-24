@@ -24,8 +24,13 @@ exports.run = async function () {
   const extension = vscode.extensions.all.find(value => value.packageJSON.name === 'eska-explorer');
   const explorer = await extension.activate();
   await vscode.commands.executeCommand('eska.explorer.connect');
-  const roots = (await explorer.getChildren()).filter(entry => entry.node);
-  assert.equal(roots.length, 2);
+  let roots = [];
+  const deadline = Date.now() + 30000;
+  while (Date.now() < deadline && roots.length !== 2) {
+    roots = (await explorer.getChildren()).filter(entry => entry.node);
+    if (roots.length !== 2) await new Promise(resolve => setTimeout(resolve, 100));
+  }
+  assert.equal(roots.length, 2, 'both workspace members finish opening before navigation');
   for (const root of roots) {
     const common = (await explorer.getChildren(root)).find(e => e.node?.id.collection?.kind === 'common');
     const group = (await explorer.getChildren(common)).find(e => e.node?.id.collection?.metadataKind === 'event-subscription');

@@ -78,3 +78,20 @@ test("tabular attributes inherit the table color without recoloring other fields
     assert.equal(tabular, original.replaceAll("#6c9fc3", "#34835b"));
   }
 });
+
+test("support composites preserve themed metadata and bundle only the three orange symbols", async () => {
+  const symbols = ['lock', 'lock_open_right', 'no_encryption'];
+  for (const theme of ['light', 'dark', 'contrast', 'contrast-light']) {
+    const base = new URL(`../resources/icons/${theme}/`, import.meta.url);
+    const output = new URL(`../resources/icons/support/generated/${theme}/`, import.meta.url);
+    const names = await readdir(base);
+    assert.equal((await readdir(output)).length, names.length * symbols.length);
+    for (const name of names) for (const symbol of symbols) {
+      const svg = await readFile(new URL(name.replace('.svg', `-${symbol}.svg`), output), 'utf8');
+      assert.match(svg, /fill="#f59e0b"/);
+      assert.match(svg, /mask="url\(#cut\)"/);
+      assert.match(svg, /viewBox="0 -960 960 960"/);
+      assert.doesNotMatch(svg, /<script|<image|<foreignObject|(?:href|xlink:href)=/);
+    }
+  }
+});

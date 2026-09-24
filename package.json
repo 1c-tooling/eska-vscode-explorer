@@ -20,7 +20,9 @@
     "workspace"
   ],
   "activationEvents": [
-    "onView:eska.explorer.projects"
+    "onFileSystem:eska-protected",
+    "onView:eska.explorer.projects",
+    "workspaceContains:**/eska.toml"
   ],
   "capabilities": {
     "untrustedWorkspaces": {
@@ -33,7 +35,7 @@
     }
   },
   "scripts": {
-    "compile": "tsc -p .",
+    "compile": "node scripts/support-icons.mjs && tsc -p .",
     "check": "tsc -p . --noEmit",
     "test": "bun run --bun compile && bun test",
     "test:node": "npm run compile && node --test test/*.test.mjs",
@@ -301,6 +303,12 @@
           "default": true,
           "scope": "window",
           "description": "%checkForUpdates%"
+        },
+        "eska.explorer.supportPolicy": {
+          "type": "boolean",
+          "default": true,
+          "scope": "window",
+          "description": "%supportPolicy%"
         }
       }
     },

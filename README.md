@@ -179,6 +179,7 @@ ESKA: 1C Explorer
 | Настройка | Значение по умолчанию | Назначение |
 | --- | --- | --- |
 | `eska.explorer.executable` | `eska` | Глобальная ESKA или путь к backend для разработки |
+| `eska.explorer.supportPolicy` | `true` | Адресно проверять поддержку 1С и открывать запрещённые исходники в защищённых вкладках; отключение снимает ограничения ESKA без перезапуска |
 | `eska.explorer.checkForUpdates` | `true` | Проверять обновления CLI не чаще раза в сутки |
 | `eska.explorer.treeLanguage` | `auto` | Язык групп: `auto`, `ru-RU` или `en-US` |
 | `eska.explorer.hideEmptyRootGroups` | `true` | Скрывать пустые разделы по умолчанию |
@@ -263,3 +264,5 @@ IDE API и обязательные возможности дерева, пои�
 
 [Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0).
 Полный текст находится в файле `LICENSE` репозитория и включён в VSIX как `LICENSE.txt`.
+
+Правила поддержки 1С: [индикаторы, защищённое открытие и ограничения обычных файлов](docs/support-policy.md).

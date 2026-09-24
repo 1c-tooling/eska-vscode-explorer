@@ -20,6 +20,8 @@ export interface ProjectTree {
   nodes: Map<string, TreeEntry>;
   root: TreeEntry | undefined;
   rootDirty: boolean;
+  supportGeneration?: string;
+  supportEventSequence?: string;
 }
 export interface TreeEntry {
   key: string;
@@ -81,7 +83,7 @@ export class MetadataTree {
     private readonly recover: (project: ProjectTree, reopen: boolean) => void) {
     this.projects = session.projects.map((info) => ({ info: { ...info },
       key: JSON.stringify([info.rootPath.encoding, info.rootPath.value, info.scope]),
-      nodes: new Map(), root: undefined, rootDirty: true }));
+      nodes: new Map(), root: undefined, rootDirty: true, supportGeneration: info.generation, supportEventSequence: info.eventSequence }));
     this.subscription = connection.onNotification((method, params) => {
       if (method === "metadata/changed") this.invalidated(params);
     });
@@ -198,6 +200,8 @@ export class MetadataTree {
     if (!info) throw new ExplorerError("obsolete");
     if (BigInt(info.generation) >= BigInt(project.info.generation) && BigInt(info.eventSequence) >= BigInt(project.info.eventSequence)) {
       Object.assign(project.info, info);
+      project.supportGeneration = info.generation;
+      project.supportEventSequence = info.eventSequence;
     }
     for (const entry of project.nodes.values()) entry.children = undefined;
     project.rootDirty = true;
@@ -247,6 +251,10 @@ export class MetadataTree {
     const info = project.info;
     if (BigInt(value.eventSequence) <= BigInt(info.eventSequence) || BigInt(value.generation) < BigInt(info.generation)) return;
     const gap = BigInt(value.eventSequence) !== BigInt(info.eventSequence) + 1n;
+    if (gap || value.supportUnchanged !== true || value.requiresRefresh || value.requiresReopen) {
+      project.supportGeneration = value.generation;
+      project.supportEventSequence = value.eventSequence;
+    }
     Object.assign(info, { generation: value.generation, eventSequence: value.eventSequence,
       requiresRefresh: value.requiresRefresh, requiresReopen: value.requiresReopen });
     const affected = value.affected === null || gap ? null : new Set(value.affected as string[]);

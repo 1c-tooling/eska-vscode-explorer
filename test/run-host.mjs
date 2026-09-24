@@ -18,7 +18,7 @@ try {
   if (process.platform === "win32") await cp(binary, join(bin, executableName));
   else await symlink(binary, join(bin, executableName));
   await mkdir(join(fixture.root, ".vscode"), { recursive: true });
-  await writeFile(join(fixture.root, ".vscode/settings.json"), JSON.stringify({ "eska.explorer.checkForUpdates": false }));
+  await writeFile(join(fixture.root, ".vscode/settings.json"), JSON.stringify({ "eska.explorer.checkForUpdates": false, ...(process.env.ESKA_HOST_SUPPORT_DISABLED ? { "eska.explorer.supportPolicy": false } : {}) }));
   const executable = process.env.VSCODE_EXECUTABLE ?? "code";
   let extensionPath = repository;
   if (process.env.ESKA_BSL_EXTENSION) {
@@ -49,34 +49,65 @@ try {
     // Test mode exposes the provider only for acceptance. All runtime files come from the installed VSIX.
   }
   let workspace = fixture.root;
+  let secondFixture;
+  if (process.env.ESKA_HOST_MULTI_ROOT) {
+    secondFixture = await createTreeProject(join(root, "second"));
+    workspace = join(root, "support.code-workspace");
+    await writeFile(workspace, JSON.stringify({ folders: [{ path: fixture.root }, { path: secondFixture.root }], settings: { "eska.explorer.checkForUpdates": false } }));
+  }
   if (process.env.ESKA_PERF_PROJECT) {
     if (!isAbsolute(process.env.ESKA_PERF_PROJECT)) throw new Error("ESKA_PERF_PROJECT must be absolute.");
     workspace = join(root, "performance.code-workspace");
     await writeFile(workspace, JSON.stringify({ folders: [{ path: process.env.ESKA_PERF_PROJECT }], settings: { "eska.explorer.checkForUpdates": false } }));
   }
-  const child = spawn(executable, ["--verbose", "--wait",
-    `--extensionDevelopmentPath=${extensionPath}`, `--extensionTestsPath=${resolve(repository, process.argv[2] ?? "test/extension-host.cjs")}`,
-    `--user-data-dir=${join(root, "profile")}`, `--extensions-dir=${join(root, "extensions")}`,
-    "--disable-workspace-trust", ...(process.env.ESKA_BSL_EXTENSION ? [] : ["--disable-extensions"]), "--disable-gpu", "--new-window", workspace],
-  { env: { ...process.env, PATH: bin + (process.platform === "win32" ? ";" : ":") + (process.env.PATH ?? ""), ESKA_HOST_FIXTURE: JSON.stringify(fixture) }, stdio: ["ignore", "pipe", "pipe"] });
-  let output = "";
-  /** Retain bounded diagnostic output; host startup can be verbose. */
-  const capture = (data) => { output = (output + data.toString()).slice(-32000); };
-  child.stdout.on("data", capture);
-  child.stderr.on("data", capture);
-  const code = await new Promise((resolve, reject) => { child.once("error", reject); child.once("close", resolve); });
-  if (code !== 0) throw new Error(`Extension host exited ${code}\n${output}`);
-  try {
-    const result = JSON.parse(await readFile(join(fixture.root, "host-result.json"), "utf8"));
-    if (result.passed !== true) throw new Error("Acceptance result did not pass");
-    for (const pid of result.shutdownPids ?? []) {
-      try { process.kill(pid, 0); }
-      catch (error) { if (error.code === "ESRCH") continue; throw error; }
-      // Only a PID recorded by this fixture is eligible for cleanup after a failed shutdown check.
-      process.kill(pid, "SIGKILL");
-      throw new Error(`Backend ${pid} survived native host shutdown`);
-    }
-    console.log(JSON.stringify(result));
+  // A second process reuses the same profile and workspace to test restored editors.
+  const suite = resolve(repository, process.argv[2] ?? "test/extension-host.cjs");
+  const hostArguments = [`--extensionTestsPath=${suite}`];
+  if (process.env.ESKA_HOST_RESTART) {
+    // VS Code deliberately skips editor restoration in extension-test mode. Run the
+    // same assertions from a disposable startup extension in a normal development host.
+    const probe = join(root, "restore-probe");
+    await mkdir(probe);
+    await writeFile(join(probe, "package.json"), JSON.stringify({ name: "restore-probe", publisher: "eska-test",
+      version: "0.0.1", engines: { vscode: "^1.109.0" }, main: "./extension.cjs", activationEvents: ["onStartupFinished"] }));
+    await writeFile(join(probe, "extension.cjs"), `const vscode = require('vscode');
+exports.activate = async function () {
+  try { await require(${JSON.stringify(suite)}).run(); }
+  catch (error) {
+    await require('node:fs/promises').writeFile(${JSON.stringify(join(fixture.root, "host-result.json"))},
+      JSON.stringify({ passed: false, error: String(error.stack ?? error) }));
   }
-  catch (error) { throw new Error(`Extension host did not report success: ${error.message}\n${output}`); }
+  await vscode.commands.executeCommand('workbench.action.closeWindow');
+};\n`);
+    hostArguments.splice(0, 1, `--extensionDevelopmentPath=${probe}`);
+  }
+  for (let run = 0; run < (process.env.ESKA_HOST_RESTART ? 2 : 1); run++) {
+    await rm(join(fixture.root, "host-result.json"), { force: true });
+    const child = spawn(executable, ["--verbose", "--wait", ...(process.env.ESKA_HOST_DEBUG_PORT ? [`--remote-debugging-port=${process.env.ESKA_HOST_DEBUG_PORT}`] : []),
+      `--extensionDevelopmentPath=${extensionPath}`, ...hostArguments,
+      `--user-data-dir=${join(root, "profile")}`, `--extensions-dir=${join(root, "extensions")}`,
+      "--disable-workspace-trust", ...(process.env.ESKA_BSL_EXTENSION ? [] : ["--disable-extensions"]), "--disable-gpu", "--new-window", workspace],
+    { env: { ...process.env, PATH: bin + (process.platform === "win32" ? ";" : ":") + (process.env.PATH ?? ""), ESKA_HOST_RUN: String(run), ESKA_HOST_FIXTURE: JSON.stringify(fixture), ESKA_HOST_SECOND_FIXTURE: JSON.stringify(secondFixture) }, stdio: ["ignore", "pipe", "pipe"] });
+    let output = "";
+    /** Retain bounded diagnostic output; host startup can be verbose. */
+    const capture = (data) => { output = (output + data.toString()).slice(-32000); };
+    child.stdout.on("data", capture);
+    child.stderr.on("data", capture);
+    const code = await new Promise((resolve, reject) => { child.once("error", reject); child.once("close", resolve); });
+    if (process.env.ESKA_HOST_LOG) await writeFile(process.env.ESKA_HOST_LOG, output);
+    if (code !== 0) throw new Error(`Extension host exited ${code}\n${output}`);
+    try {
+      const result = JSON.parse(await readFile(join(fixture.root, "host-result.json"), "utf8"));
+      if (result.passed !== true) throw new Error(`Acceptance result did not pass: ${result.error ?? "unknown failure"}`);
+      for (const pid of result.shutdownPids ?? []) {
+        try { process.kill(pid, 0); }
+        catch (error) { if (error.code === "ESRCH") continue; throw error; }
+        // Only a PID recorded by this fixture is eligible for cleanup after a failed shutdown check.
+        process.kill(pid, "SIGKILL");
+        throw new Error(`Backend ${pid} survived native host shutdown`);
+      }
+      console.log(JSON.stringify(result));
+    }
+    catch (error) { throw new Error(`Extension host did not report success: ${error.message}\n${output}`); }
+  }
 } finally { await rm(root, { recursive: true, force: true }); }

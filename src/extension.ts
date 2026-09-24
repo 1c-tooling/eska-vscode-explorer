@@ -1,3 +1,7 @@
+import { SupportContexts } from "./support-contexts.js";
+import { SupportController } from "./support.js";
+import { PROTECTED_SOURCE_SCHEME, ProtectedSources } from "./protected-source.js";
+import { ProtectedLanguageFeatures } from "./protected-language.js";
 import * as vscode from "vscode";
 import { BackendSetup } from "./backend-setup.js";
 import { GitDecorations } from "./decorations.js";
@@ -16,12 +20,12 @@ import { FormSources, type FormSource } from "./forms.js";
 import { WorkspaceFiles, fileName, type WorkspaceEntry } from "./workspace-files.js";
 import { ProjectWatcher, watchManifests, watchDirectory } from "./watch.js";
 
-interface Notice { label: string; project?: ProjectTree; parent?: Element }
+interface Notice { label: string; loading?: boolean; supportFailure?: boolean; project?: ProjectTree; parent?: Element }
 type Element = TreeEntry | Notice | FormSource | WorkspaceEntry;
 
 let active: Explorer | undefined;
 
-/** Activation registers only Explorer UI; no backend runs before a view or command needs it. */
+/** Activation starts workspace protection independently of whether the tree is expanded. */
 export function activate(context: vscode.ExtensionContext): unknown {
   active = new Explorer(context);
   context.subscriptions.push(active);
@@ -45,6 +49,9 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
   private readonly view: vscode.TreeView<Element>;
   private readonly status = vscode.window.createStatusBarItem("eska.explorer.connection", vscode.StatusBarAlignment.Right, 0);
   private readonly disposables: vscode.Disposable[] = [];
+  readonly support: SupportController;
+  private readonly protectedSources = new ProtectedSources();
+  private readonly supportContexts: SupportContexts;
   private tree: MetadataTree | undefined;
   private files: WorkspaceFiles | undefined;
   private searchView: SearchView | undefined;
@@ -63,11 +70,15 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
   private connecting: AbortController | undefined;
   private disposed = false;
   private stopping: Promise<void> | undefined;
+  private supportSelection: { tree: MetadataTree; entry: TreeEntry } | undefined;
 
   constructor(private readonly context: vscode.ExtensionContext) {
+    this.support = new SupportController(context, () => this.supportRepaint(), text => this.output.warn(text));
+    this.supportContexts = new SupportContexts(String(context.extension.packageJSON.version), (trees, pending) => this.support.setAdditionalTrees(trees, pending), () => this.support.invalidate(), text => this.output.info(text));
     this.status.name = "ESKA Explorer";
     this.status.command = "eska.explorer.checkUpdates";
-    this.disposables.push(this.status, this.decorations);
+    this.disposables.push(this.status, this.decorations, this.protectedSources);
+    this.disposables.push(new ProtectedLanguageFeatures(error => this.output.warn(String(error))));
     this.filters = new ProjectFilters(context.workspaceState);
     this.sorting = new ProjectSorting(context.workspaceState);
     this.connection = new Connection(String(context.extension.packageJSON.version),
@@ -94,6 +105,7 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
     this.disposables.push(vscode.commands.registerCommand("eska.explorer.openXml", (entry: TreeEntry) => this.open(entry, "xml")));
     this.disposables.push(vscode.commands.registerCommand("eska.explorer.openFormSource", (entry: FormSource) =>
       this.open(entry.owner, entry.target)));
+    this.disposables.push(vscode.commands.registerCommand("eska.explorer.openFile", (entry: WorkspaceEntry) => this.openFile(entry)));
     for (const name of ["hideEmptyGroups", "showEmptyGroups", "resetRootFilter"] as const) {
       this.disposables.push(vscode.commands.registerCommand(`eska.explorer.${name}`, (entry: Element) =>
         this.setRootFilter(entry, name === "resetRootFilter" ? undefined : name === "hideEmptyGroups")));
@@ -112,13 +124,25 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
     }));
     this.disposables.push(vscode.workspace.onDidChangeWorkspaceFolders(() => {
       if (this.selected && !this.folders().some((folder) => folder.uri.toString() === this.selected?.uri.toString())) {
-        this.selected = undefined;
-        void this.disconnect();
+        this.selected = this.folders()[0];
+        if (this.selected) void this.connect(false);
+        else void this.disconnect();
+      } else if (this.connection.state.kind === "ready") {
+        const target = this.connection.state.target;
+        void this.supportContexts.start(this.folders().filter(folder => folder.uri.fsPath !== target.path).map(folder => ({ ...target, path: folder.uri.fsPath, name: folder.name })));
       }
     }));
     this.disposables.push(vscode.workspace.onDidChangeConfiguration((event) => {
       if (event.affectsConfiguration("eska.explorer.executable", this.selected?.uri)) {
         void this.disconnect();
+      }
+      if (event.affectsConfiguration("eska.explorer.supportPolicy")) {
+        this.support.invalidate();
+        const state = this.connection.state;
+        if (state.kind === "ready") {
+          void this.supportContexts.start(this.folders().filter(folder => folder.uri.fsPath !== state.target.path)
+            .map(folder => ({ ...state.target, path: folder.uri.fsPath, name: folder.name })));
+        } else void this.supportContexts.stop();
       }
       if (event.affectsConfiguration("eska.explorer.hideEmptyRootGroups")) {
         void this.repaint(this.tree?.projects.flatMap((project) => project.root ? [project.root] : []));
@@ -131,7 +155,8 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
       }
     }));
     this.disposables.push(vscode.window.onDidChangeActiveTextEditor(() => this.updateKeyboardContext()));
-    if (this.view.visible) void this.connect(false);
+    this.selected = this.folders()[0];
+    if (this.selected) void this.connect(false);
   }
 
   /** Resolve the active host locale without changing the workspace's language providers. */
@@ -206,7 +231,7 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
         item.resourceUri = vscode.Uri.file(entry.path);
         item.tooltip = entry.path;
         item.iconPath = entry.directory ? vscode.ThemeIcon.Folder : vscode.ThemeIcon.File;
-        if (!entry.directory) item.command = { command: "vscode.open", title: this.text("openSource"), arguments: [item.resourceUri] };
+        if (!entry.directory) item.command = { command: "eska.explorer.openFile", title: this.text("openSource"), arguments: [entry] };
       } else {
         const icons = { settings: "settings-gear", documentation: "book", other: "folder" };
         item.iconPath = new vscode.ThemeIcon(icons[entry.kind]);
@@ -227,7 +252,12 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
     if (!("node" in entry)) {
       const item = new vscode.TreeItem(entry.label);
       item.id = `${entry.parent && "key" in entry.parent ? entry.parent.key : "connection"}:${entry.project?.key ?? ""}:notice`;
-      item.iconPath = new vscode.ThemeIcon("warning");
+      item.iconPath = new vscode.ThemeIcon(entry.loading ? "loading~spin" : "warning");
+      if (entry.loading) return item;
+      if (entry.supportFailure) {
+        item.command = { command: "eska.explorer.refresh", title: this.text("refresh") };
+        return item;
+      }
       item.command = { command: this.tree ? "eska.explorer.refreshNode" : "eska.explorer.connect",
         title: this.text(this.tree ? "refresh" : "select"), arguments: [entry] };
       return item;
@@ -241,14 +271,15 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
       : expanded ? vscode.TreeItemCollapsibleState.Expanded : vscode.TreeItemCollapsibleState.Collapsed);
     item.id = entry.key;
     item.resourceUri = this.decorations.resource(entry);
-    item.tooltip = label;
+    const support = this.support.object(entry);
+    item.tooltip = support ? `${label}\n${this.support.explanation(entry)}` : label;
     item.contextValue = !node.parent
       ? supportsRootFilter(entry.project)
         ? this.hideEmptyGroups(entry.project) ? "eskaRootFiltered" : "eskaRootUnfiltered"
         : "eskaRoot"
       : commonModule ? "eskaCommonModule" : directModuleRole(entry) ? "eskaModuleObject" : isForm(entry) ? "eskaForm" : "eskaMetadata";
     if (!node.parent && this.sorting.order(entry.project) === "alphabetical") item.contextValue += "Sorted";
-    item.accessibilityInformation = { label };
+    item.accessibilityInformation = { label: support ? `${label}. ${this.support.explanation(entry)}` : label };
     item.iconPath = node.state === "error" ? new vscode.ThemeIcon("warning") : this.metadataIcon(entry);
     if (!node.parent) item.description = entry.project.info.scope.kind === "member"
       ? `${entry.project.info.scope.name} · ${this.text(entry.project.info.type)}` : this.text(entry.project.info.type);
@@ -262,7 +293,9 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
     const theme = kind === vscode.ColorThemeKind.HighContrast ? "contrast"
       : kind === vscode.ColorThemeKind.HighContrastLight ? "contrast-light"
       : kind === vscode.ColorThemeKind.Light ? "light" : "dark";
-    const key = `${theme}/${sourceIcon ?? iconName(entry.node, entry.project.info.type, this.tree?.parent(entry)?.node)}.svg`;
+    const name = sourceIcon ?? iconName(entry.node, entry.project.info.type, this.tree?.parent(entry)?.node);
+    const support = this.support.icon(entry);
+    const key = support ? `support/generated/${theme}/${name}-${support}.svg` : `${theme}/${name}.svg`;
     let uri = this.iconPaths.get(key);
     if (!uri) {
       uri = vscode.Uri.joinPath(this.context.extensionUri, "resources", "icons", key);
@@ -285,8 +318,9 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
   /** Limit shortcut overrides to files in the connected projects, including multi-root workspaces. */
   private updateKeyboardContext(): void {
     const uri = vscode.window.activeTextEditor?.document.uri;
-    const activeProject = uri?.scheme === "file" && !!this.files?.scopes.some(scope =>
-      relativeFile(scope.path, uri.fsPath) !== undefined);
+    const source = uri && ProtectedSources.sourceUri(uri);
+    const activeProject = !!source && source.scheme === "file" && !!this.files?.scopes.some(scope =>
+      relativeFile(scope.path, source.fsPath) !== undefined);
     void vscode.commands.executeCommand("setContext", "eska.explorer.activeProject", activeProject);
     void vscode.commands.executeCommand("setContext", "eska.explorer.connected", !!this.tree);
   }
@@ -294,12 +328,13 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
   /** Reveal the active source without replacing the document or changing unsaved text. */
   private async revealActiveFile(): Promise<void> {
     const uri = vscode.window.activeTextEditor?.document.uri;
-    if (!uri || uri.scheme !== "file") return;
+    if (!uri || (uri.scheme !== "file" && uri.scheme !== PROTECTED_SOURCE_SCHEME)) return;
+    const source = ProtectedSources.sourceUri(uri);
     if (!this.tree) await this.connect(false);
     const tree = this.tree;
     if (!tree) return;
     try {
-      const entry = await revealFile(tree, uri.fsPath) ?? await this.files?.reveal(uri.fsPath);
+      const entry = await revealFile(tree, source.fsPath) ?? await this.files?.reveal(source.fsPath);
       if (this.tree !== tree || this.disposed) return;
       if (!entry) { void vscode.window.showInformationMessage(this.text("fileNotInTree")); return; }
       await vscode.commands.executeCommand("eska.explorer.projects.focus");
@@ -340,8 +375,37 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
     return false;
   }
 
+  /** Preserve native selection while the support preloader temporarily replaces the roots. */
+  private supportRepaint(): void {
+    const selected = this.view?.selection[0];
+    if (this.support.loading && !this.supportSelection && this.tree && selected && "node" in selected) {
+      this.supportSelection = { tree: this.tree, entry: selected };
+    }
+    this.decorations.invalidate();
+    this.changed.fire(undefined);
+    if (this.support.loading || this.support.failed) return;
+    const saved = this.supportSelection;
+    this.supportSelection = undefined;
+    if (saved && saved.tree === this.tree && (!selected || !("node" in selected))) {
+      void this.restoreSupportSelection(saved.tree, saved.entry);
+    }
+  }
+
+  /** Resolve the surviving selection without focusing an editor or a stale session. */
+  private async restoreSupportSelection(tree: MetadataTree, entry: TreeEntry): Promise<void> {
+    try {
+      const root = await tree.root(entry.project);
+      await tree.children(root);
+      const target = this.hiddenAncestor(entry, tree, this.hideEmptyGroups(entry.project)) ? root : entry;
+      if (this.tree === tree && !this.support.loading && !this.disposed) {
+        await this.view.reveal(target, { select: true, focus: false });
+      }
+    } catch { /* Deleted selections and broken branches have no surviving native target. */ }
+  }
+
   /** Move a disappearing selection before VS Code discards it during the native tree refresh. */
   private async repaint(entries?: TreeEntry[]): Promise<void> {
+    if (this.support.loading) return;
     const tree = this.tree;
     const selected = this.view.selection[0];
     if (tree && selected && "node" in selected && supportsRootFilter(selected.project)
@@ -454,7 +518,9 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
     try {
       const source = await resolveSource(tree, entry, target);
       if (opening !== this.opening || tree !== this.tree) return;
-      const document = await vscode.workspace.openTextDocument(vscode.Uri.file(source.path));
+      const uri = await this.support.resolveUri(source.path);
+      if (opening !== this.opening || tree !== this.tree) return;
+      const document = await vscode.workspace.openTextDocument(uri);
       if (opening !== this.opening || tree !== this.tree) return;
       if (source.position && (document.isDirty || document.getText() !== source.position.text)) throw new ExplorerError("sourceChanged");
       const editor = await vscode.window.showTextDocument(document, { preview: true, preserveFocus: false });
@@ -467,6 +533,15 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
         this.showError(error instanceof ExplorerError ? error : new ExplorerError("sourceMissing"));
       }
     }
+  }
+
+  /** File groups use the same protected route as metadata nodes. */
+  private async openFile(entry: WorkspaceEntry): Promise<void> {
+    if (entry?.fileKind !== "entry" || entry.directory || !this.files?.scopes.some(scope =>
+      relativeFile(scope.path, entry.path) !== undefined)) return;
+    const uri = await this.support.resolveUri(entry.path);
+    if (uri.scheme === "file") await vscode.commands.executeCommand("vscode.open", uri);
+    else await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(uri), { preview: true });
   }
 
   /** Invalidate preflight as well as the protocol connection so late probes cannot reconnect. */
@@ -519,6 +594,7 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
   /** Process logs never become the view's labels or user-facing error text. */
   private update(state: ConnectionState): void {
     if (this.disposed) return;
+    void this.supportContexts.stop();
     this.searchView?.dispose();
     this.tree?.dispose();
     this.files?.dispose();
@@ -529,7 +605,7 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
     this.opening++;
     if (state.kind === "ready") {
       const tree = new MetadataTree(this.connection, state.session,
-        (entries) => { this.decorations.invalidate(); void this.repaint(entries); }, (project, reopen) => this.recover(project, reopen));
+        (entries) => { this.support.invalidate(); this.decorations.invalidate(); void this.repaint(entries); }, (project, reopen) => this.recover(project, reopen));
       this.tree = tree;
       this.files = new WorkspaceFiles(tree.projects, state.target.path, watchDirectory, entry => {
         if (this.tree !== tree) return;
@@ -540,6 +616,11 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
           (error) => { this.output.info(`watch_error code=${error instanceof ExplorerError ? error.code : "requestFailed"}`); }));
         this.watchers.push(watchManifests(state.target.path, tree.projects, () => { void this.connect(false); }));
       } catch (error) { this.showError(error instanceof ExplorerError ? error : new ExplorerError("unsupportedPath")); }
+    }
+    this.support.setTree(this.tree, state.kind === "ready" && state.supportPolicy, state.kind === "disconnected" || state.kind === "stopping", state.kind === "ready" && state.supportFiles);
+    if (state.kind === "ready") {
+      void this.supportContexts.start(this.folders().filter(folder => folder.uri.fsPath !== state.target.path)
+        .map(folder => ({ ...state.target, path: folder.uri.fsPath, name: folder.name })));
     }
     this.decorations.setTree(this.tree);
     this.updateKeyboardContext();
@@ -585,7 +666,7 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
       for (const watcher of this.watchers) watcher.dispose();
       this.view.dispose();
       this.changed.dispose();
-      this.stopping = Promise.all([this.connection.dispose(), this.setup.shutdown()]).then(() => {}).finally(() => this.output.dispose());
+      this.stopping = Promise.all([this.supportContexts.stop(), this.support.shutdown(), this.connection.dispose(), this.setup.shutdown()]).then(() => {}).finally(() => this.output.dispose());
     }
     return this.stopping;
   }
