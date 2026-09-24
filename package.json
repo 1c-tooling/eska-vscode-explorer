@@ -20,6 +20,7 @@
     "workspace"
   ],
   "activationEvents": [
+    "onFileSystem:eska-protected",
     "onView:eska.explorer.projects",
     "workspaceContains:**/eska.toml"
   ],
