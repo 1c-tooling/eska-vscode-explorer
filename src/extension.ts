@@ -1,6 +1,7 @@
 import { SupportContexts } from "./support-contexts.js";
 import { SupportController } from "./support.js";
 import { PROTECTED_SOURCE_SCHEME, ProtectedSources } from "./protected-source.js";
+import { ProtectedLanguageFeatures } from "./protected-language.js";
 import * as vscode from "vscode";
 import { BackendSetup } from "./backend-setup.js";
 import { GitDecorations } from "./decorations.js";
@@ -77,6 +78,7 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
     this.status.name = "ESKA Explorer";
     this.status.command = "eska.explorer.checkUpdates";
     this.disposables.push(this.status, this.decorations, this.protectedSources);
+    this.disposables.push(new ProtectedLanguageFeatures(error => this.output.warn(String(error))));
     this.filters = new ProjectFilters(context.workspaceState);
     this.sorting = new ProjectSorting(context.workspaceState);
     this.connection = new Connection(String(context.extension.packageJSON.version),

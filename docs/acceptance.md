@@ -135,6 +135,38 @@ ESKA_BSL_BINARY="$(command -v bsl-analyzer-app)" \
 VSCODE_EXECUTABLE=codium node test/run-host.mjs test/compatibility-host.cjs
 ```
 
+### Защищённые модули и восстановление вкладок — 2026-09-24
+
+Linux/VSCodium 1.109.5, расширение bsl-analyzer 0.1.12, сервер 0.2.80.
+`protected-language-host.cjs` проверяет анализ открытого из ESKA запрещённого
+модуля: semantic tokens и legend совпадают с `file:`, работают структура,
+hover, определения, ссылки, сворачивание, обновление диагностики и запрет записи.
+`protected-language-guards-host.cjs` проверяет грязный исходник, поздние ответы,
+вложенную структуру, специальные символы пути и перезапуск языкового провайдера.
+
+`support-restore-host.cjs` использует два отдельных процесса с общим профилем:
+защищённая вкладка сохраняется при закрытии первого и восстанавливается во втором.
+Восстановление не требует открытия дерева или `eska.toml`. Runner использует
+временное проверочное расширение в обычном development host, поскольку
+`--extensionTestsPath` отключает штатное восстановление вкладок.
+
+```sh
+npm run compile
+ESKA_TEST_BINARY="$(realpath ../eska/target/debug/eska)" \
+ESKA_BSL_EXTENSION=/absolute/path/to/installed/bsl-analyzer-extension \
+ESKA_BSL_BINARY="$(command -v bsl-analyzer-app)" \
+VSCODE_EXECUTABLE=codium node test/run-host.mjs test/protected-language-host.cjs
+
+ESKA_TEST_BINARY="$(realpath ../eska/target/debug/eska)" \
+VSCODE_EXECUTABLE=codium node test/run-host.mjs test/protected-language-guards-host.cjs
+
+ESKA_TEST_BINARY="$(realpath ../eska/target/debug/eska)" ESKA_HOST_RESTART=1 \
+VSCODE_EXECUTABLE=codium node test/run-host.mjs test/support-restore-host.cjs
+```
+
+Сценарии создают собственные каталоги в соседнем `eska-playground` и удаляют их.
+Эта проверка не включает Windows/macOS и настоящий сеанс отладки 1С.
+
 ## Реальная установка CLI на Linux — 2026-09-19
 
 Проверка выполнялась на Linux x86-64 через `bootstrapCommand` и `inspectGlobal`

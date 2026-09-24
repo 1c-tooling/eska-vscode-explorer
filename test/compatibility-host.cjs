@@ -62,7 +62,10 @@ exports.run = async function () {
   const after = await vscode.commands.executeCommand('vscode.executeCompletionItemProvider', uri, new vscode.Position(1, 4));
   assert.deepEqual(after.items.map(item => typeof item.label === 'string' ? item.label : item.label.label).sort(), labels);
   assert.deepEqual(await vscode.commands.executeCommand('vscode.executeFormatDocumentProvider', uri, { tabSize: 4, insertSpaces: true }), format);
-  assert.equal(await fs.readFile(settingsPath, 'utf8'), settings, 'external settings unchanged');
+  // Support policy owns this setting; all language and other workspace settings must be preserved.
+  const currentSettings = JSON.parse(await fs.readFile(settingsPath, 'utf8'));
+  delete currentSettings['files.readonlyInclude'];
+  assert.deepEqual(currentSettings, JSON.parse(settings), 'external settings unchanged apart from support policy');
   assert.deepEqual(analyzer.packageJSON.contributes.debuggers.map(value => value.type), debugTypes);
   assert.equal(extension.packageJSON.contributes.debuggers, undefined);
   await vscode.commands.executeCommand('eska.explorer.disconnect');
