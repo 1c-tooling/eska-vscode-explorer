@@ -20,6 +20,8 @@ export const RUSSIAN_PROPERTY_NAMES: Readonly<Record<string, string>> = {
   Code: "Код",
 };
 
+const METADATA_NAMESPACE = "http://v8.1c.ru/8.3/MDClasses";
+
 export interface PropertyChoice {
   label: string;
   description: string;
@@ -29,6 +31,19 @@ export interface PropertyChoice {
   key: PropertyKey;
   qualifiers: PropertyQualifier[];
   value: PropertyValue;
+}
+
+/** Prefer the tree language, then any nonempty synonym defined for the object. */
+export function objectSynonym(properties: readonly PropertyChoice[], language: string): string | undefined {
+  const synonym = properties.find(property => property.key.namespace === METADATA_NAMESPACE
+    && property.key.name === "Synonym" && property.value.kind === "localized");
+  if (!synonym || synonym.value.kind !== "localized") return undefined;
+  const items = synonym.value.items.filter(item => item.content.trim());
+  const preferred = language.toLowerCase();
+  const base = preferred.split("-")[0];
+  return (items.find(item => item.language.toLowerCase() === preferred)
+    ?? items.find(item => item.language.toLowerCase() === base)
+    ?? items[0])?.content.trim();
 }
 
 /** A small digest detects edits while the tab is open without retaining large values twice. */

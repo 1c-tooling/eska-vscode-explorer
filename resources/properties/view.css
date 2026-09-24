@@ -53,8 +53,30 @@ button:focus-visible, summary:focus-visible { outline: 1px solid var(--vscode-fo
 .boolean-property .property-name { margin-bottom: 0; }
 .property-name, .field-name { display: flex; align-items: center; gap: 9px; }
 .name-text { min-width: 0; }
-.boolean-checkbox { flex: none; width: 16px; height: 16px; margin: 0; opacity: 1; pointer-events: none;
-  accent-color: var(--vscode-checkbox-selectBackground, var(--vscode-focusBorder)); }
+.boolean-checkbox {
+  appearance: none;
+  position: relative;
+  flex: none;
+  width: 25px;
+  height: 25px;
+  margin: 0;
+  border: 1px solid var(--vscode-checkbox-border, var(--vscode-descriptionForeground));
+  border-radius: 4px;
+  background: transparent;
+  opacity: 1;
+  pointer-events: none;
+}
+.boolean-checkbox:checked::after {
+  content: "";
+  position: absolute;
+  left: 8px;
+  top: 4px;
+  width: 7px;
+  height: 12px;
+  border: solid var(--vscode-checkbox-foreground, var(--vscode-foreground));
+  border-width: 0 1.5px 1.5px 0;
+  transform: rotate(45deg);
+}
 .technical-name { margin-left: 10px; color: var(--vscode-descriptionForeground); font-size: 0.85em; font-weight: 400; }
 .source-button { flex: none; padding: 3px 0; color: var(--vscode-textLink-foreground);
   background: transparent; border: 0; }

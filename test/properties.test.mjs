@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import { propertyChoices } from "../out/properties.js";
+import { objectSynonym, propertyChoices } from "../out/properties.js";
 import { resolvePropertySource } from "../out/source.js";
 import { Connection } from "../out/connection.js";
 import { MetadataTree } from "../out/tree.js";
@@ -34,6 +34,25 @@ test("property tab data preserves order, repeated names and structured values", 
     { code: "protocolInvalid" });
   assert.throws(() => propertyChoices({ properties: [{ ...properties[2], value: { kind: "record", fields: [{ key, value: null }] } }] }, "en-US"),
     { code: "protocolInvalid" });
+});
+
+/** The heading uses a localized synonym and retains the XML name as its fallback. */
+test("property heading chooses the tree-language synonym, then another nonempty translation", () => {
+  const properties = propertyChoices({ properties: [{
+    key: { namespace: "http://v8.1c.ru/8.3/MDClasses", name: "Synonym" },
+    range: { start: 0, end: 1 },
+    value: { kind: "localized", items: [
+      { language: "ru", content: "  Товары  " }, { language: "en", content: "Goods" },
+    ] },
+  }] }, "ru-RU");
+  assert.equal(objectSynonym(properties, "ru-RU"), "Товары");
+  assert.equal(objectSynonym(properties, "en-US"), "Goods");
+  assert.equal(objectSynonym(properties, "de-DE"), "Товары");
+  assert.equal(objectSynonym([], "ru-RU"), undefined);
+  assert.equal(objectSynonym(propertyChoices({ properties: [{
+    key: { namespace: "http://v8.1c.ru/8.3/MDClasses", name: "Synonym" },
+    range: { start: 0, end: 1 }, value: { kind: "localized", items: [{ language: "ru", content: "  " }] },
+  }] }, "ru-RU"), "ru-RU"), undefined);
 });
 
 /** Real Designer mappings select the intended property for root, object and inline child. */

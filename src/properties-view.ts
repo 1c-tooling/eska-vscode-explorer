@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import { message } from "./messages.js";
 import { ExplorerError, isRecord } from "./protocol.js";
-import { propertyChoices, RUSSIAN_PROPERTY_NAMES, type PropertyChoice } from "./properties.js";
+import { objectSynonym, propertyChoices, RUSSIAN_PROPERTY_NAMES, type PropertyChoice } from "./properties.js";
 import { nodeKey, type MetadataTree, type TreeEntry } from "./tree.js";
 
 type Language = "ru-RU" | "en-US";
@@ -82,12 +82,14 @@ class PropertyTab implements vscode.Disposable {
       if (controller.signal.aborted || this.disposed || revision !== this.revision) return;
       if (tree !== this.currentTree() || entry.project.nodes.get(nodeKey(entry.node.id)) !== entry) throw new ExplorerError("obsolete");
       this.choices = propertyChoices(result, vscode.env.language);
+      this.updateTitle();
       this.state = this.makeState("ready", "");
       this.publish();
     } catch (error) {
       if (controller.signal.aborted || this.disposed || revision !== this.revision) return;
       const failure = error instanceof ExplorerError ? error : new ExplorerError("requestFailed");
       this.choices = [];
+      this.updateTitle();
       this.state = this.makeState(failure.code === "obsolete" ? "stale" : "error", message(vscode.env.language,
         failure.code === "obsolete" ? "propertyStale" : failure.code));
       this.publish();
@@ -99,6 +101,7 @@ class PropertyTab implements vscode.Disposable {
     this.controller?.abort();
     this.revision++;
     this.choices = [];
+    this.updateTitle();
     this.state = this.makeState("stale", message(vscode.env.language, "propertyStale"));
     this.publish();
   }
@@ -137,7 +140,7 @@ class PropertyTab implements vscode.Disposable {
     }
     const project = this.entry.project.info.scope.kind === "member" ? this.entry.project.info.scope.name
       : this.tree.connection.target?.name ?? message(vscode.env.language, this.entry.project.info.type);
-    return { title: names.at(-1) ?? message(vscode.env.language, "properties"),
+    return { title: objectSynonym(this.choices, this.language()) ?? names.at(-1) ?? message(vscode.env.language, "properties"),
       path: [project, ...names.slice(0, -1)].join(" › ") };
   }
 
