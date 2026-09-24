@@ -21,13 +21,21 @@ exports.run = async function () {
     await fs.mkdir(path.dirname(file), { recursive: true });
     await fs.writeFile(file, '// original\n');
   }
-  const patterns = readonlyPatterns(fixture.root, [locked, nestedLocked, otherLocked, ...Array.from({length:256}, (_, i) => path.join(fixture.root, `Module${i}.bsl`))]);
+  const cyrillicLocked = path.join(fixture.root, 'CommonModules/АвансовыйОтчетФормы/Ext/Module.bsl');
+  await fs.mkdir(path.dirname(cyrillicLocked), { recursive: true });
+  await fs.writeFile(cyrillicLocked, '// original\n');
+  const longNames = Array.from({ length: 128 }, (_, i) => path.join(fixture.root,
+    `CommonModules/АяДлинноеНаименованиеОбщегоМодуля${String(i).padStart(3, '0')}/Ext/Module.bsl`));
+  const patterns = readonlyPatterns(fixture.root, [locked, nestedLocked, otherLocked, cyrillicLocked,
+    ...longNames, ...Array.from({length:256}, (_, i) => path.join(fixture.root, `Module${i}.bsl`))]);
+  assert.ok(patterns.some(pattern => pattern.includes('/CommonModules/') && pattern.includes('вансовыйОтчетФормы')));
+  assert.ok(patterns.every(pattern => pattern.length <= 4096));
   await vscode.workspace.getConfiguration('files').update('readonlyInclude', Object.fromEntries(patterns.map(pattern => [pattern,true])), vscode.ConfigurationTarget.Workspace);
-  for (const file of [locked, allowed, nestedLocked, nestedAllowed, otherLocked]) {
+  for (const file of [locked, allowed, nestedLocked, nestedAllowed, otherLocked, cyrillicLocked]) {
     const editor = await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(vscode.Uri.file(file)));
     const before = editor.document.getText();
     await vscode.commands.executeCommand('type', {text:'// edit\n'});
-    assert.equal(editor.document.getText() === before, [locked, nestedLocked, otherLocked].includes(file), file);
+    assert.equal(editor.document.getText() === before, [locked, nestedLocked, otherLocked, cyrillicLocked].includes(file), file);
     await vscode.commands.executeCommand('workbench.action.revertAndCloseActiveEditor');
   }
   await fs.writeFile(path.join(fixture.root, 'host-result.json'), JSON.stringify({passed:true, compactLiteralPatterns:true, adjacentFileEditable:true}));

@@ -27,6 +27,18 @@ test('large policy has bounded keys and literal project-scoped alternatives', ()
 });
 
 
+test('large groups never span sibling metadata directories', () => {
+  const target = '/project/src/CommonModules/АвансовыйОтчетФормы/Ext/Module.bsl';
+  const paths = [target, '/project/src/Catalogs/A/Ext/ObjectModule.bsl',
+    '/project/src/Catalogs/B/Ext/ManagerModule.bsl',
+    ...Array.from({length: 128}, (_, i) => `/project/src/CommonModules/АяДлинноеНаименование${i}/Ext/Module.bsl`)];
+  const patterns = readonlyPatterns('/project/src', paths);
+  assert.ok(patterns.some(pattern => pattern.startsWith('/project/src/CommonModules/А{')));
+  assert.ok(patterns.some(pattern => pattern.startsWith('/project/src/Catalogs/')));
+  assert.ok(patterns.every(pattern => !pattern.includes('/C{atalogs')));
+  assert.ok(patterns.every(pattern => pattern.length <= 4096));
+});
+
 test('factoring shared literals retains the exact file set and reduces pattern size', () => {
   const paths = Array.from({length: 256}, (_, i) => `/project/src/CommonModules/M${i}/Ext/Module.bsl`);
   const patterns = readonlyPatterns('/project/src', paths);

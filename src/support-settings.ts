@@ -21,10 +21,25 @@ export function readonlyPatterns(source: string, paths: readonly string[]): stri
   const sorted = [...new Set(paths)].sort();
   if (sorted.length <= 128 || sorted.some(path => !path.replaceAll('\\', '/').startsWith(prefix))) return sorted.map(readonlyPattern);
   const result: string[] = [];
-  for (let offset = 0; offset < sorted.length; offset += 128) {
-    const batch = sorted.slice(offset, offset + 128);
-    const relative = batch.map(path => path.replaceAll('\\', '/').slice(prefix.length));
-    result.push(readonlyPattern(prefix) + exactAlternatives(relative));
+  for (let offset = 0; offset < sorted.length;) {
+    const relative = sorted[offset]!.replaceAll('\\', '/').slice(prefix.length);
+    const directory = relative.includes('/') ? relative.split('/', 1)[0] : '';
+    let size = 0;
+    while (offset + size < sorted.length && size < 128) {
+      const next = sorted[offset + size]!.replaceAll('\\', '/').slice(prefix.length);
+      if ((next.includes('/') ? next.split('/', 1)[0] : '') !== directory) break;
+      size++;
+    }
+    let pattern: string;
+    do {
+      const batch = sorted.slice(offset, offset + size).map(path => path.replaceAll('\\', '/').slice(prefix.length));
+      pattern = readonlyPattern(prefix) + exactAlternatives(batch);
+      if (pattern.length <= 4096 || size === 1) break;
+      size = Math.ceil(size / 2);
+    } while (true);
+    // Keep braces inside one top-level directory and limit native glob complexity.
+    result.push(pattern);
+    offset += size;
   }
   return result;
 }
