@@ -48,9 +48,12 @@ exports.run = async function () {
   assert.equal(siblings[1], group, 'predefined collection follows modules');
   const command = explorer.getTreeItem(item).command;
   await vscode.commands.executeCommand(command.command, ...command.arguments);
+  const properties = [...explorer.propertiesTabs.tabs.values()].find(tab => tab.entry.node.id.objectId === item.node.id.objectId);
+  await until(() => properties?.panel.visible && properties.state.status === 'ready', 'predefined item properties');
+  await vscode.commands.executeCommand('eska.explorer.openXml', item);
   assert.equal(vscode.window.activeTextEditor.document.uri.fsPath, file);
   assert.equal(vscode.window.activeTextEditor.document.getText(vscode.window.activeTextEditor.selection), '<Name>ЭлементДанных</Name>');
-  assert.match(explorer.getTreeItem(item).iconPath.path, /\/enum\.svg$/);
+  assert.match(explorer.getTreeItem(item).iconPath.path, /\/predefined-item\.svg$/);
   await settings.update('treeLanguage', 'en-US', vscode.ConfigurationTarget.Workspace);
   await until(() => explorer.getTreeItem(group).label === 'Predefined data', 'English predefined label');
   await fs.writeFile(file, xml.replaceAll('ЭлементДанных', 'НовыйЭлемент'));

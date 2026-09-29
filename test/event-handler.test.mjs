@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, mkdir, readFile, writeFile, rm } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { handlerRange } from "../out/event-handler.js";
-import { resolveSource } from "../out/source.js";
+import { resolveSource, resolveTreeSource } from "../out/source.js";
 import { Connection } from "../out/connection.js";
 import { MetadataTree } from "../out/tree.js";
 import { createTreeProject, addCommonModules, descriptor } from "./fixture.mjs";
@@ -50,6 +50,7 @@ test("event subscriptions navigate within each project and retain explicit XML n
     const subscriptions = groups.find(e => e.node.id.collection?.metadataKind === "event-subscription");
     const [entry] = await tree.children(subscriptions);
     const source = await resolveSource(tree, entry);
+    assert.deepEqual(await resolveTreeSource(tree, entry), source, "tree activation preserves handler navigation");
     assert.equal(source.path, module);
     assert.equal(source.position.text, code.slice(1));
     assert.equal(source.position.text.slice(source.position.start, source.position.end), "ПриЗаписи");
