@@ -12,9 +12,11 @@ export function translated(value, language, fallback) {
   return value.caption?.[language] ?? fallback;
 }
 
-/** Only exact Designer boolean literals use a checkbox. */
+/** A backend type hint distinguishes booleans from user text such as Comment="true". */
 export function booleanValue(value) {
-  return value?.kind === "text" ? value.text === "true" ? true : value.text === "false" ? false : undefined : undefined;
+  if (value?.kind !== "text" || value.scalarType !== "boolean") return undefined;
+  const text = value.text.trim();
+  return text === "true" || text === "1" ? true : text === "false" || text === "0" ? false : undefined;
 }
 
 /** Distinguish a repeated collection from a record with individually named fields. */

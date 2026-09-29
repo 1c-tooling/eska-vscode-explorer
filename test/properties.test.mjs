@@ -8,6 +8,14 @@ import { Connection } from "../out/connection.js";
 import { MetadataTree } from "../out/tree.js";
 import { createTreeProject } from "./fixture.mjs";
 
+test("boolean hints preserve source text and reject contradictory values", () => {
+  const property = { key: { namespace: null, name: "Value" }, range: { start: 0, end: 1 } };
+  const value = { kind: "text", text: " 0 ", scalarType: "boolean" };
+  assert.deepEqual(propertyChoices({ properties: [{ ...property, value }] }, "en-US")[0].value, value);
+  assert.throws(() => propertyChoices({ properties: [{ ...property, value: { ...value, text: "invalid" } }] }, "ru-RU"),
+    error => error.code === "protocolInvalid");
+});
+
 /** Property previews stay concise while full values and ranges remain backend-owned. */
 test("property tab data preserves order, repeated names and structured values", () => {
   const range = { start: 3, end: 12 };

@@ -49,7 +49,9 @@ exports.run = async function () {
   assert.equal(first.state.properties.find(property => property.key.name === 'Comment').key.namespace,
     'http://v8.1c.ru/8.3/MDClasses');
   assert.equal(first.state.properties.find(property => property.key.name === 'Hierarchical').value.text, 'true');
+  assert.equal(first.state.properties.find(property => property.key.name === 'Hierarchical').value.scalarType, 'boolean');
   assert.equal(first.state.properties.find(property => property.key.name === 'CheckUnique').value.text, 'false');
+  assert.equal(first.state.properties.find(property => property.key.name === 'CheckUnique').value.scalarType, 'boolean');
   assert.deepEqual(first.state.properties.find(property => property.key.name === 'Flags').value.fields
     .map(field => field.value.text), ['true', 'false']);
   assert.ok(first.panel.visible);

@@ -6,7 +6,7 @@ export interface PropertyKey { namespace: string | null; name: string }
 export interface PropertyQualifier { key: PropertyKey; value: string; caption?: PropertyCaption }
 export interface PropertyCaption { "ru-RU": string; "en-US": string }
 export interface PropertyField { key: PropertyKey; caption?: PropertyCaption; qualifiers: PropertyQualifier[]; value: PropertyValue }
-export type PropertyValue = { kind: "text"; text: string; caption?: PropertyCaption }
+export type PropertyValue = { kind: "text"; text: string; caption?: PropertyCaption; scalarType?: "boolean" }
   | { kind: "localized"; items: { language: string; content: string }[] }
   | { kind: "record"; fields: PropertyField[] }
   | { kind: "unsupported"; issue: string };
@@ -73,7 +73,13 @@ function parseCaption(value: unknown): { caption?: PropertyCaption } {
 /** Validate the backend's four value shapes before sending them to the webview. */
 function parseValue(value: unknown, depth: number): PropertyValue {
   if (!isRecord(value)) throw new ExplorerError("protocolInvalid");
-  if (value.kind === "text" && typeof value.text === "string") return { kind: "text", text: value.text, ...parseCaption(value.caption) };
+  if (value.kind === "text" && typeof value.text === "string") {
+    if (value.scalarType === "boolean" && !["true", "false", "1", "0"].includes(value.text.trim())) {
+      throw new ExplorerError("protocolInvalid");
+    }
+    return { kind: "text", text: value.text, ...parseCaption(value.caption),
+      ...(value.scalarType === "boolean" ? { scalarType: "boolean" } : {}) };
+  }
   if (value.kind === "localized" && Array.isArray(value.items) && value.items.every(item => isRecord(item)
     && typeof item.language === "string" && typeof item.content === "string")) {
     return { kind: "localized", items: value.items.map(item => ({ language: item.language, content: item.content })) };

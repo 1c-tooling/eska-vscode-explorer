@@ -10,7 +10,7 @@ function field(namespace, name, value, caption) {
 function mobile(token, checked) {
   return field(APP, "functionality", { kind: "record", fields: [
     field(APP, "functionality", { kind: "text", text: token, caption: { "ru-RU": "Биометрия", "en-US": "Biometrics" } }),
-    field(APP, "use", { kind: "text", text: String(checked) }),
+    field(APP, "use", { kind: "text", text: String(checked), scalarType: "boolean" }),
   ] });
 }
 
@@ -41,6 +41,15 @@ test("records stay full structures and collection identities come from names", (
   value.qualifiers.push({ key: { namespace: null, name: "name" }, value: "Code", caption: { "ru-RU": "Код", "en-US": "Code" } });
   assert.deepEqual(identity(value, "ru-RU"), { title: "Код", raw: "Code" });
   assert.equal(booleanValue({ kind: "text", text: "TRUE" }), undefined);
+});
+
+test("checkboxes require a boolean type; identical user strings remain text", () => {
+  for (const text of ["true", "false", "1", "0"]) {
+    assert.equal(booleanValue({ kind: "text", text }), undefined);
+    assert.equal(booleanValue({ kind: "text", text, scalarType: "boolean" }), text === "true" || text === "1");
+  }
+  assert.equal(booleanValue({ kind: "text", text: " false ", scalarType: "boolean" }), false);
+  assert.equal(booleanValue({ kind: "text", text: "TRUE", scalarType: "boolean" }), undefined);
 });
 
 test("search retains raw tokens, translated nested values and annotations", () => {
