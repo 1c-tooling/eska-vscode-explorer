@@ -4,21 +4,12 @@ import { ExplorerError, isRecord } from "./protocol.js";
 
 export interface PropertyKey { namespace: string | null; name: string }
 export interface PropertyQualifier { key: PropertyKey; value: string }
-export interface PropertyField { key: PropertyKey; qualifiers: PropertyQualifier[]; value: PropertyValue }
+export interface PropertyCaption { "ru-RU": string; "en-US": string }
+export interface PropertyField { key: PropertyKey; caption?: PropertyCaption; qualifiers: PropertyQualifier[]; value: PropertyValue }
 export type PropertyValue = { kind: "text"; text: string }
   | { kind: "localized"; items: { language: string; content: string }[] }
   | { kind: "record"; fields: PropertyField[] }
   | { kind: "unsupported"; issue: string };
-
-/** Translate only XML property names with an unambiguous 1C UI equivalent. */
-export const RUSSIAN_PROPERTY_NAMES: Readonly<Record<string, string>> = {
-  Name: "Имя",
-  Synonym: "Синоним",
-  Comment: "Комментарий",
-  Description: "Описание",
-  Type: "Тип",
-  Code: "Код",
-};
 
 const METADATA_NAMESPACE = "http://v8.1c.ru/8.3/MDClasses";
 
@@ -29,6 +20,7 @@ export interface PropertyChoice {
   fingerprint: string;
   range: { start: number; end: number };
   key: PropertyKey;
+  caption?: PropertyCaption;
   qualifiers: PropertyQualifier[];
   value: PropertyValue;
 }
@@ -67,7 +59,14 @@ function parseField(value: unknown, depth: number): PropertyField {
     if (!isRecord(qualifier) || typeof qualifier.value !== "string") throw new ExplorerError("protocolInvalid");
     return { key: parseKey(qualifier.key), value: qualifier.value };
   });
-  return { key: parseKey(value.key), qualifiers, value: parseValue(value.value, depth) };
+  const field: PropertyField = { key: parseKey(value.key), qualifiers, value: parseValue(value.value, depth) };
+  if (value.caption !== undefined) {
+    if (!isRecord(value.caption) || typeof value.caption["ru-RU"] !== "string"
+      || typeof value.caption["en-US"] !== "string" || !value.caption["ru-RU"].trim()
+      || !value.caption["en-US"].trim()) throw new ExplorerError("protocolInvalid");
+    field.caption = { "ru-RU": value.caption["ru-RU"], "en-US": value.caption["en-US"] };
+  }
+  return field;
 }
 
 /** Validate the backend's four value shapes before sending them to the webview. */

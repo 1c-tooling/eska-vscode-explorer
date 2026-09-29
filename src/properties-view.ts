@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import { message } from "./messages.js";
 import { ExplorerError, isRecord } from "./protocol.js";
-import { objectSynonym, propertyChoices, RUSSIAN_PROPERTY_NAMES, type PropertyChoice } from "./properties.js";
+import { objectSynonym, propertyChoices, type PropertyChoice } from "./properties.js";
 import { nodeKey, type MetadataTree, type TreeEntry } from "./tree.js";
 
 type Language = "ru-RU" | "en-US";
@@ -13,8 +13,8 @@ interface ViewState {
   status: "loading" | "ready" | "stale" | "error";
   notice: string;
   labels: Record<string, string>;
-  names: Readonly<Record<string, string>>;
-  properties: Pick<PropertyChoice, "index" | "label" | "key" | "qualifiers" | "value" | "description">[];
+  language: Language;
+  properties: Pick<PropertyChoice, "index" | "label" | "key" | "caption" | "qualifiers" | "value" | "description">[];
 }
 
 /** One editor tab belongs to one project-scoped metadata identity. */
@@ -155,15 +155,15 @@ class PropertyTab implements vscode.Disposable {
     const text = (key: Parameters<typeof message>[1], ...values: string[]): string => message(vscode.env.language, key, ...values);
     return {
       type: "state", title: heading.title, path: heading.path, status, notice,
-      names: this.language() === "ru-RU" ? RUSSIAN_PROPERTY_NAMES : {},
+      language: this.language(),
       labels: {
         properties: text("properties"), search: text("propertySearch"), refresh: text("propertyRefresh"),
         openXml: text("openXml"), empty: text("propertyEmpty"), noMatches: text("propertyNoMatches"),
         readOnly: text("propertyReadOnly"), fields: text("propertyFields", "{0}"),
         xmlOnly: text("propertyXmlOnly"), count: text("propertyCount", "{0}"),
       },
-      properties: this.choices.map(({ index, label, key, qualifiers, value, description }) =>
-        ({ index, label, key, qualifiers, value, description })),
+      properties: this.choices.map(({ index, label, key, caption, qualifiers, value, description }) =>
+        ({ index, label, key, ...(caption ? { caption } : {}), qualifiers, value, description })),
     };
   }
 

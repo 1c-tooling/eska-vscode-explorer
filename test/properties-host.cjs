@@ -41,8 +41,11 @@ exports.run = async function () {
   assert.equal(first.state.status, 'ready');
   assert.equal(first.state.title, 'Каталог товаров');
   assert.ok(first.panel.title.startsWith('Каталог товаров · '));
-  assert.equal(first.state.names.Name, 'Имя');
-  assert.equal(first.state.names.Comment, 'Комментарий');
+  assert.equal(first.state.language, 'ru-RU');
+  assert.deepEqual(first.state.properties.find(property => property.key.name === 'Name').caption,
+    { 'ru-RU': 'Имя', 'en-US': 'Name' });
+  assert.equal(first.state.properties.find(property => property.key.name === 'Hierarchical').caption['ru-RU'], 'Иерархический');
+  assert.equal(first.state.properties.find(property => property.key.name === 'CheckUnique').caption['en-US'], 'Check for uniqueness');
   assert.equal(first.state.properties.find(property => property.key.name === 'Comment').key.namespace,
     'http://v8.1c.ru/8.3/MDClasses');
   assert.equal(first.state.properties.find(property => property.key.name === 'Hierarchical').value.text, 'true');
@@ -67,6 +70,18 @@ exports.run = async function () {
     await new Promise(resolve => setTimeout(resolve, 100));
   }
   assert.equal(webviews.length, 2, JSON.stringify(vscode.window.tabGroups.all.flatMap(group => group.tabs.map(tab => tab.label))));
+  await vscode.workspace.getConfiguration('eska.explorer').update('treeLanguage', 'en-US', vscode.ConfigurationTarget.Workspace);
+  for (let attempt = 0; attempt < 50 && first.state.language !== 'en-US'; attempt++) {
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+  assert.equal(first.state.language, 'en-US', 'an open tab follows the tree language');
+  assert.equal(first.state.properties.find(property => property.key.name === 'CheckUnique').caption[first.state.language], 'Check for uniqueness');
+  assert.equal(first.state.title, 'Каталог товаров', 'a missing English synonym falls back to an existing one');
+  await vscode.workspace.getConfiguration('eska.explorer').update('treeLanguage', 'ru-RU', vscode.ConfigurationTarget.Workspace);
+  for (let attempt = 0; attempt < 50 && first.state.language !== 'ru-RU'; attempt++) {
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+  assert.equal(first.state.language, 'ru-RU');
   const comment = first.choices.find(choice => choice.label === 'Comment');
   await first.receive({ type: 'openXml', index: comment.index });
   const editor = vscode.window.activeTextEditor;

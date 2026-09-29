@@ -55,6 +55,25 @@ test("property heading chooses the tree-language synonym, then another nonempty 
   }] }, "ru-RU"), "ru-RU"), undefined);
 });
 
+/** New backend captions remain bilingual and old backend responses retain their raw fallback. */
+test("property captions preserve both locales at every depth and reject malformed data", () => {
+  const key = { namespace: "http://v8.1c.ru/8.3/MDClasses", name: "CheckUnique" };
+  const caption = { "ru-RU": "Контроль уникальности", "en-US": "Check for uniqueness" };
+  const field = { key, caption, value: { kind: "text", text: "true" } };
+  const property = { ...field, range: { start: 0, end: 2 }, value: { kind: "record", fields: [field] } };
+  for (const language of ["ru-RU", "en-US"]) {
+    const [choice] = propertyChoices({ properties: [property] }, language);
+    assert.deepEqual(choice.caption, caption);
+    assert.deepEqual(choice.value.fields[0].caption, caption);
+    assert.equal(choice.label, "CheckUnique");
+  }
+  const { caption: omitted, ...legacy } = property;
+  assert.equal(propertyChoices({ properties: [legacy] }, "ru-RU")[0].caption, undefined);
+  for (const invalid of [null, {}, { "ru-RU": "Имя" }, { "ru-RU": " ", "en-US": "Name" }]) {
+    assert.throws(() => propertyChoices({ properties: [{ ...property, caption: invalid }] }, "ru-RU"), { code: "protocolInvalid" });
+  }
+});
+
 /** Real Designer mappings select the intended property for root, object and inline child. */
 test("property action opens exact XML and rejects a stale tab result", { skip: !process.env.ESKA_TEST_BINARY }, async t => {
   const directory = await mkdtemp(join(process.env.ESKA_TEST_ROOT ?? resolve("../eska-playground"), "explorer-properties-"));
@@ -81,6 +100,8 @@ test("property action opens exact XML and rejects a stale tab result", { skip: !
     const properties = await tree.request(entry.project, "metadata/properties", { objectId: entry.node.id.objectId });
     const choice = propertyChoices(properties, "ru-RU").find(value => value.label === name);
     assert.ok(choice);
+    assert.equal(choice.caption["ru-RU"], name === "Name" ? "Имя" : "Комментарий");
+    assert.equal(choice.caption["en-US"], name);
     const source = await resolvePropertySource(tree, entry, choice);
     assert.equal(source.path, path);
     assert.equal(source.position.text.slice(source.position.start, source.position.end), snippet);

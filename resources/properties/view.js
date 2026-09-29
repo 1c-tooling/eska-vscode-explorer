@@ -5,7 +5,6 @@ const notice = document.getElementById("notice");
 const count = document.getElementById("count");
 const refresh = document.getElementById("refresh");
 let snapshot;
-const metadataNamespaces = new Set(["http://v8.1c.ru/8.3/MDClasses", "http://v8.1c.ru/8.3/xcf/predef"]);
 
 search.value = vscode.getState()?.query ?? "";
 search.addEventListener("input", () => {
@@ -27,11 +26,17 @@ function element(tag, className, value) {
   return node;
 }
 
-/** Show a known Russian caption beside its exact Designer XML name. */
-function appendPropertyName(container, key) {
-  const translated = metadataNamespaces.has(key.namespace) ? snapshot.names[key.name] : undefined;
+/** Use backend captions so object context and platform vocabulary stay consistent. */
+function caption(field) {
+  return field.caption?.[snapshot.language];
+}
+
+/** Show the platform caption beside its exact Designer XML name. */
+function appendPropertyName(container, field) {
+  const { key } = field;
+  const translated = caption(field);
   container.append(document.createTextNode(translated ?? key.name));
-  if (translated) container.append(element("span", "technical-name", key.name));
+  if (translated && translated !== key.name) container.append(element("span", "technical-name", key.name));
 }
 
 /** Designer's exact boolean text is a display hint; other scalar text stays unchanged. */
@@ -43,7 +48,8 @@ function booleanValue(value) {
 }
 
 /** A disabled native checkbox exposes the value without suggesting it can be edited. */
-function propertyName(tag, className, key, value) {
+function propertyName(tag, className, field) {
+  const { key, value } = field;
   const container = element(tag, className);
   const checked = booleanValue(value);
   if (checked !== undefined) {
@@ -51,11 +57,11 @@ function propertyName(tag, className, key, value) {
     checkbox.type = "checkbox";
     checkbox.checked = checked;
     checkbox.disabled = true;
-    checkbox.setAttribute("aria-label", key.name);
+    checkbox.setAttribute("aria-label", caption(field) ?? key.name);
     container.append(checkbox);
   }
   const name = element("span", "name-text");
-  appendPropertyName(name, key);
+  appendPropertyName(name, field);
   container.append(name);
   container.title = key.namespace ?? "";
   return container;
@@ -67,7 +73,7 @@ function searchable(value, depth = 0) {
   if (value.kind === "text") return value.text;
   if (value.kind === "localized") return value.items.map(item => `${item.language} ${item.content}`).join(" ");
   if (value.kind === "record") return value.fields.map(field =>
-    `${field.key.name} ${metadataNamespaces.has(field.key.namespace) ? snapshot.names[field.key.name] ?? "" : ""} ${field.qualifiers.map(q => `${q.key.name} ${q.value}`).join(" ")} ${searchable(field.value, depth + 1)}`).join(" ");
+    `${field.key.name} ${caption(field) ?? ""} ${field.qualifiers.map(q => `${q.key.name} ${q.value}`).join(" ")} ${searchable(field.value, depth + 1)}`).join(" ");
   return "";
 }
 
@@ -92,7 +98,7 @@ function valueView(value, labels, depth = 0) {
     const fields = element("div", "fields");
     for (const field of value.fields) {
       const row = element("div", "field");
-      row.append(propertyName("div", "field-name", field.key, field.value));
+      row.append(propertyName("div", "field-name", field));
       if (booleanValue(field.value) === undefined) row.append(valueView(field.value, labels, depth + 1));
       if (field.qualifiers.length) row.append(qualifiersView(field.qualifiers));
       fields.append(row);
@@ -120,7 +126,7 @@ function propertyView(property, labels) {
   const checked = booleanValue(property.value);
   if (checked !== undefined) card.classList.add("boolean-property");
   const head = element("div", "property-head");
-  const title = propertyName("h2", "property-name", property.key, property.value);
+  const title = propertyName("h2", "property-name", property);
   const button = element("button", "source-button", labels.openXml);
   button.type = "button";
   button.addEventListener("click", () => vscode.postMessage({ type: "openXml", index: property.index }));
@@ -145,7 +151,7 @@ function render() {
   refresh.setAttribute("aria-label", labels.refresh);
   const query = search.value.trim().toLocaleLowerCase();
   const matches = snapshot.status === "ready" ? snapshot.properties.filter(property =>
-    `${property.label} ${metadataNamespaces.has(property.key.namespace) ? snapshot.names[property.key.name] ?? "" : ""} ${property.description} ${property.qualifiers.map(q => `${q.key.name} ${q.value}`).join(" ")} ${searchable(property.value)}`
+    `${property.label} ${caption(property) ?? ""} ${property.description} ${property.qualifiers.map(q => `${q.key.name} ${q.value}`).join(" ")} ${searchable(property.value)}`
       .toLocaleLowerCase().includes(query)) : [];
   count.textContent = snapshot.status === "ready" ? labels.count.replace("{0}", String(matches.length)) : "";
   notice.textContent = snapshot.notice || (snapshot.status === "ready" && !matches.length
