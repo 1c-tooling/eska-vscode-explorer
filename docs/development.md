@@ -148,3 +148,28 @@ README, язык групп, ancestry метаданных, шесть пере�
 После ревью 2026-09-19: 68 Node-тестов с реальным backend; отдельно проверены
 native shutdown и освобождение объектов за 20 подключений.
 Новые сценарии и ограничения замеров описаны в [отчёте MVP](mvp-review-linux.md).
+
+
+## Вкладки свойств и вложенные значения
+
+`properties.test.mjs` проверяет DTO, обе локали, исходные токены и точные
+диапазоны XML. `property-layout.test.mjs` проверяет выбор раскладки без потери
+дополнительных полей, поиск и независимость состояния от перевода подписей.
+Модуль `resources/properties/model.mjs` входит в VSIX; архив проверяется
+`scripts/check-vsix.py`.
+
+```sh
+ESKA_TEST_BINARY="$(realpath ../eska/target/debug/eska)" \
+ESKA_TEST_ROOT="$(realpath ../eska-playground)" \
+VSCODE_EXECUTABLE=codium node test/run-host.mjs test/properties-host.cjs
+
+ESKA_TEST_BINARY="$(realpath ../eska/target/debug/eska)" \
+ESKA_TEST_ROOT="$(realpath ../eska-playground)" \
+VSCODE_EXECUTABLE=codium node test/run-host.mjs test/properties-layout-host.cjs
+```
+
+Приёмка 2026-09-29: 96 Node-тестов с backend, native VSCodium 1.109.5.
+Через CDP в изолированном host проверены список 38 возможностей, RU/EN,
+поиск по подписи и токену, раскрытие после refresh/смены языка и отсутствие
+горизонтального переполнения узкой вкладки. XML-действие выделяет исходный
+токен после отображения перевода. Проверка ограничена Linux.

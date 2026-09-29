@@ -49,10 +49,11 @@ button:focus-visible, summary:focus-visible { outline: 1px solid var(--vscode-fo
 .items { border-top: 1px solid var(--vscode-settings-headerBorder, var(--vscode-panel-border)); }
 .property { padding: 18px 0 20px; border-bottom: 1px solid var(--vscode-settings-headerBorder, var(--vscode-panel-border)); }
 .property-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; }
-.property-name { margin: 0 0 10px; font-size: 1.02em; font-weight: 600; overflow-wrap: anywhere; }
+.property-name { margin: 0 0 10px; font-size: 1.02em; font-weight: 600; flex: 1; min-width: 0; }
 .boolean-property .property-name { margin-bottom: 0; }
 .property-name, .field-name { display: flex; align-items: center; gap: 9px; }
-.name-text { min-width: 0; }
+.name-text { min-width: 0; display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
+.caption { overflow-wrap: break-word; }
 .boolean-checkbox {
   appearance: none;
   position: relative;
@@ -77,7 +78,7 @@ button:focus-visible, summary:focus-visible { outline: 1px solid var(--vscode-fo
   border-width: 0 1.5px 1.5px 0;
   transform: rotate(45deg);
 }
-.technical-name { margin-left: 10px; color: var(--vscode-descriptionForeground); font-size: 0.85em; font-weight: 400; }
+.technical-name { overflow-wrap: anywhere; color: var(--vscode-descriptionForeground); font-size: 0.85em; font-weight: 400; }
 .source-button { flex: none; padding: 3px 0; color: var(--vscode-textLink-foreground);
   background: transparent; border: 0; }
 .source-button:hover { color: var(--vscode-textLink-activeForeground); text-decoration: underline; }
@@ -87,18 +88,50 @@ button:focus-visible, summary:focus-visible { outline: 1px solid var(--vscode-fo
 .localized { display: grid; gap: 6px; }
 .localized-row { display: grid; grid-template-columns: minmax(52px, auto) 1fr; gap: 12px; }
 .language { color: var(--vscode-descriptionForeground); font-size: 0.9em; }
-.record { margin: 0; }
-.record-summary { width: fit-content; color: var(--vscode-textLink-foreground); cursor: pointer; }
-.fields { margin: 12px 0 0 8px; padding-left: 16px; border-left: 1px solid var(--vscode-settings-headerBorder, var(--vscode-panel-border)); }
-.field { display: grid; grid-template-columns: minmax(120px, 30%) 1fr; gap: 8px 20px; margin: 10px 0; }
-.field-name { color: var(--vscode-descriptionForeground); overflow-wrap: anywhere; }
 .qualifiers { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; }
 .qualifier { padding: 2px 6px; border-radius: 2px; color: var(--vscode-descriptionForeground);
   background: var(--vscode-editorWidget-background, var(--vscode-input-background)); font-size: 0.85em; overflow-wrap: anywhere; }
 .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; }
 
+/* Complex fields span the available width; only leaf values use columns. */
+.field-name { color: var(--vscode-foreground); overflow-wrap: normal; min-width: 0; align-self: start; }
+.structure { width: 100%; min-width: 0; }
+.field { display: grid; grid-template-columns: minmax(140px, 34%) minmax(0, 1fr); gap: 8px 20px; padding: 8px 0; margin: 0; }
+.field > .value { min-width: 0; }
+.field > .qualifiers { grid-column: 1 / -1; }
+.complex-field { display: block; padding: 10px 0; }
+.complex-field > .field-name { font-weight: 500; margin-bottom: 8px; }
+.complex-field > .structure { border-top: 1px solid var(--vscode-settings-headerBorder, var(--vscode-panel-border)); }
+.boolean-field { display: block; }
+.record { min-width: 0; margin: 0; }
+.record-summary { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; width: 100%; padding: 10px 0;
+  color: var(--vscode-foreground); list-style: none; cursor: pointer; }
+.record-summary::-webkit-details-marker { display: none; }
+.record-summary::before { content: ""; flex: none; width: 6px; height: 6px; margin: 0 3px;
+  border: solid var(--vscode-descriptionForeground); border-width: 0 1.5px 1.5px 0; transform: rotate(-45deg); }
+.record[open] > .record-summary::before { transform: rotate(45deg); margin-top: -3px; }
+.record-summary:hover { background: var(--vscode-list-hoverBackground); }
+.record-summary .name-text { font-weight: 500; flex: 0 1 auto; min-width: 0; }
+.record-preview { color: var(--vscode-descriptionForeground); font-size: 0.9em; overflow-wrap: anywhere;
+  flex: 1 1 180px; line-height: 1.5; }
+.entry-body { padding: 4px 12px 12px; background: var(--vscode-editorWidget-background, var(--vscode-editor-background));
+  border: 1px solid var(--vscode-settings-headerBorder, var(--vscode-panel-border)); border-radius: 3px; }
+.entry-body .entry-body { padding-left: 0; padding-right: 0; border-left: 0; border-right: 0; }
+.collection > .record + .record, .collection-value + .collection-value {
+  border-top: 1px solid var(--vscode-settings-headerBorder, var(--vscode-panel-border)); }
+.collection-count { color: var(--vscode-descriptionForeground); font-size: 0.95em; }
+.collection-value { padding: 8px 0; }
+.checklist-row { display: flex; align-items: flex-start; gap: 10px; min-height: 38px; padding: 7px 0; }
+.checklist-row .name-text { padding-top: 2px; line-height: 1.5; }
+.checklist-row .technical-name { font-size: 0.85em; }
+.collection-group > .collection { padding-top: 4px; }
 @media (max-width: 560px) {
   .page { padding: 20px 16px 40px; }
+  .property-head { flex-wrap: wrap; gap: 4px 12px; }
+  .property-name { flex-basis: 100%; }
+  .source-button { margin-bottom: 8px; }
   .field { display: block; }
-  .field-name { margin-bottom: 4px; }
+  .field-name { margin-bottom: 6px; }
+  .entry-body { padding: 4px 8px 8px; }
+  .record-preview { flex-basis: 100%; padding-left: 20px; }
 }

@@ -3,10 +3,10 @@ import { message } from "./messages.js";
 import { ExplorerError, isRecord } from "./protocol.js";
 
 export interface PropertyKey { namespace: string | null; name: string }
-export interface PropertyQualifier { key: PropertyKey; value: string }
+export interface PropertyQualifier { key: PropertyKey; value: string; caption?: PropertyCaption }
 export interface PropertyCaption { "ru-RU": string; "en-US": string }
 export interface PropertyField { key: PropertyKey; caption?: PropertyCaption; qualifiers: PropertyQualifier[]; value: PropertyValue }
-export type PropertyValue = { kind: "text"; text: string }
+export type PropertyValue = { kind: "text"; text: string; caption?: PropertyCaption }
   | { kind: "localized"; items: { language: string; content: string }[] }
   | { kind: "record"; fields: PropertyField[] }
   | { kind: "unsupported"; issue: string };
@@ -57,22 +57,23 @@ function parseField(value: unknown, depth: number): PropertyField {
   if (!Array.isArray(annotations)) throw new ExplorerError("protocolInvalid");
   const qualifiers = annotations.map((qualifier: unknown) => {
     if (!isRecord(qualifier) || typeof qualifier.value !== "string") throw new ExplorerError("protocolInvalid");
-    return { key: parseKey(qualifier.key), value: qualifier.value };
+    return { key: parseKey(qualifier.key), value: qualifier.value, ...parseCaption(qualifier.caption) };
   });
-  const field: PropertyField = { key: parseKey(value.key), qualifiers, value: parseValue(value.value, depth) };
-  if (value.caption !== undefined) {
-    if (!isRecord(value.caption) || typeof value.caption["ru-RU"] !== "string"
-      || typeof value.caption["en-US"] !== "string" || !value.caption["ru-RU"].trim()
-      || !value.caption["en-US"].trim()) throw new ExplorerError("protocolInvalid");
-    field.caption = { "ru-RU": value.caption["ru-RU"], "en-US": value.caption["en-US"] };
-  }
-  return field;
+  return { key: parseKey(value.key), qualifiers, value: parseValue(value.value, depth), ...parseCaption(value.caption) };
+}
+
+/** Validate optional presentation metadata without modifying the original scalar value. */
+function parseCaption(value: unknown): { caption?: PropertyCaption } {
+  if (value === undefined) return {};
+  if (!isRecord(value) || typeof value["ru-RU"] !== "string" || typeof value["en-US"] !== "string"
+    || !value["ru-RU"].trim() || !value["en-US"].trim()) throw new ExplorerError("protocolInvalid");
+  return { caption: { "ru-RU": value["ru-RU"], "en-US": value["en-US"] } };
 }
 
 /** Validate the backend's four value shapes before sending them to the webview. */
 function parseValue(value: unknown, depth: number): PropertyValue {
   if (!isRecord(value)) throw new ExplorerError("protocolInvalid");
-  if (value.kind === "text" && typeof value.text === "string") return { kind: "text", text: value.text };
+  if (value.kind === "text" && typeof value.text === "string") return { kind: "text", text: value.text, ...parseCaption(value.caption) };
   if (value.kind === "localized" && Array.isArray(value.items) && value.items.every(item => isRecord(item)
     && typeof item.language === "string" && typeof item.content === "string")) {
     return { kind: "localized", items: value.items.map(item => ({ language: item.language, content: item.content })) };
@@ -89,7 +90,7 @@ function preview(value: PropertyValue, language: string): string {
   let text: string;
   switch (value.kind) {
     case "text":
-      text = value.text;
+      text = value.caption?.[language.toLowerCase().startsWith("ru") ? "ru-RU" : "en-US"] ?? value.text;
       break;
     case "localized":
       text = value.items.map(item => `${item.language}: ${item.content}`).join(" · ");

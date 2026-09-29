@@ -161,6 +161,8 @@ class PropertyTab implements vscode.Disposable {
         openXml: text("openXml"), empty: text("propertyEmpty"), noMatches: text("propertyNoMatches"),
         readOnly: text("propertyReadOnly"), fields: text("propertyFields", "{0}"),
         xmlOnly: text("propertyXmlOnly"), count: text("propertyCount", "{0}"),
+        items: text("propertyItems", "{0}"), item: text("propertyItem", "{0}"),
+        enabled: text("propertyEnabled", "{0}", "{1}"),
       },
       properties: this.choices.map(({ index, label, key, caption, qualifiers, value, description }) =>
         ({ index, label, key, ...(caption ? { caption } : {}), qualifiers, value, description })),
@@ -183,7 +185,7 @@ class PropertyTab implements vscode.Disposable {
       <input id="search" type="search" autocomplete="off"><button id="refresh" type="button"></button></div>
       <p id="count" class="count" aria-live="polite"></p><p id="notice" class="notice" role="status"></p>
       <section id="items" class="items" aria-label="Properties"></section></main>
-      <script src="${script}"></script></body></html>`;
+      <script type="module" src="${script}"></script></body></html>`;
   }
 
   dispose(): void {

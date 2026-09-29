@@ -1,16 +1,21 @@
+import { booleanValue, checklistEntry, childrenWithPaths, identity, isCollection, localizedEntries, searchable, summary, translated } from "./model.mjs";
+
 const vscode = acquireVsCodeApi();
 const search = document.getElementById("search");
 const items = document.getElementById("items");
 const notice = document.getElementById("notice");
 const count = document.getElementById("count");
 const refresh = document.getElementById("refresh");
+const saved = vscode.getState();
+const expanded = new Map(Object.entries(saved?.expanded ?? {}).filter(([, value]) => typeof value === "boolean"));
 let snapshot;
+search.value = saved?.query ?? "";
 
-search.value = vscode.getState()?.query ?? "";
-search.addEventListener("input", () => {
-  vscode.setState({ query: search.value });
-  render();
-});
+/** Persist only presentation state; property values remain backend-owned. */
+function saveState() {
+  vscode.setState({ query: search.value, expanded: Object.fromEntries(expanded) });
+}
+search.addEventListener("input", () => { saveState(); render(); });
 refresh.addEventListener("click", () => vscode.postMessage({ type: "refresh" }));
 window.addEventListener("message", event => {
   if (event.data?.type !== "state") return;
@@ -18,126 +23,184 @@ window.addEventListener("message", event => {
   render();
 });
 
-/** Create text nodes for metadata values so XML content cannot become markup. */
-function element(tag, className, value) {
+/** Workspace strings always become text nodes, never HTML. */
+function element(tag, className, text) {
   const node = document.createElement(tag);
   if (className) node.className = className;
-  if (value !== undefined) node.textContent = value;
+  if (text !== undefined) node.textContent = text;
   return node;
 }
 
-/** Use backend captions so object context and platform vocabulary stay consistent. */
-function caption(field) {
-  return field.caption?.[snapshot.language];
+/** Keep raw identities visible without repeating identical human-readable text. */
+function namedText(title, raw) {
+  const node = element("span", "name-text");
+  node.append(element("span", "caption", title));
+  if (raw && raw !== title) node.append(element("span", "technical-name", raw));
+  return node;
 }
 
-/** Show the platform caption beside its exact Designer XML name. */
-function appendPropertyName(container, field) {
-  const { key } = field;
-  const translated = caption(field);
-  container.append(document.createTextNode(translated ?? key.name));
-  if (translated && translated !== key.name) container.append(element("span", "technical-name", key.name));
+/** Checkbox values are accessible and read-only in every layout. */
+function checkbox(checked, label) {
+  const node = element("input", "boolean-checkbox");
+  node.type = "checkbox";
+  node.checked = checked;
+  node.disabled = true;
+  node.setAttribute("aria-label", label);
+  return node;
 }
 
-/** Designer's exact boolean text is a display hint; other scalar text stays unchanged. */
-function booleanValue(value) {
-  if (value?.kind !== "text") return undefined;
-  if (value.text === "true") return true;
-  if (value.text === "false") return false;
-  return undefined;
-}
-
-/** A disabled native checkbox exposes the value without suggesting it can be edited. */
+/** Property and structure labels use the same platform vocabulary. */
 function propertyName(tag, className, field) {
-  const { key, value } = field;
-  const container = element(tag, className);
-  const checked = booleanValue(value);
-  if (checked !== undefined) {
-    const checkbox = element("input", "boolean-checkbox");
-    checkbox.type = "checkbox";
-    checkbox.checked = checked;
-    checkbox.disabled = true;
-    checkbox.setAttribute("aria-label", caption(field) ?? key.name);
-    container.append(checkbox);
+  const node = element(tag, className);
+  const title = translated(field, snapshot.language, field.key.name);
+  const checked = booleanValue(field.value);
+  if (checked !== undefined) node.append(checkbox(checked, title));
+  node.append(namedText(title, field.key.name));
+  node.title = field.key.namespace ?? "";
+  return node;
+}
+
+/** A matching group name reveals the whole group; a matching child filters its siblings. */
+function childQuery(field, query) {
+  const own = field.value.kind === "record" ? { ...field, value: { kind: "record", fields: [] } } : field;
+  return searchable(own, snapshot.language).includes(query) ? "" : query;
+}
+
+/** Native details retain keyboard behavior and restore the user's expansion choice. */
+function disclosure(path, title, preview) {
+  const details = element("details", "record");
+  details.open = Boolean(search.value.trim()) || (expanded.get(path) ?? false);
+  const heading = element("summary", "record-summary");
+  heading.append(title);
+  if (preview) heading.append(element("span", "record-preview", preview));
+  details.append(heading);
+  let open = details.open;
+  details.addEventListener("toggle", () => {
+    if (open === details.open) return;
+    open = details.open;
+    if (search.value.trim()) return;
+    expanded.set(path, open);
+    saveState();
+  });
+  return details;
+}
+
+/** XML annotations remain available beneath a value, with captions for known identities. */
+function qualifiersView(qualifiers) {
+  const group = element("div", "qualifiers");
+  for (const qualifier of qualifiers) {
+    const caption = translated(qualifier, snapshot.language, qualifier.value);
+    const chip = element("span", "qualifier", `@${qualifier.key.name} = ${caption}`);
+    chip.title = `${qualifier.key.namespace ?? ""} ${qualifier.value}`;
+    group.append(chip);
   }
-  const name = element("span", "name-text");
-  appendPropertyName(name, field);
-  container.append(name);
-  container.title = key.namespace ?? "";
-  return container;
+  return group;
 }
 
-/** Find nested record fields and localized values through the same search box. */
-function searchable(value, depth = 0) {
-  if (!value || depth > 32) return "";
-  if (value.kind === "text") return value.text;
-  if (value.kind === "localized") return value.items.map(item => `${item.language} ${item.content}`).join(" ");
-  if (value.kind === "record") return value.fields.map(field =>
-    `${field.key.name} ${caption(field) ?? ""} ${field.qualifiers.map(q => `${q.key.name} ${q.value}`).join(" ")} ${searchable(field.value, depth + 1)}`).join(" ");
-  return "";
+/** Structured scalar fields align in two columns; complex children get the full width. */
+function structureView(field, path, query, depth) {
+  const group = element("div", "structure");
+  for (const child of childrenWithPaths(field.value.fields, path)) {
+    if (query && !searchable(child.field, snapshot.language).includes(query)) continue;
+    const complex = child.field.value.kind === "record";
+    const row = element("div", `field${complex ? " complex-field" : ""}${booleanValue(child.field.value) !== undefined ? " boolean-field" : ""}`);
+    row.append(propertyName("div", "field-name", child.field));
+    if (booleanValue(child.field.value) === undefined) row.append(valueView(child.field, child.path, childQuery(child.field, query), depth + 1));
+    if (child.field.qualifiers.length) row.append(qualifiersView(child.field.qualifiers));
+    group.append(row);
+  }
+  return group;
 }
 
-/** Display all backend value variants without flattening repeated record fields. */
-function valueView(value, labels, depth = 0) {
-  if (!value || depth > 32) return element("span", "value unsupported", labels.xmlOnly);
-  if (value.kind === "text") return element("span", "value text-value", value.text || "—");
-  if (value.kind === "localized") {
+/** Collections use names and previews instead of repeating XML wrapper fields. */
+function collectionEntry(root, field, path, index, query, depth) {
+  const flag = checklistEntry(root, field);
+  if (flag) {
+    const row = element("div", "checklist-row");
+    const title = translated(flag.name, snapshot.language, flag.name.text);
+    row.append(checkbox(flag.checked, title), namedText(title, flag.name.text));
+    return row;
+  }
+  if (field.value.kind !== "record") {
+    const row = element("div", "collection-value");
+    const checked = booleanValue(field.value);
+    row.append(checked === undefined ? valueView(field, path, query, depth + 1) : propertyName("div", "field-name", field));
+    if (field.qualifiers.length) row.append(qualifiersView(field.qualifiers));
+    return row;
+  }
+  const name = identity(field, snapshot.language);
+  const title = namedText(name?.title ?? `${translated(field, snapshot.language, field.key.name)} · ${snapshot.labels.item.replace("{0}", String(index + 1))}`, name?.raw);
+  const details = disclosure(path, title, summary(field, snapshot.language));
+  const body = element("div", "entry-body");
+  body.append(valueView(field, `${path}/body`, childQuery(field, query), depth + 1));
+  if (field.qualifiers.length) body.append(qualifiersView(field.qualifiers));
+  details.append(body);
+  return details;
+}
+
+/** Large collections have one disclosure and a meaningful count, including enabled flags. */
+function collectionView(field, path, query, depth) {
+  const children = childrenWithPaths(field.value.fields, path);
+  const visible = children.filter(child => !query || searchable(child.field, snapshot.language).includes(query));
+  const group = element("div", "collection");
+  for (const [index, child] of children.entries()) {
+    if (query && !searchable(child.field, snapshot.language).includes(query)) continue;
+    group.append(collectionEntry(field, child.field, child.path, index, query, depth));
+  }
+  if (children.length <= 6) return group;
+  const flags = visible.map(child => checklistEntry(field, child.field)).filter(Boolean);
+  const info = flags.length ? snapshot.labels.enabled.replace("{0}", String(flags.filter(flag => flag.checked).length)).replace("{1}", String(flags.length)) : "";
+  const title = element("span", "collection-count", snapshot.labels.items.replace("{0}", String(query ? visible.length : children.length)));
+  const details = disclosure(path, title, info);
+  details.classList.add("collection-group");
+  details.append(group);
+  return details;
+}
+
+/** Render full values without pushing nested records into progressively narrower columns. */
+function valueView(field, path, query, depth = 0) {
+  const value = field.value;
+  const labels = snapshot.labels;
+  if (depth > 32) return element("span", "value unsupported", labels.xmlOnly);
+  if (value.kind === "text") {
+    const translatedValue = translated(value, snapshot.language, value.text);
+    const node = element("div", "value text-value");
+    node.append(namedText(translatedValue || "—", value.caption ? value.text : undefined));
+    return node;
+  }
+  const localized = localizedEntries(value);
+  if (localized) {
     const group = element("div", "localized");
-    if (!value.items.length) group.append(element("span", "value", "—"));
-    for (const item of value.items) {
+    if (!localized.length) group.append(element("span", "value", "—"));
+    for (const item of localized) {
       const row = element("div", "localized-row");
       row.append(element("span", "language", item.language), element("span", "value text-value", item.content || "—"));
       group.append(row);
     }
     return group;
   }
-  if (value.kind === "record") {
-    const details = element("details", "record");
-    details.open = search.value.trim().length > 0;
-    details.append(element("summary", "record-summary", labels.fields.replace("{0}", String(value.fields.length))));
-    const fields = element("div", "fields");
-    for (const field of value.fields) {
-      const row = element("div", "field");
-      row.append(propertyName("div", "field-name", field));
-      if (booleanValue(field.value) === undefined) row.append(valueView(field.value, labels, depth + 1));
-      if (field.qualifiers.length) row.append(qualifiersView(field.qualifiers));
-      fields.append(row);
-    }
-    details.append(fields);
-    return details;
-  }
+  if (value.kind === "record") return isCollection(field)
+    ? collectionView(field, path, query, depth) : structureView(field, path, query, depth);
   return element("span", "value unsupported", labels.xmlOnly);
 }
 
-/** Keep XML annotations readable without confusing them with nested properties. */
-function qualifiersView(qualifiers) {
-  const group = element("div", "qualifiers");
-  for (const qualifier of qualifiers) {
-    const chip = element("span", "qualifier", `@${qualifier.key.name} = ${qualifier.value}`);
-    chip.title = qualifier.key.namespace ?? "";
-    group.append(chip);
-  }
-  return group;
-}
-
-/** A settings-style row has one explicit source action and a full structured value. */
-function propertyView(property, labels) {
+/** The original property index continues to address the exact source XML range. */
+function propertyView(property, path, query) {
   const card = element("article", "property");
   const checked = booleanValue(property.value);
   if (checked !== undefined) card.classList.add("boolean-property");
   const head = element("div", "property-head");
-  const title = propertyName("h2", "property-name", property);
-  const button = element("button", "source-button", labels.openXml);
+  const button = element("button", "source-button", snapshot.labels.openXml);
   button.type = "button";
   button.addEventListener("click", () => vscode.postMessage({ type: "openXml", index: property.index }));
-  head.append(title, button);
+  head.append(propertyName("h2", "property-name", property), button);
   card.append(head);
-  if (checked === undefined) card.append(valueView(property.value, labels));
+  if (checked === undefined) card.append(valueView(property, path, childQuery(property, query)));
   if (property.qualifiers.length) card.append(qualifiersView(property.qualifiers));
   return card;
 }
 
-/** Rebuild only the visible property rows when data or search text changes. */
+/** Filter inside collections and auto-reveal matches without overwriting saved expansion. */
 function render() {
   if (!snapshot) return;
   const labels = snapshot.labels;
@@ -148,15 +211,13 @@ function render() {
   search.placeholder = labels.search;
   search.setAttribute("aria-label", labels.search);
   refresh.textContent = labels.refresh;
-  refresh.setAttribute("aria-label", labels.refresh);
   const query = search.value.trim().toLocaleLowerCase();
-  const matches = snapshot.status === "ready" ? snapshot.properties.filter(property =>
-    `${property.label} ${caption(property) ?? ""} ${property.description} ${property.qualifiers.map(q => `${q.key.name} ${q.value}`).join(" ")} ${searchable(property.value)}`
-      .toLocaleLowerCase().includes(query)) : [];
+  const matches = snapshot.status === "ready" ? childrenWithPaths(snapshot.properties, "properties")
+    .filter(({ field }) => !query || searchable(field, snapshot.language).includes(query)) : [];
   count.textContent = snapshot.status === "ready" ? labels.count.replace("{0}", String(matches.length)) : "";
   notice.textContent = snapshot.notice || (snapshot.status === "ready" && !matches.length
     ? query ? labels.noMatches : labels.empty : "");
-  items.replaceChildren(...matches.map(property => propertyView(property, labels)));
+  items.replaceChildren(...matches.map(({ field, path }) => propertyView(field, path, query)));
 }
 
 vscode.postMessage({ type: "ready" });

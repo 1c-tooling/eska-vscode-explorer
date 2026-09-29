@@ -115,3 +115,21 @@ test("property action opens exact XML and rejects a stale tab result", { skip: !
   await assert.rejects(resolvePropertySource(tree, goods, choice), { code: "sourceChanged" });
   assert.ok((await readFile(fixture.descriptor, "utf8")).includes("Новое значение"));
 });
+
+/** Caption validation covers scalar and qualifier metadata without rewriting technical values. */
+test("translated values preserve raw tokens and validate both caption locations", () => {
+  const caption = { "ru-RU": "Версия 8.3.27", "en-US": "Version 8.3.27" };
+  const qualifier = { key: { namespace: null, name: "name" }, value: "Code",
+    caption: { "ru-RU": "Код", "en-US": "Code" } };
+  const property = { key: { namespace: null, name: "Example" }, range: { start: 0, end: 2 },
+    qualifiers: [qualifier], value: { kind: "text", text: "Version8_3_27", caption } };
+  const [choice] = propertyChoices({ properties: [property] }, "ru-RU");
+  assert.equal(choice.description, "Версия 8.3.27");
+  assert.equal(choice.value.text, "Version8_3_27");
+  assert.deepEqual(choice.value.caption, caption);
+  assert.deepEqual(choice.qualifiers, [qualifier]);
+  assert.throws(() => propertyChoices({ properties: [{ ...property,
+    value: { ...property.value, caption: { "ru-RU": "Версия" } } }] }, "ru-RU"), { code: "protocolInvalid" });
+  assert.throws(() => propertyChoices({ properties: [{ ...property,
+    qualifiers: [{ ...qualifier, caption: null }] }] }, "ru-RU"), { code: "protocolInvalid" });
+});
