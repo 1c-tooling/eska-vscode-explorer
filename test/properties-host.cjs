@@ -83,7 +83,7 @@ exports.run = async function () {
   }
   assert.equal(first.state.language, 'ru-RU');
   const comment = first.choices.find(choice => choice.label === 'Comment');
-  await first.receive({ type: 'openXml', index: comment.index });
+  await first.receive({ type: 'openXml', revision: first.state.revision, index: comment.index });
   const editor = vscode.window.activeTextEditor;
   assert.equal(editor.document.uri.fsPath, fixture.descriptor);
   assert.equal(editor.document.getText(editor.selection), '<Comment>😀 Кириллица</Comment>');

@@ -51,7 +51,7 @@ exports.run = async function () {
   assert.deepEqual(type.value.caption, { 'ru-RU': 'Строка', 'en-US': 'String' });
   // Visual acceptance can pause here in a disposable copy of this suite.
   const choice = configuration.choices.find(field => field.label === 'CompatibilityMode');
-  await configuration.receive({ type: 'openXml', index: choice.index });
+  await configuration.receive({ type: 'openXml', revision: configuration.state.revision, index: choice.index });
   assert.equal(vscode.window.activeTextEditor.document.getText(vscode.window.activeTextEditor.selection),
     '<CompatibilityMode>Version8_3_27</CompatibilityMode>');
   await vscode.commands.executeCommand('eska.explorer.disconnect');

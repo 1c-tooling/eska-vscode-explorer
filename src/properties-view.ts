@@ -8,6 +8,7 @@ type Language = "ru-RU" | "en-US";
 
 interface ViewState {
   type: "state";
+  revision: number;
   title: string;
   path: string;
   status: "loading" | "ready" | "stale" | "error";
@@ -24,6 +25,8 @@ class PropertyTab implements vscode.Disposable {
   private ready = false;
   private disposed = false;
   private revision = 0;
+  private dirty = true;
+  private version = "";
   private controller: AbortController | undefined;
   private state: ViewState;
 
@@ -40,24 +43,43 @@ class PropertyTab implements vscode.Disposable {
     this.panel.webview.html = this.html();
     this.panel.onDidDispose(() => this.dispose());
     this.panel.onDidChangeViewState(() => {
-      if (this.panel.visible && this.state.status === "ready" && this.tree === this.currentTree()) void this.load();
+      if (this.panel.visible && this.dirty && this.tree === this.currentTree()) void this.load();
     });
     this.panel.webview.onDidReceiveMessage((input: unknown) => { void this.receive(input); });
     this.updateTitle();
   }
 
   /** Existing object tabs return to focus and bind to the freshest tree entry. */
-  bind(tree: MetadataTree, entry: TreeEntry): void {
+  async show(tree: MetadataTree, entry: TreeEntry): Promise<void> {
     this.tree = tree;
     this.entry = entry;
-    this.updateTitle();
+    // Start before reveal: its visibility event must not schedule a second read.
+    const loading = this.load();
     this.panel.reveal(this.panel.viewColumn);
+    await loading;
   }
 
-  /** Invalidation refreshes only visible tabs bound to the affected project. */
-  matches(tree: MetadataTree, entries: TreeEntry[] | undefined): boolean {
-    return this.tree === tree && this.panel.visible
-      && (!entries || entries.some(entry => entry.project === this.entry.project));
+  /** Remember hidden invalidations and ignore presentation-only tree changes. */
+  changed(tree: MetadataTree, entries: TreeEntry[] | undefined): void {
+    if (this.disposed || this.tree !== tree || this.version === this.projectVersion()) return;
+    this.version = this.projectVersion();
+    if (entries) {
+      let cursor: TreeEntry | undefined = this.entry;
+      while (cursor && !entries.includes(cursor)) cursor = tree.parent(cursor);
+      if (!cursor) return;
+    }
+    this.dirty = true;
+    this.controller?.abort();
+    this.revision++;
+    this.state = this.makeState("loading", message(vscode.env.language, "propertyLoading"));
+    this.publish();
+    if (this.panel.visible) void this.load();
+  }
+
+  /** Ordered backend tokens distinguish data changes from lazy branch repainting. */
+  private projectVersion(): string {
+    const { generation, eventSequence } = this.entry.project.info;
+    return `${generation}:${eventSequence}`;
   }
 
   /** Show the current status again when VS Code recreates a hidden webview. */
@@ -67,6 +89,9 @@ class PropertyTab implements vscode.Disposable {
 
   /** Read only this object's properties and ignore requests superseded by refresh or disposal. */
   async load(): Promise<void> {
+    if (this.disposed) return;
+    this.dirty = false;
+    this.version = this.projectVersion();
     this.controller?.abort();
     const controller = new AbortController();
     this.controller = controller;
@@ -99,6 +124,7 @@ class PropertyTab implements vscode.Disposable {
   /** Connection replacement leaves the tab visible but prevents stale XML navigation. */
   stale(): void {
     this.controller?.abort();
+    this.dirty = false;
     this.revision++;
     this.choices = [];
     this.updateTitle();
@@ -113,7 +139,7 @@ class PropertyTab implements vscode.Disposable {
     this.publish();
   }
 
-  /** Route only known message types and stored property indexes from the isolated webview. */
+  /** Bind XML actions to the snapshot actually displayed, including its original indexes. */
   private async receive(input: unknown): Promise<void> {
     if (!isRecord(input) || this.disposed) return;
     if (input.type === "ready") {
@@ -121,7 +147,7 @@ class PropertyTab implements vscode.Disposable {
       this.publish();
     } else if (input.type === "refresh") {
       await this.load();
-    } else if (input.type === "openXml" && Number.isSafeInteger(input.index)) {
+    } else if (input.type === "openXml" && input.revision === this.state.revision && Number.isSafeInteger(input.index)) {
       const choice = this.choices[input.index as number];
       if (choice && this.state.status === "ready" && this.tree === this.currentTree()) {
         await this.openXml(this.entry, choice);
@@ -154,7 +180,7 @@ class PropertyTab implements vscode.Disposable {
     const heading = this.heading();
     const text = (key: Parameters<typeof message>[1], ...values: string[]): string => message(vscode.env.language, key, ...values);
     return {
-      type: "state", title: heading.title, path: heading.path, status, notice,
+      type: "state", revision: this.revision, title: heading.title, path: heading.path, status, notice,
       language: this.language(),
       labels: {
         properties: text("properties"), search: text("propertySearch"), refresh: text("propertyRefresh"),
@@ -209,23 +235,22 @@ export class PropertyTabs implements vscode.Disposable {
     if (entry.node.id.kind !== "object") return;
     const key = JSON.stringify([entry.project.key, entry.node.id.objectId]);
     let tab = this.tabs.get(key);
-    if (tab) tab.bind(tree, entry);
-    else {
-      tab = new PropertyTab(this.context, tree, entry, this.language, this.currentTree, this.openXml,
-        () => { this.tabs.delete(key); });
-      this.tabs.set(key, tab);
+    if (tab) {
+      await tab.show(tree, entry);
+      return;
     }
+    tab = new PropertyTab(this.context, tree, entry, this.language, this.currentTree, this.openXml,
+      () => { this.tabs.delete(key); });
+    this.tabs.set(key, tab);
     await tab.load();
   }
 
   /** Keep open tabs but flag their data when the connection is replaced. */
   stale(): void { for (const tab of this.tabs.values()) tab.stale(); }
 
-  /** Visible tabs refresh when the backend invalidates their project. */
+  /** Visible tabs refresh immediately; hidden tabs defer reads until revealed. */
   changed(tree: MetadataTree, entries: TreeEntry[] | undefined): void {
-    for (const tab of this.tabs.values()) {
-      if (tab.matches(tree, entries)) void tab.load();
-    }
+    for (const tab of this.tabs.values()) tab.changed(tree, entries);
   }
 
   relabel(): void { for (const tab of this.tabs.values()) tab.relabel(); }

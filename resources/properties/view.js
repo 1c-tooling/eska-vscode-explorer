@@ -184,15 +184,16 @@ function valueView(field, path, query, depth = 0) {
   return element("span", "value unsupported", labels.xmlOnly);
 }
 
-/** The original property index continues to address the exact source XML range. */
+/** Capture the displayed revision so queued clicks cannot address a replacement snapshot. */
 function propertyView(property, path, query) {
+  const revision = snapshot.revision;
   const card = element("article", "property");
   const checked = booleanValue(property.value);
   if (checked !== undefined) card.classList.add("boolean-property");
   const head = element("div", "property-head");
   const button = element("button", "source-button", snapshot.labels.openXml);
   button.type = "button";
-  button.addEventListener("click", () => vscode.postMessage({ type: "openXml", index: property.index }));
+  button.addEventListener("click", () => vscode.postMessage({ type: "openXml", revision, index: property.index }));
   head.append(propertyName("h2", "property-name", property), button);
   card.append(head);
   if (checked === undefined) card.append(valueView(property, path, childQuery(property, query)));
