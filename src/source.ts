@@ -96,6 +96,22 @@ export function isFormPayload(source: unknown): boolean {
 
 export type SourceTarget = "default" | "xml" | "form" | "form-module";
 
+/** Objects with a Modules group open properties; direct-code objects use their existing BSL mapping. */
+export async function resolveTreeSource(tree: MetadataTree, entry: TreeEntry): Promise<OpenSource | undefined> {
+  if (entry.node.id.kind !== "object" || entry.node.metadataKind === "event-subscription") {
+    return resolveSource(tree, entry);
+  }
+  const role = directModuleRole(entry) ?? (isForm(entry) ? "module" : undefined);
+  if (role === undefined) return undefined;
+  const result = await tree.request(entry.project, "metadata/source", { node: entry.node.id });
+  if (!Array.isArray(result.sources)) throw new ExplorerError("protocolInvalid");
+  const modules = result.sources.filter(source => isRecord(source) && isRecord(source.role)
+    && source.role.kind === "module" && source.role.role === role);
+  if (!modules.length) return undefined;
+  if (modules.length !== 1 || !isWirePath(modules[0].path)) throw new ExplorerError("protocolInvalid");
+  return { path: await existingSource(entry.project.info.sourcePath, modules[0].path) };
+}
+
 /** Request exact source mappings; virtual groups intentionally do not open an editor. */
 export async function resolveSource(tree: MetadataTree, entry: TreeEntry, target: SourceTarget = "default"): Promise<OpenSource> {
   if (target === "default" && entry.node.id.kind === "object" && entry.node.metadataKind === "event-subscription") {

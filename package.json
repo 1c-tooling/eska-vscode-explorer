@@ -208,7 +208,7 @@
         },
         {
           "command": "eska.explorer.openXml",
-          "when": "view == eska.explorer.projects && (viewItem == eskaCommonModule || viewItem == eskaModuleObject || viewItem == eskaForm)",
+          "when": "view == eska.explorer.projects && (viewItem == eskaMetadata || viewItem == eskaCommonModule || viewItem == eskaModuleObject || viewItem == eskaForm || viewItem =~ /^eskaRoot(Filtered|Unfiltered)?(Sorted)?$/)",
           "group": "navigation@2"
         },
         {

@@ -17,7 +17,7 @@ import { PropertyTabs } from "./properties-view.js";
 import { MetadataTree, type TreeEntry, type ProjectTree } from "./tree.js";
 import { ProjectSorting, type SortOrder } from "./sorting.js";
 import { ProjectFilters, isHiddenSection, supportsRootFilter } from "./filter.js";
-import { nativePath, isCommonModule, directModuleRole, isModuleLeaf, isForm, resolveSource, resolvePropertySource, type SourceTarget } from "./source.js";
+import { nativePath, isCommonModule, directModuleRole, isModuleLeaf, isForm, resolveSource, resolveTreeSource, resolvePropertySource, type SourceTarget } from "./source.js";
 import { FormSources, type FormSource } from "./forms.js";
 import { WorkspaceFiles, fileName, type WorkspaceEntry } from "./workspace-files.js";
 import { ProjectWatcher, watchManifests, watchDirectory } from "./watch.js";
@@ -519,14 +519,19 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
     }).finally(() => this.recovering.delete(project));
   }
 
-  /** Open only resolved existing sources, preserving unsaved buffers and rejecting stale positions. */
+  /** Activate properties or a resolved source, preserving unsaved buffers and rejecting stale positions. */
   private async open(entry: TreeEntry, target: SourceTarget = "default", property?: PropertyChoice): Promise<void> {
     const tree = this.tree;
     if (!tree || !entry || !("node" in entry) || !tree.projects.includes(entry.project)) return;
     const opening = ++this.opening;
     try {
-      const source = property ? await resolvePropertySource(tree, entry, property) : await resolveSource(tree, entry, target);
+      const source = property ? await resolvePropertySource(tree, entry, property)
+        : target === "default" ? await resolveTreeSource(tree, entry) : await resolveSource(tree, entry, target);
       if (opening !== this.opening || tree !== this.tree) return;
+      if (!source) {
+        await this.showProperties(entry);
+        return;
+      }
       const uri = await this.support.resolveUri(source.path);
       if (opening !== this.opening || tree !== this.tree) return;
       const document = await vscode.workspace.openTextDocument(uri);
@@ -548,6 +553,8 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
   private async showProperties(entry: TreeEntry): Promise<void> {
     const tree = this.tree;
     if (!tree || !entry || entry.node?.id.kind !== "object" || !tree.projects.includes(entry.project)) return;
+    // A context-menu or property-tab activation supersedes an earlier asynchronous source open.
+    this.opening++;
     try {
       await this.propertiesTabs.show(tree, entry);
     } catch (error) {

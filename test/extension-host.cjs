@@ -37,6 +37,14 @@ exports.run = async function () {
     await until(() => !explorer.support.loading, 'support preloader completed');
     return explorer.getChildren(entry);
   }
+  /** Invoke the actual tree command and observe the object's ready properties tab. */
+  async function activateProperties(entry) {
+    const command = explorer.getTreeItem(entry).command;
+    await vscode.commands.executeCommand(command.command, ...command.arguments);
+    const tab = [...explorer.propertiesTabs.tabs.values()].find(tab => tab.entry.node.id.objectId === entry.node.id.objectId);
+    await until(() => tab?.panel.visible && tab.state.status === 'ready', 'properties opened by tree activation');
+    return tab;
+  }
   await vscode.commands.executeCommand('eska.explorer.disconnect');
   // Disconnect must also invalidate preflight, before Connection owns a child.
   const ensure = explorer.setup.ensure.bind(explorer.setup);
@@ -115,8 +123,16 @@ exports.run = async function () {
   assert.equal(scripts.length, 1, 'bin-only manager is hidden');
   const attributes = named(groups, 'Реквизиты');
   const article = named(await children(attributes), 'Артикул');
+  await activateProperties(root);
+  const goodsProperties = await activateProperties(goods);
+  await activateProperties(customers);
+  const tabCount = explorer.propertiesTabs.tabs.size;
+  assert.equal(await activateProperties(goods), goodsProperties, 'activation reuses the same object tab');
+  assert.equal(explorer.propertiesTabs.tabs.size, tabCount);
   await explorer.view.reveal(article, { select: true, focus: true });
-  await vscode.commands.executeCommand('eska.explorer.openSource', article);
+  const properties = await activateProperties(article);
+  assert.equal(properties.state.title, 'Уникальный код товара');
+  await vscode.commands.executeCommand('eska.explorer.openXml', article);
   assert.equal(vscode.window.activeTextEditor.document.uri.fsPath, fixture.descriptor);
   assert.equal(vscode.window.activeTextEditor.document.getText(vscode.window.activeTextEditor.selection), '<Name>Артикул</Name>');
   await vscode.commands.executeCommand('eska.explorer.openSource', scripts[0]);
@@ -124,7 +140,8 @@ exports.run = async function () {
 
   const common = named(await children(root), 'Общие');
   const commonGroup = named(await children(common), 'Общие модули');
-  const commonModule = named(await children(commonGroup), 'Обмен');
+  const commonModules = await children(commonGroup);
+  const commonModule = named(commonModules, 'Обмен');
   const commonItem = explorer.getTreeItem(commonModule);
   assert.equal(commonItem.collapsibleState, vscode.TreeItemCollapsibleState.None);
   assert.equal(commonItem.contextValue, 'eskaCommonModule');
@@ -132,6 +149,10 @@ exports.run = async function () {
   await explorer.view.reveal(commonModule, { select: true, focus: true });
   await vscode.commands.executeCommand(commonItem.command.command, ...commonItem.command.arguments);
   assert.equal(vscode.window.activeTextEditor.document.uri.fsPath, path.join(fixture.source, 'CommonModules', 'Обмен', 'Ext', 'Module.bsl'));
+  await vscode.commands.executeCommand('eska.explorer.properties', commonModule);
+  const commonProperties = [...explorer.propertiesTabs.tabs.values()].find(tab => tab.entry.node.id.objectId === commonModule.node.id.objectId);
+  await until(() => commonProperties?.panel.visible && commonProperties.state.status === 'ready', 'common module retains its context-menu properties');
+  await activateProperties(named(commonModules, 'Защищенный'));
   await vscode.commands.executeCommand('eska.explorer.openXml', commonModule);
   assert.equal(vscode.window.activeTextEditor.document.uri.fsPath, path.join(fixture.source, 'CommonModules', 'Обмен.xml'));
   assert.equal(vscode.window.activeTextEditor.document.getText(vscode.window.activeTextEditor.selection), '<Name>Обмен</Name>');

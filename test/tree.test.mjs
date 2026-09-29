@@ -5,7 +5,7 @@ import { resolve, join, isAbsolute } from "node:path";
 import { Connection } from "../out/connection.js";
 import { MetadataTree, nodeKey, parseNode } from "../out/tree.js";
 import { ExplorerError } from "../out/protocol.js";
-import { nativePath, editorRange, existingSource, resolveSource, isCommonModule } from "../out/source.js";
+import { nativePath, editorRange, existingSource, resolveSource, resolveTreeSource, isCommonModule } from "../out/source.js";
 import { createTreeProject, descriptor, inline, addCommonModules } from "./fixture.mjs";
 
 const executable = process.env.ESKA_TEST_BINARY;
@@ -94,9 +94,11 @@ test("real backend lazy trees, source positions and local invalidation for all f
     const modules = await tree.children(groups[0]);
     assert.equal(modules.length, 1, "binary-only manager module is hidden");
     assert.equal((await resolveSource(tree, modules[0])).path, fixture.module);
+    assert.equal(await resolveTreeSource(tree, object), undefined, "an object with a Modules group opens properties even with one BSL file");
     const attributeGroup = named(groups, "Реквизиты");
     const attribute = named(await tree.children(attributeGroup), "Артикул");
     assert.equal(attribute.node.metadataKind, "attribute");
+    assert.equal(await resolveTreeSource(tree, attribute), undefined, "an inline object opens properties, not its owner's BSL");
     const location = await resolveSource(tree, attribute);
     assert.equal(location.path, fixture.descriptor);
     assert.equal(location.position.text.slice(location.position.start, location.position.end), "<Name>Артикул</Name>");
@@ -215,13 +217,45 @@ test("common modules open existing BSL directly and retain explicit XML access",
   assert.ok(isCommonModule(module));
   assert.equal(isCommonModule(group), false);
   assert.equal((await resolveSource(tree, module)).path, join(fixture.source, "CommonModules", "Обмен", "Ext", "Module.bsl"));
+  assert.equal((await resolveTreeSource(tree, module)).path, join(fixture.source, "CommonModules", "Обмен", "Ext", "Module.bsl"));
   assert.equal(module.children, undefined, "opening BSL does not load hidden module groups");
   const xml = await resolveSource(tree, module, "xml");
   assert.equal(xml.path, join(fixture.source, "CommonModules", "Обмен.xml"));
   assert.equal(xml.position.text.slice(xml.position.start, xml.position.end), "<Name>Обмен</Name>");
   const binary = named(entries, "Защищенный");
+  assert.equal(await resolveTreeSource(tree, binary), undefined, "binary-only common modules open properties");
   await assert.rejects(resolveSource(tree, binary), { code: "sourceMissing" });
   assert.equal((await resolveSource(tree, binary, "xml")).path, join(fixture.source, "CommonModules", "Защищенный.xml"));
+});
+
+/** The Modules group keeps activation stable when its BSL files appear or disappear. */
+test("objects with a Modules group open properties regardless of BSL count", { skip: !executable }, async t => {
+  const root = await mkdtemp(join(process.env.ESKA_TEST_ROOT ?? resolve("../eska-playground"), "explorer-activation-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const fixture = await createTreeProject(root);
+  const manager = join(fixture.source, "Catalogs", "Товары", "Ext", "ManagerModule.bsl");
+  await writeFile(manager, "// manager\r\n");
+  const connection = new Connection("0.0.0", () => {}, () => {});
+  t.after(() => connection.dispose());
+  await connection.connect({ executable, path: root, name: "test", locale: "ru-RU" });
+  const tree = new MetadataTree(connection, connection.state.session, () => {}, () => {});
+  t.after(() => tree.dispose());
+  const [top] = await tree.roots();
+  const catalogs = named(await tree.children(top), "Справочники");
+  const objects = await tree.children(catalogs);
+  const goods = named(objects, "Товары");
+  assert.equal(await resolveTreeSource(tree, top), undefined);
+  assert.equal(await resolveTreeSource(tree, named(objects, "Покупатели")), undefined);
+  assert.equal(await resolveTreeSource(tree, goods), undefined);
+  const modules = await tree.children(named(await tree.children(goods), "Модули"));
+  assert.deepEqual(new Set(await Promise.all(modules.map(async entry => (await resolveTreeSource(tree, entry)).path))),
+    new Set([fixture.module, manager]));
+  await rm(manager);
+  await tree.refresh(goods.project, goods);
+  assert.equal(await resolveTreeSource(tree, goods), undefined);
+  await rm(fixture.module);
+  await tree.refresh(goods.project, goods);
+  assert.equal(await resolveTreeSource(tree, goods), undefined);
 });
 
 

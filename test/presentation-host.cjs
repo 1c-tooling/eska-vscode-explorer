@@ -47,6 +47,7 @@ exports.run = async function () {
   /** Collect the tiny fixture through the public native provider. */
   async function walk(owner) {
     for (const entry of await explorer.getChildren(owner)) {
+      if (entry.fileKind === "group" && !owner) continue;
       assert.ok(entry.node || entry.owner, `Unexpected notice: ${entry.label}`);
       if (!entry.node) continue;
       if (entry.node.label.kind === "name") entries.set(entry.node.label.text, entry);
@@ -69,6 +70,8 @@ exports.run = async function () {
     assert.match(vscode.window.activeTextEditor.document.uri.fsPath, /\.xml$/);
   }
   const form = entries.get("FormDemo");
+  await vscode.commands.executeCommand("eska.explorer.openSource", form);
+  assert.equal(vscode.window.activeTextEditor.document.uri.fsPath, formModule, "a form with BSL opens its module");
   const rows = await explorer.getChildren(form);
   assert.deepEqual(rows.map(row => explorer.getTreeItem(row).label), ["Форма", "Модуль"]);
   assert.equal(await explorer.getChildren(form), rows, "source rows reuse the loaded branch");
@@ -80,6 +83,15 @@ exports.run = async function () {
   }
   await config.update("treeLanguage", "en-US", vscode.ConfigurationTarget.Workspace);
   assert.deepEqual(rows.map(row => explorer.getTreeItem(row).label), ["Form", "Module"]);
+  // Native watcher registration is asynchronous; observe a real event before testing deletion.
+  const initialEvent = form.project.info.eventSequence;
+  const watchDeadline = Date.now() + 15000;
+  while (form.project.info.eventSequence === initialEvent && Date.now() < watchDeadline) {
+    const now = new Date();
+    await fs.utimes(formModule, now, now);
+    await new Promise(resolve => setTimeout(resolve, 150));
+  }
+  assert.notEqual(form.project.info.eventSequence, initialEvent, "native source watcher is ready");
   await fs.rename(formModule, formModule.replace(/\.bsl$/, ".bin"));
   const deadline = Date.now() + 15000;
   let current = rows;
@@ -89,5 +101,8 @@ exports.run = async function () {
     await new Promise(resolve => setTimeout(resolve, 50));
   }
   assert.deepEqual(current.map(row => row.target), ["form"], "watch invalidates cached form sources; bin-only module stays hidden");
+  await vscode.commands.executeCommand("eska.explorer.openSource", form);
+  assert.ok([...explorer.propertiesTabs.tabs.values()].some(tab => tab.entry.node.id.objectId === form.node.id.objectId
+    && tab.panel.visible && tab.state.status === "ready"), "a form without BSL opens properties");
   await fs.writeFile(path.join(fixture.root, "host-result.json"), JSON.stringify({ passed: true, directModules: modules.size, nestedChildren: 6, formSources: 2 }));
 };
