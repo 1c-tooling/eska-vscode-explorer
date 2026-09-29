@@ -96,12 +96,12 @@ export function isFormPayload(source: unknown): boolean {
 
 export type SourceTarget = "default" | "xml" | "form" | "form-module";
 
-/** Objects with a Modules group open properties; direct-code objects use their existing BSL mapping. */
+/** Forms and objects with a Modules group open properties; direct-code objects use their BSL mapping. */
 export async function resolveTreeSource(tree: MetadataTree, entry: TreeEntry): Promise<OpenSource | undefined> {
   if (entry.node.id.kind !== "object" || entry.node.metadataKind === "event-subscription") {
     return resolveSource(tree, entry);
   }
-  const role = directModuleRole(entry) ?? (isForm(entry) ? "module" : undefined);
+  const role = directModuleRole(entry);
   if (role === undefined) return undefined;
   const result = await tree.request(entry.project, "metadata/source", { node: entry.node.id });
   if (!Array.isArray(result.sources)) throw new ExplorerError("protocolInvalid");
