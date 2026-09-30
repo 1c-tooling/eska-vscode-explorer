@@ -98,10 +98,17 @@ exports.run = async function () {
     await until(() => Object.keys(tab.state.editing.drafts).length === 0, 'Esc clears draft');
     assert.equal(await fs.readFile(file, 'utf8'), saved);
     const booleanIndex = tab.state.editing.schema.fields.findIndex(field => field.path[0].key.name === 'IncludeHelpInContents');
-    await dom.evaluate(`document.getElementById('edit-${booleanIndex}').click()`);
+    const booleanSelector = `document.getElementById('edit-${booleanIndex}')`;
+    const hit = await dom.evaluate(`(()=>{const input=${booleanSelector};input.scrollIntoView({block:'center'});const rect=input.getBoundingClientRect();const hit=document.elementFromPoint(rect.x+rect.width/2,rect.y+rect.height/2);return hit===input;})()`);
+    assert.equal(hit, true, 'the checkbox square itself receives pointer input');
+    await dom.evaluate(`${booleanSelector}.click()`);
     await until(async () => !tab.state.editing.busy && (await fs.readFile(file, 'utf8')).includes('<IncludeHelpInContents>true'), 'checkbox autosave');
     await dom.evaluate("window.dispatchEvent(new KeyboardEvent('keydown',{key:'z',ctrlKey:true,bubbles:true}))");
     await until(async () => !tab.state.editing.busy && (await fs.readFile(file, 'utf8')) === saved, 'checkbox undo');
+    await dom.evaluate(`document.querySelector('label[for="edit-${booleanIndex}"]').click()`);
+    await until(async () => !tab.state.editing.busy && (await fs.readFile(file, 'utf8')).includes('<IncludeHelpInContents>true'), 'checkbox label autosave');
+    await dom.evaluate("window.dispatchEvent(new KeyboardEvent('keydown',{key:'z',ctrlKey:true,bubbles:true}))");
+    await until(async () => !tab.state.editing.busy && (await fs.readFile(file, 'utf8')) === saved, 'checkbox label undo');
     await dom.screenshot('editing.png');
     await dom.evaluate(`(()=>{const input=${selector};input.value='Keep my draft';input.dispatchEvent(new Event('input'));})()`);
     await until(() => Object.keys(tab.state.editing.drafts).length === 1, 'host retains draft');

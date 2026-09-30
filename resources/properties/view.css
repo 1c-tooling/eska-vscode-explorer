@@ -204,6 +204,7 @@ textarea.property-input { resize: vertical; line-height: 1.5; }
 button.property-input { text-align: start; }
 .property-editor.boolean-editor { display: flex; align-items: center; gap: 9px; }
 .boolean-editor label { color: var(--vscode-foreground); cursor: pointer; }
-.boolean-editor .boolean-checkbox { cursor: pointer; }
+.boolean-editor .boolean-checkbox { cursor: pointer; pointer-events: auto; }
+.boolean-editor .boolean-checkbox:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 2px; }
 .draft-save { align-self: start; }
 .property-editors + details { margin-top: 12px; }
