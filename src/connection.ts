@@ -86,7 +86,7 @@ export class Connection {
         });
         this.child = child;
         const response = await child.request("initialize", {
-          apiVersion: API_VERSION, client: { name: "eska-explorer", version: this.version }, locale: target.locale,
+          apiVersion: API_VERSION, client: { name: "eska-explorer", version: this.version }, locale: target.locale, allowPropertyEdits: true,
         }, 10_000);
         const version = parseHandshake(response);
         negotiated = true;

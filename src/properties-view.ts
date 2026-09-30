@@ -1,3 +1,6 @@
+import { resolve } from "node:path";
+import { nativePath } from "./source.js";
+import { editingSchema, fieldId, propertyChange, type EditingView, type PropertyChange } from "./property-editing.js";
 import * as vscode from "vscode";
 import { message } from "./messages.js";
 import { ExplorerError, isRecord } from "./protocol.js";
@@ -21,6 +24,7 @@ interface ViewState {
   language: Language;
   icons: Record<string, Record<string, string>>;
   picture: PicturePreview | { status: "loading" } | undefined;
+  editing: EditingView;
   properties: Pick<PropertyChoice, "index" | "label" | "key" | "caption" | "qualifiers" | "value" | "description" | "presentation">[];
 }
 
@@ -36,6 +40,11 @@ class PropertyTab implements vscode.Disposable {
   private version = "";
   private controller: AbortController | undefined;
   private state: ViewState;
+  private editor: EditingView = { unlocked: false, busy: false, blocked: false, schema: undefined, drafts: {} };
+  private readonly pendingEdits = new Map<string, PropertyChange>();
+  private pendingInvalidation = false;
+  private lockAfterSave = false;
+  private refreshing = false;
 
   constructor(private readonly context: vscode.ExtensionContext, private tree: MetadataTree, private entry: TreeEntry,
     private readonly language: () => Language, private readonly currentTree: () => MetadataTree | undefined,
@@ -63,7 +72,7 @@ class PropertyTab implements vscode.Disposable {
     this.tree = tree;
     this.entry = entry;
     // Start before reveal: its visibility event must not schedule a second read.
-    const loading = this.load();
+    const loading = this.editor.unlocked || Object.keys(this.editor.drafts).length ? Promise.resolve() : this.load();
     this.panel.reveal(this.panel.viewColumn);
     await loading;
   }
@@ -76,6 +85,12 @@ class PropertyTab implements vscode.Disposable {
       let cursor: TreeEntry | undefined = this.entry;
       while (cursor && !entries.includes(cursor)) cursor = tree.parent(cursor);
       if (!cursor) return;
+    }
+    if (this.refreshing) return;
+    if (this.editor.busy) { this.pendingInvalidation = true; return; }
+    if (this.editor.unlocked || Object.keys(this.editor.drafts).length) {
+      void this.checkExternalChange();
+      return;
     }
     this.dirty = true;
     this.controller?.abort();
@@ -98,7 +113,7 @@ class PropertyTab implements vscode.Disposable {
 
   /** Read only this object's properties and ignore requests superseded by refresh or disposal. */
   async load(): Promise<void> {
-    if (this.disposed) return;
+    if (this.disposed || this.editor.busy) return;
     this.dirty = false;
     this.version = this.projectVersion();
     this.controller?.abort();
@@ -113,17 +128,32 @@ class PropertyTab implements vscode.Disposable {
     try {
       if (tree !== this.currentTree() || entry.project.nodes.get(nodeKey(entry.node.id)) !== entry
         || entry.node.id.kind !== "object") throw new ExplorerError("obsolete");
+      if (this.editor.unlocked) {
+        this.editor.schema = editingSchema(await tree.request(entry.project, "metadata/propertyEditing", { objectId: entry.node.id.objectId }, controller.signal));
+        if (controller.signal.aborted || this.disposed || revision !== this.revision) return;
+      }
       const result = await tree.request(entry.project, "metadata/properties", { objectId: entry.node.id.objectId }, controller.signal);
       if (controller.signal.aborted || this.disposed || revision !== this.revision) return;
       if (tree !== this.currentTree() || entry.project.nodes.get(nodeKey(entry.node.id)) !== entry) throw new ExplorerError("obsolete");
+      if (this.editor.unlocked) {
+        this.editor.blocked = false;
+        this.pendingEdits.clear();
+      }
       this.choices = propertyChoices(result, vscode.env.language);
       this.picture = picturePreview(result.picture);
+      this.editor.blocked = false;
       this.updateTitle();
       this.state = this.makeState("ready", "");
       this.publish();
     } catch (error) {
       if (controller.signal.aborted || this.disposed || revision !== this.revision) return;
       const failure = error instanceof ExplorerError ? error : new ExplorerError("requestFailed");
+      if (this.editor.unlocked && this.choices.length) {
+        this.editor.blocked = true;
+        this.state = this.makeState("ready", message(vscode.env.language, "propertyConflict"));
+        this.publish();
+        return;
+      }
       this.choices = [];
       this.updateTitle();
       this.state = this.makeState(failure.code === "obsolete" ? "stale" : "error", message(vscode.env.language,
@@ -134,6 +164,9 @@ class PropertyTab implements vscode.Disposable {
 
   /** Connection replacement leaves the tab visible but prevents stale XML navigation. */
   stale(): void {
+    this.editor.unlocked = false;
+    this.editor.blocked = true;
+    this.pendingEdits.clear();
     this.controller?.abort();
     this.dirty = false;
     this.revision++;
@@ -158,15 +191,174 @@ class PropertyTab implements vscode.Disposable {
       this.ready = true;
       this.publish();
     } else if (input.type === "refresh") {
-      await this.load();
+      await this.refresh();
+    } else if (["toggleLock", "draft", "commit", "cancelDraft", "pickType", "undo", "redo"].includes(String(input.type))) {
+      await this.edit(input);
     } else if (input.type === "openReference" && typeof input.target === "string"
-      && input.revision === this.state.revision && this.state.status === "ready"
+      && input.revision === this.state.revision && this.state.status === "ready" && !this.editor.blocked
       && this.tree === this.currentTree() && referenceTargets(this.choices).has(input.target)) {
       await this.followReference(input.target);
     } else if (input.type === "openXml" && input.revision === this.state.revision && Number.isSafeInteger(input.index)) {
       const choice = this.choices[input.index as number];
-      if (choice && this.state.status === "ready" && this.tree === this.currentTree()) {
+      if (choice && this.state.status === "ready" && !this.editor.blocked && this.tree === this.currentTree()) {
         await this.openXml(this.entry, choice);
+      }
+    }
+  }
+
+  /** Explicit reread bypasses a stale descriptor cache even before its watcher event arrives. */
+  private async refresh(): Promise<void> {
+    if (this.editor.busy || this.refreshing) return;
+    this.refreshing = true;
+    this.editorNotice("propertyLoading");
+    try {
+      if (this.editor.unlocked || this.editor.blocked) {
+        await this.tree.request(this.entry.project, "metadata/refresh", { node: this.entry.node.id });
+      }
+      await this.load();
+    } catch {
+      this.blockEditing("propertyConflict");
+    } finally {
+      this.refreshing = false;
+      this.state = this.makeState(this.state.status, this.state.notice);
+      this.publish();
+    }
+  }
+
+  /** Read external changes without discarding drafts or mistaking our own watcher event for a conflict. */
+  private async checkExternalChange(): Promise<void> {
+    const expected = this.editor.schema?.snapshot;
+    if (!expected || this.entry.node.id.kind !== "object") return;
+    try {
+      const result = editingSchema(await this.tree.request(this.entry.project, "metadata/propertyEditing", { objectId: this.entry.node.id.objectId }));
+      if (this.disposed || expected !== this.editor.schema?.snapshot) return;
+      if (result.snapshot !== expected || !result.writable) this.blockEditing("propertyConflict");
+    } catch { if (!this.disposed) this.blockEditing("propertyConflict"); }
+  }
+
+  /** Keep the displayed snapshot and draft values intact until an explicit reread. */
+  private blockEditing(key: "propertyConflict" | "propertyWriteUnknown"): void {
+    this.editor.blocked = true;
+    this.pendingEdits.clear();
+    this.editorNotice(key);
+  }
+
+  /** Editing status updates reuse the current values rather than starting another source load. */
+  private editorNotice(key: Parameters<typeof message>[1]): void {
+    this.state = this.makeState(this.state.status, message(vscode.env.language, key));
+    this.publish();
+  }
+
+  /** Bind every proposal to the advertised field and displayed revision before queuing it. */
+  private async edit(input: Record<string, unknown>): Promise<void> {
+    if (this.refreshing || input.revision !== this.revision || this.state.status !== "ready" || this.tree !== this.currentTree()
+      || this.entry.node.id.kind !== "object") return;
+    if (input.type === "toggleLock") {
+      if (this.editor.busy) { this.lockAfterSave = true; return; }
+      if (this.editor.unlocked) {
+        this.editor.unlocked = false;
+        this.editorNotice("propertyReadOnly");
+        return;
+      }
+      try {
+        const revision = this.revision;
+        const result = await this.tree.request(this.entry.project, "metadata/propertyEditing", { objectId: this.entry.node.id.objectId });
+        if (revision !== this.revision || this.disposed) return;
+        this.editor.schema = editingSchema(result);
+        if (!this.editor.schema.writable || !this.editor.schema.fields.length || !vscode.workspace.isTrusted) { this.editorNotice("propertyLocked"); return; }
+        this.editor.unlocked = true;
+        this.editor.blocked = false;
+        this.editorNotice("propertyEditingHint");
+      } catch { this.editorNotice("propertyLocked"); }
+      return;
+    }
+    if (!this.editor.unlocked || !this.editor.schema) return;
+    if (input.type === "undo" || input.type === "redo") {
+      if (Object.keys(this.editor.drafts).length) { this.editorNotice("propertyDraftsFirst"); return; }
+      await this.writeEdit(undefined, undefined, input.type);
+      return;
+    }
+    const field = this.editor.schema.fields[Number(input.field)];
+    if (!Number.isSafeInteger(input.field) || !field) return;
+    const id = fieldId(field.path);
+    if (input.type === "cancelDraft") {
+      delete this.editor.drafts[id];
+      this.pendingEdits.delete(id);
+      this.state = this.makeState(this.state.status, this.state.notice);
+      this.publish();
+      return;
+    }
+    if (input.type === "pickType") {
+      if (this.editor.busy || this.editor.blocked || field.schema.kind !== "dataType") return;
+      try {
+        const revision = this.revision;
+        const result = await this.tree.request(this.entry.project, "metadata/propertyTypeChoices", { objectId: this.entry.node.id.objectId, path: field.path });
+        const options = Array.isArray(result.choices) ? result.choices.filter(isRecord).filter(item => isRecord(item.key) && isRecord(item.caption)) : [];
+        const selected = await vscode.window.showQuickPick(options.map(item => ({
+          label: String((item.caption as Record<string, unknown>)[this.language()] ?? ""),
+          description: item.metadataKind ? String((item.key as Record<string, unknown>).name).split(".").slice(1).join(".") : "", item,
+        })), { title: message(vscode.env.language, "propertyChangeType"), matchOnDescription: true });
+        if (!selected || revision !== this.revision || this.disposed) return;
+        const change = { kind: "dataType", key: selected.item.key } as PropertyChange;
+        this.editor.drafts[id] = change;
+        await this.writeEdit(id, change);
+      } catch { this.editorNotice("requestFailed"); }
+      return;
+    }
+    const change = propertyChange(input.change, field);
+    if (!change) return;
+    if (change.kind === "text" && change.value === field.value) delete this.editor.drafts[id];
+    else this.editor.drafts[id] = change;
+    // The host retains every draft, including when VS Code destroys a hidden webview.
+    this.state = this.makeState(this.state.status, this.state.notice);
+    if (input.type === "commit" && this.editor.drafts[id]) {
+      if (this.editor.busy) this.pendingEdits.set(id, change);
+      else await this.writeEdit(id, change);
+    }
+  }
+
+  /** Never overwrite a dirty text editor; writes execute once and require an exact backend snapshot. */
+  private async writeEdit(id?: string, change?: PropertyChange, direction?: "undo" | "redo"): Promise<void> {
+    const schema = this.editor.schema;
+    if (!schema || !schema.writable || this.editor.busy || this.editor.blocked || !this.editor.unlocked
+      || this.entry.node.id.kind !== "object" || !vscode.workspace.isTrusted) return;
+    const field = schema.fields.find(field => fieldId(field.path) === id);
+    if (!direction && (!field || !change)) return;
+    const path = resolve(nativePath(this.entry.project.info.sourcePath), nativePath(schema.source));
+    if (vscode.workspace.textDocuments.some(document => document.isDirty && resolve(document.uri.fsPath) === path)) {
+      this.editorNotice("propertyDirtyXml"); return;
+    }
+    this.editor.busy = true;
+    this.editorNotice("propertySaving");
+    try {
+      const result = await this.tree.request(this.entry.project, direction ? "metadata/undoProperty" : "metadata/updateProperty", {
+        objectId: this.entry.node.id.objectId, snapshot: schema.snapshot,
+        ...(direction ? { direction } : { path: field?.path, change }),
+      });
+      if (this.disposed || this.tree !== this.currentTree()) return;
+      this.editor.schema = editingSchema(result.editing);
+      if (id && JSON.stringify(this.editor.drafts[id]) === JSON.stringify(change)) delete this.editor.drafts[id];
+      this.choices = propertyChoices(result, vscode.env.language);
+      this.picture = picturePreview(result.picture);
+      this.revision++;
+      this.updateTitle();
+      this.editorNotice("propertySaved");
+    } catch (error) {
+      if (this.disposed) return;
+      const domain = error instanceof ExplorerError ? error.domain : undefined;
+      if (domain === "property_invalid") this.editorNotice("propertyInvalid");
+      else if (domain === "property_unsupported" || domain === "property_read_only") this.editorNotice("propertyLocked");
+      else this.blockEditing(domain === "property_conflict" || domain === "stale_generation" ? "propertyConflict" : "propertyWriteUnknown");
+      this.pendingEdits.clear();
+    } finally {
+      this.editor.busy = false;
+      if (this.lockAfterSave) { this.lockAfterSave = false; this.editor.unlocked = false; this.pendingEdits.clear(); }
+      if (!this.disposed) {
+        this.state = this.makeState(this.state.status, this.state.notice);
+        this.publish();
+        if (this.pendingInvalidation) { this.pendingInvalidation = false; await this.checkExternalChange(); }
+        const next = this.pendingEdits.entries().next().value;
+        if (next && !this.editor.blocked) { this.pendingEdits.delete(next[0]); await this.writeEdit(...next); }
       }
     }
   }
@@ -212,11 +404,15 @@ class PropertyTab implements vscode.Disposable {
     const text = (key: Parameters<typeof message>[1], ...values: string[]): string => message(vscode.env.language, key, ...values);
     return {
       type: "state", revision: this.revision, title: heading.title, path: heading.path, status, notice,
-      language: this.language(),
+      language: this.language(), editing: { ...this.editor, busy: this.editor.busy || this.refreshing, drafts: { ...this.editor.drafts } },
       icons: this.icons(),
       picture: status === "ready" ? this.picture
         : status === "loading" && this.entry.node.metadataKind === "common-picture" ? { status: "loading" } : undefined,
       labels: {
+        unlock: text("propertyUnlock"), lock: text("propertyLock"), editing: text("propertyEditing"),
+        undo: text("propertyUndo"), redo: text("propertyRedo"), apply: text("propertyApply"),
+        changeType: text("propertyChangeType"), unchanged: text("propertyOtherValues"),
+        notEditable: text("propertyNotEditable"), saved: text("propertySaved"),
         properties: text("properties"), search: text("propertySearch"), refresh: text("propertyRefresh"),
         openXml: text("openXml"), empty: text("propertyEmpty"), noMatches: text("propertyNoMatches"),
         readOnly: text("propertyReadOnly"), fields: text("propertyFields", "{0}"),
@@ -253,7 +449,7 @@ class PropertyTab implements vscode.Disposable {
       <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data: ${webview.cspSource}; style-src ${webview.cspSource}; script-src ${webview.cspSource};">
       <link rel="stylesheet" href="${css}"><title>ESKA Properties</title></head>
       <body><main class="page"><header class="heading"><div id="breadcrumb" class="breadcrumb"></div>
-      <div class="title-row"><h1 id="title"></h1><span id="read-only" class="badge"></span></div></header>
+      <div class="title-row"><h1 id="title"></h1><button id="read-only" class="badge lock-button" type="button"></button><button id="undo" class="history-button" type="button" hidden></button><button id="redo" class="history-button" type="button" hidden></button></div></header>
       <div class="toolbar"><label class="visually-hidden" for="search"></label>
       <input id="search" type="search" autocomplete="off"><button id="refresh" type="button"></button></div>
       <figure id="picture-preview" class="picture-preview" hidden><div class="picture-frame" id="picture-frame">

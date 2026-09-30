@@ -185,3 +185,25 @@ button:focus-visible, summary:focus-visible { outline: 1px solid var(--vscode-fo
 .icon-dark { display: block; }
 .vscode-light .icon-dark, .vscode-high-contrast .icon-dark, .vscode-high-contrast-light .icon-dark { display: none; }
 .vscode-light .icon-light, .vscode-high-contrast .icon-contrast, .vscode-high-contrast-light .icon-contrast-light { display: block; }
+
+/* Editing controls follow native Settings spacing and theme colors. */
+.lock-button { background: transparent; cursor: pointer; }
+.lock-button[aria-pressed="true"] { color: var(--vscode-foreground); border-color: var(--vscode-focusBorder); }
+.history-button, .draft-save { color: var(--vscode-button-secondaryForeground); background: var(--vscode-button-secondaryBackground);
+  border: 0; border-radius: 3px; padding: 5px 9px; }
+.history-button { margin-top: 8px; }
+button:disabled { cursor: default; opacity: .6; }
+.property-editors { display: grid; gap: 14px; margin-top: 2px; }
+.property-editor { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 5px 10px; max-width: 700px; }
+.property-editor > label { grid-column: 1 / -1; color: var(--vscode-descriptionForeground); }
+.property-input { grid-column: 1; width: 100%; min-width: 0; min-height: 30px; padding: 5px 8px; font: inherit;
+  color: var(--vscode-input-foreground); background: var(--vscode-input-background);
+  border: 1px solid var(--vscode-input-border, var(--vscode-settings-textInputBorder, transparent)); border-radius: 2px; }
+.property-input:focus { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
+textarea.property-input { resize: vertical; line-height: 1.5; }
+button.property-input { text-align: start; }
+.property-editor.boolean-editor { display: flex; align-items: center; gap: 9px; }
+.boolean-editor label { color: var(--vscode-foreground); cursor: pointer; }
+.boolean-editor .boolean-checkbox { cursor: pointer; }
+.draft-save { align-self: start; }
+.property-editors + details { margin-top: 12px; }

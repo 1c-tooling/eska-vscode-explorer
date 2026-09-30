@@ -152,7 +152,8 @@ export class MetadataTree {
 
   /** Read requests may retry after an intervening change, but never loop indefinitely. */
   async request(project: ProjectTree, method: string, params: Record<string, unknown> = {}, signal?: AbortSignal): Promise<Record<string, unknown>> {
-    for (let attempt = 0; attempt < 3; attempt++) {
+    const mutation = method === "metadata/updateProperty" || method === "metadata/undoProperty";
+    for (let attempt = 0; attempt < (mutation ? 1 : 3); attempt++) {
       if (signal?.aborted) throw new ExplorerError("cancelled");
       if (this.disposed) throw new ExplorerError("obsolete");
       if (project.info.requiresReopen) throw new ExplorerError("obsolete");
@@ -165,7 +166,10 @@ export class MetadataTree {
         if (!isRecord(result) || result.sessionId !== this.session.sessionId || result.projectId !== project.info.projectId
           || !isToken(result.generation) || !isToken(result.eventSequence)) throw new ExplorerError("protocolInvalid");
         if (BigInt(result.generation) < BigInt(project.info.generation)
-          || BigInt(result.eventSequence) < BigInt(project.info.eventSequence)) continue;
+          || BigInt(result.eventSequence) < BigInt(project.info.eventSequence)) {
+          if (mutation) return result; // The acknowledged write must never be replayed.
+          continue;
+        }
         if (result.generation !== project.info.generation || result.eventSequence !== project.info.eventSequence) {
           // Missing an invalidation is a resync condition, never permission to reuse cached branches.
           await this.synchronize(project);
@@ -174,6 +178,7 @@ export class MetadataTree {
         }
         return result;
       } catch (error) {
+        if (mutation) throw error;
         if (error instanceof ExplorerError && error.domain === "stale_generation") {
           // An ordered event already invalidated this snapshot; retry without triggering another refresh.
           if (generation !== project.info.generation && !project.info.requiresRefresh && !project.info.requiresReopen) continue;

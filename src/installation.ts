@@ -72,7 +72,7 @@ export async function inspectGlobal(log: DiagnosticLog, signal?: AbortSignal): P
   if (compareVersions(version, MIN_CLI_VERSION) < 0) return result;
   const child = new BackendProcess({ executable: path, cwd: homedir(), log, failed() {}, ...(signal ? { signal } : {}) });
   try {
-    const hello = await child.request("initialize", { apiVersion: API_VERSION, client: { name: "eska-explorer", version: "probe" }, locale: "en-US" }, 10_000);
+    const hello = await child.request("initialize", { apiVersion: API_VERSION, client: { name: "eska-explorer", version: "probe" }, locale: "en-US", allowPropertyEdits: true }, 10_000);
     parseHandshake(hello);
     result.compatible = true;
     result.selfUpdate = isRecord(hello) && isRecord(hello.capabilities) && hello.capabilities.selfUpdate === true;

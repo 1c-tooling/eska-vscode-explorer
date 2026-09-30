@@ -1,3 +1,4 @@
+import { editableFields, editorView } from "./editing.mjs";
 import { presentationView } from "./presentation.mjs";
 import { createPictureView } from "./picture.mjs";
 import { booleanValue, checklistEntry, childrenWithPaths, identity, isCollection, localizedEntries, searchable, summary, translated } from "./model.mjs";
@@ -11,6 +12,7 @@ const refresh = document.getElementById("refresh");
 const saved = vscode.getState();
 const expanded = new Map(Object.entries(saved?.expanded ?? {}).filter(([, value]) => typeof value === "boolean"));
 let snapshot;
+let rememberedFocus;
 const pictureView = createPictureView(document);
 search.value = saved?.query ?? "";
 
@@ -19,12 +21,35 @@ function saveState() {
   vscode.setState({ query: search.value, expanded: Object.fromEntries(expanded) });
 }
 search.addEventListener("input", () => { saveState(); render(); });
+document.getElementById("read-only").addEventListener("click", () => vscode.postMessage({ type: "toggleLock", revision: snapshot.revision }));
+for (const type of ["undo", "redo"]) document.getElementById(type).addEventListener("click", () => vscode.postMessage({ type, revision: snapshot.revision }));
+window.addEventListener("keydown", event => {
+  if (!snapshot?.editing?.unlocked || !(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== "z") return;
+  const focused = document.activeElement;
+  if (focused?.dataset.editId && snapshot.editing.drafts[focused.dataset.editId]) return;
+  if (focused === search) return;
+  event.preventDefault();
+  vscode.postMessage({ type: event.shiftKey ? "redo" : "undo", revision: snapshot.revision });
+});
 refresh.addEventListener("click", () => vscode.postMessage({ type: "refresh" }));
 window.addEventListener("message", event => {
   if (event.data?.type !== "state") return;
+  const active = document.activeElement;
+  if (active?.dataset.editId) rememberedFocus = { id: active.dataset.editId, start: active.selectionStart, end: active.selectionEnd };
+  else if (active !== document.body && !snapshot?.editing?.busy) rememberedFocus = undefined;
+  const focus = rememberedFocus;
+  const scroll = window.scrollY;
   snapshot = event.data;
   pictureView.render(snapshot);
   render();
+  if (focus) {
+    const control = [...document.querySelectorAll("[data-edit-id]")].find(node => node.dataset.editId === focus.id);
+    if (control && !control.disabled) {
+      control.focus({ preventScroll: true });
+      if (typeof focus.start === "number" && ["text", "textarea"].includes(control.type)) control.setSelectionRange(focus.start, focus.end);
+    }
+  }
+  window.scrollTo(0, scroll);
 });
 
 /** Workspace strings always become text nodes, never HTML. */
@@ -182,15 +207,30 @@ function valueView(field, path, query, depth = 0) {
 function propertyView(property, path, query) {
   const revision = snapshot.revision;
   const card = element("article", "property");
-  const checked = booleanValue(property.value);
+  const editors = editableFields(property, snapshot.editing);
+  const directBoolean = editors.length === 1 && editors[0].field.path.length === 1 && editors[0].field.schema.kind === "boolean";
+  const checked = editors.length ? undefined : booleanValue(property.value);
   if (checked !== undefined) card.classList.add("boolean-property");
   const head = element("div", "property-head");
   const button = element("button", "source-button", snapshot.labels.openXml);
   button.type = "button";
   button.addEventListener("click", () => vscode.postMessage({ type: "openXml", revision, index: property.index }));
-  head.append(propertyName("h2", "property-name", property), button);
+  const title = editors.length ? element("h2", "property-name", translated(property, snapshot.language, property.key.name)) : propertyName("h2", "property-name", property);
+  if (directBoolean) {
+    title.textContent = "";
+    title.append(editorView(document, property, editors, snapshot, input => vscode.postMessage(input)));
+    card.classList.add("boolean-property");
+  }
+  head.append(title, button);
   card.append(head);
-  if (checked === undefined) card.append(valueView(property, path, childQuery(property, query)));
+  if (editors.length && !directBoolean) {
+    card.append(editorView(document, property, editors, snapshot, input => vscode.postMessage(input)));
+    if (property.value.kind === "record") {
+      const original = disclosure(`${path}/readonly`, element("span", "", snapshot.labels.unchanged));
+      original.append(valueView(property, path, childQuery(property, query)));
+      card.append(original);
+    }
+  } else if (!directBoolean && checked === undefined) card.append(valueView(property, path, childQuery(property, query)));
   return card;
 }
 
@@ -200,7 +240,20 @@ function render() {
   const labels = snapshot.labels;
   document.getElementById("breadcrumb").textContent = snapshot.path;
   document.getElementById("title").textContent = snapshot.title;
-  document.getElementById("read-only").textContent = labels.readOnly;
+  const editing = snapshot.editing ?? {};
+  const lock = document.getElementById("read-only");
+  lock.textContent = `${editing.unlocked ? "🔓" : "🔒"} ${editing.unlocked ? labels.editing : labels.readOnly}`;
+  lock.title = editing.unlocked ? labels.lock : labels.unlock;
+  lock.setAttribute("aria-label", lock.title);
+  lock.setAttribute("aria-pressed", String(Boolean(editing.unlocked)));
+  lock.disabled = snapshot.status !== "ready" || editing.busy;
+  for (const type of ["undo", "redo"]) {
+    const button = document.getElementById(type);
+    button.hidden = !editing.unlocked;
+    button.textContent = labels[type];
+    button.disabled = editing.busy || editing.blocked || !editing.schema?.[type];
+  }
+  refresh.disabled = Boolean(editing.busy);
   items.setAttribute("aria-label", labels.properties);
   search.placeholder = labels.search;
   search.setAttribute("aria-label", labels.search);

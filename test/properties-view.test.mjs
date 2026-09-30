@@ -9,6 +9,7 @@ import { nodeKey } from "../out/tree.js";
 function fixture(t) {
   const requests = [], opened = [];
   const vscode = {
+    workspace: { isTrusted: true, textDocuments: [] },
     env: { language: "ru-RU" }, ViewColumn: { Active: -1 },
     Uri: { joinPath: (...parts) => parts.join("/") },
     window: { createWebviewPanel: () => {
@@ -28,7 +29,7 @@ function fixture(t) {
   const adapter = { exports: {} };
   runInNewContext(`(function(require,module,exports){${readFileSync(new URL("../out/properties-view.js", import.meta.url), "utf8")}\n})`, { AbortController })(
     name => name === "vscode" ? vscode : require(name), adapter, adapter.exports);
-  const project = { key: "project", nodes: new Map(), info: { generation: "1", eventSequence: "0", scope: { kind: "standalone" }, type: "configuration" } };
+  const project = { key: "project", nodes: new Map(), info: { generation: "1", eventSequence: "0", scope: { kind: "standalone" }, type: "configuration", sourcePath: { value: "/project/src", encoding: "utf-8" } } };
   const tree = {
     connection: {},
     parent: entry => entry.node.parent ? project.nodes.get(nodeKey(entry.node.parent)) : undefined,
@@ -234,4 +235,81 @@ test("reference captions reload when a target changes and late navigation cannot
   assert.equal(f.tabs.tabs.size, 1);
   f.requests[2].resolve(linkedResponse());
   await settle();
+});
+
+/** The schema's paths, snapshot and writable flag come from the backend, not webview input. */
+function editable(value = "before", snapshot = "a".repeat(64)) {
+  return { snapshot, source: { value: "Configuration.xml", encoding: "utf-8" }, writable: true, undo: false, redo: false,
+    fields: [{ path: [{ key: { namespace: null, name: "Comment" }, occurrence: 0 }], value, language: null,
+      captions: [{ "ru-RU": "Комментарий", "en-US": "Comment" }], schema: { kind: "text" } }] };
+}
+
+/** Open locked, then explicitly unlock through the same message path as the webview. */
+async function openEditable(f) {
+  const opening = f.tabs.show(f.tree, f.object);
+  f.requests[0].resolve(response()); await opening;
+  const [tab] = f.tabs.tabs.values();
+  assert.equal(tab.state.editing.unlocked, false);
+  const unlock = tab.receive({ type: "toggleLock", revision: tab.state.revision });
+  f.requests[1].resolve(editable()); await unlock;
+  assert.equal(tab.state.editing.unlocked, true);
+  return tab;
+}
+
+test("edits keep drafts through external conflicts and never write while blocked", async t => {
+  const f = fixture(t), tab = await openEditable(f);
+  const change = { kind: "text", value: "mine" };
+  await tab.receive({ type: "draft", revision: tab.state.revision, field: 0, change });
+  f.change([f.object]);
+  assert.equal(f.requests[2].method, "metadata/propertyEditing");
+  f.requests[2].resolve(editable("external", "b".repeat(64))); await settle();
+  assert.equal(tab.state.editing.blocked, true);
+  assert.equal(Object.values(tab.state.editing.drafts)[0].value, "mine");
+  await tab.receive({ type: "commit", revision: tab.state.revision, field: 0, change });
+  assert.equal(f.requests.length, 3, "a conflict cannot trigger an automatic overwrite");
+  await tab.receive({ type: "openXml", revision: tab.state.revision, index: 0 });
+  assert.equal(f.opened.length, 0);
+  const reload = tab.receive({ type: "refresh" });
+  assert.equal(f.requests[3].method, "metadata/refresh", "explicit reread invalidates the stale backend cache");
+  f.requests[3].resolve({}); await settle();
+  assert.equal(f.requests[4].method, "metadata/propertyEditing");
+  f.requests[4].resolve(editable("external", "b".repeat(64))); await settle();
+  f.requests[5].resolve(response()); await reload;
+  assert.equal(tab.state.status, "ready");
+  assert.equal(tab.state.editing.blocked, false);
+  assert.equal(tab.state.editing.busy, false);
+  assert.equal(Object.values(tab.state.editing.drafts)[0].value, "mine");
+});
+
+test("successful autosave survives its own invalidation and keeps newer draft input", async t => {
+  const f = fixture(t), tab = await openEditable(f);
+  const revision = tab.state.revision;
+  const saving = tab.receive({ type: "commit", revision, field: 0, change: { kind: "text", value: "first" } });
+  assert.equal(f.requests[2].method, "metadata/updateProperty");
+  assert.equal(f.requests[2].params.snapshot, "a".repeat(64));
+  f.change([f.object]);
+  assert.equal(f.requests.length, 3);
+  await tab.receive({ type: "draft", revision, field: 0, change: { kind: "text", value: "second" } });
+  f.requests[2].resolve({ ...response(), editing: { ...editable("first", "b".repeat(64)), undo: true } });
+  await settle();
+  f.requests[3].resolve(editable("first", "b".repeat(64))); await saving;
+  assert.equal(tab.state.editing.blocked, false);
+  assert.equal(Object.values(tab.state.editing.drafts)[0].value, "second");
+  assert.equal(tab.state.editing.schema.undo, true);
+  await tab.receive({ type: "cancelDraft", revision: tab.state.revision, field: 0 });
+  assert.equal(Object.keys(tab.state.editing.drafts).length, 0);
+});
+
+test("unknown write outcomes preserve input; re-opening creates a locked tab", async t => {
+  const f = fixture(t), tab = await openEditable(f);
+  const saving = tab.receive({ type: "commit", revision: tab.state.revision, field: 0, change: { kind: "text", value: "keep" } });
+  f.requests[2].reject(new Error("connection ended after dispatch")); await saving;
+  assert.equal(f.requests.length, 3);
+  assert.equal(tab.state.editing.blocked, true);
+  assert.equal(Object.values(tab.state.editing.drafts)[0].value, "keep");
+  tab.dispose();
+  const opening = f.tabs.show(f.tree, f.object);
+  f.requests[3].resolve(response()); await opening;
+  const [reopened] = f.tabs.tabs.values();
+  assert.equal(reopened.state.editing.unlocked, false);
 });
