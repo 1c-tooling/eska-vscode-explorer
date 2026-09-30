@@ -10,7 +10,7 @@
   "restart": "Restart Connection",
   "disconnect": "Disconnect",
   "showLog": "Show Connection Log",
-  "executable": "Development backend override: executable name or absolute path without arguments. A compatible global ESKA is still required.",
+  "executable": "Development backend: executable name or absolute path without arguments. Compatibility is checked on the selected executable. The value eska uses the global installation.",
   "trust": "eska runs a local executable and requires a trusted workspace.",
   "virtual": "Explorer requires project files on the extension host filesystem.",
   "refresh": "Refresh metadata",

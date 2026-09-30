@@ -22,10 +22,11 @@ export class BackendSetup implements vscode.Disposable {
   /** Keep installation messages in the editor language rather than the metadata tree language. */
   private text(key: MessageKey, ...values: string[]): string { return message(vscode.env.language, key, ...values); }
 
-  /** A development override never removes the requirement for a compatible global CLI. */
-  async ensure(signal = this.lifetime.signal): Promise<string | undefined> {
+  /** Resolve the chosen backend; Connection validates overrides with its own handshake. */
+  async ensure(signal = this.lifetime.signal, configured = "eska"): Promise<string | undefined> {
     signal = AbortSignal.any([signal, this.lifetime.signal]);
-    if (this.busy || this.disposed) return undefined;
+    if (this.busy || this.disposed || signal.aborted) return undefined;
+    if (configured !== "eska") return configured;
     const cli = await this.track(inspectGlobal(this.log, signal));
     if (signal.aborted) return undefined;
     if (cli?.compatible) { return cli.path; }

@@ -7,6 +7,8 @@ import { createTreeProject } from "./fixture.mjs";
 const repository = fileURLToPath(new URL("../", import.meta.url));
 const binary = process.env.ESKA_TEST_BINARY;
 if (!binary || !isAbsolute(binary)) throw new Error("Set ESKA_TEST_BINARY to an absolute path to an IDE-enabled backend.");
+const globalBinary = process.env.ESKA_HOST_GLOBAL_BINARY ?? binary;
+if (!isAbsolute(globalBinary)) throw new Error("ESKA_HOST_GLOBAL_BINARY must be absolute.");
 const playground = process.env.ESKA_TEST_ROOT ?? resolve(repository, "../eska-playground");
 if (!isAbsolute(playground)) throw new Error("ESKA_TEST_ROOT must be absolute.");
 const root = await mkdtemp(join(playground, "explorer-host-"));
@@ -15,10 +17,12 @@ try {
   const bin = join(root, "bin");
   await mkdir(bin);
   const executableName = process.platform === "win32" ? "eska.exe" : "eska";
-  if (process.platform === "win32") await cp(binary, join(bin, executableName));
-  else await symlink(binary, join(bin, executableName));
+  if (process.platform === "win32") await cp(globalBinary, join(bin, executableName));
+  else await symlink(globalBinary, join(bin, executableName));
   await mkdir(join(fixture.root, ".vscode"), { recursive: true });
-  await writeFile(join(fixture.root, ".vscode/settings.json"), JSON.stringify({ "eska.explorer.checkForUpdates": false, ...(process.env.ESKA_HOST_SUPPORT_DISABLED ? { "eska.explorer.supportPolicy": false } : {}) }));
+  await writeFile(join(fixture.root, ".vscode/settings.json"), JSON.stringify({ "eska.explorer.checkForUpdates": false,
+    ...(process.env.ESKA_HOST_GLOBAL_BINARY ? { "eska.explorer.executable": binary } : {}),
+    ...(process.env.ESKA_HOST_SUPPORT_DISABLED ? { "eska.explorer.supportPolicy": false } : {}) }));
   const executable = process.env.VSCODE_EXECUTABLE ?? "code";
   let extensionPath = repository;
   if (process.env.ESKA_BSL_EXTENSION) {
