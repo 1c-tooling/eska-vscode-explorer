@@ -6,7 +6,7 @@ Explorer использует общую ESKA текущего пользова�
 всё выполняется на стороне workspace extension host.
 
 Для глобальной CLI проверяется версия не ниже 0.11.0. При подключении проверяются
-IDE API major 1, minor не ниже 6, Designer XML, capability `propertyEditing`,
+IDE API major 1, minor не ниже 7, Designer XML, capability `propertyEditing`,
 явное разрешение записи в handshake, отсутствие multi-context режима, поиск
 и уведомления о файлах, а также лимиты протокола. Неподдерживаемый backend
 не открывает проект. Самообновление — необязательная capability `selfUpdate`.

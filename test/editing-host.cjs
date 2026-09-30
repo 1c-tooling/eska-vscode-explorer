@@ -52,6 +52,11 @@ async function frame(tab) {
       if (result.exceptionDetails) throw new Error(JSON.stringify(result.exceptionDetails));
       return result.result?.value;
     },
+    /** Observe the native QuickPick outside the property iframe before sending keyboard commands. */
+    async workbench(expression) {
+      const result = await send('Runtime.evaluate', { expression, returnByValue: true });
+      return result.result?.value;
+    },
     /** Preserve visual evidence from the actual native editor window. */
     async screenshot(name) {
       if (!process.env.ESKA_SCREENSHOT_DIR) return;
@@ -67,8 +72,11 @@ exports.run = async function () {
   const fixture = JSON.parse(process.env.ESKA_HOST_FIXTURE);
   const file = path.join(fixture.source, 'Configuration.xml');
   let original = await fs.readFile(file, 'utf8');
-  original = original.replace('</Properties>', '<ScriptVariant>Russian</ScriptVariant><IncludeHelpInContents>false</IncludeHelpInContents></Properties>');
+  original = original.replace('</Properties>', '<ScriptVariant>Russian</ScriptVariant><IncludeHelpInContents>false</IncludeHelpInContents><DefaultReportForm/></Properties>')
+    .replace('</ChildObjects>', '<CommonForm>ReportSelectorProbe</CommonForm></ChildObjects>');
   await fs.writeFile(file, original);
+  await fs.mkdir(path.join(fixture.source, 'CommonForms'), { recursive: true });
+  await fs.writeFile(path.join(fixture.source, 'CommonForms/ReportSelectorProbe.xml'), '<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" version="2.20"><CommonForm uuid="11111111-1111-1111-1111-111111111111"><Properties><Name>ReportSelectorProbe</Name><FormType>Managed</FormType></Properties></CommonForm></MetaDataObject>');
   await fs.mkdir(path.join(fixture.source, 'Ext'), { recursive: true });
   await fs.writeFile(path.join(fixture.source, 'Ext/ParentConfigurations.bin'), '{6,0,0,0,0,0}');
   await vscode.workspace.getConfiguration('eska.explorer').update('executable', process.env.ESKA_TEST_BINARY, vscode.ConfigurationTarget.Workspace);
@@ -109,6 +117,17 @@ exports.run = async function () {
     await until(async () => !tab.state.editing.busy && (await fs.readFile(file, 'utf8')).includes('<IncludeHelpInContents>true'), 'checkbox label autosave');
     await dom.evaluate("window.dispatchEvent(new KeyboardEvent('keydown',{key:'z',ctrlKey:true,bubbles:true}))");
     await until(async () => !tab.state.editing.busy && (await fs.readFile(file, 'utf8')) === saved, 'checkbox label undo');
+    const referenceIndex = tab.state.editing.schema.fields.findIndex(field => field.path[0].key.name === 'DefaultReportForm');
+    await dom.evaluate(`document.getElementById('edit-${referenceIndex}').click()`);
+    await until(() => dom.workbench("Boolean(document.querySelector('.quick-input-widget:not([style*=\"display: none\"]) input'))"), 'native reference picker');
+    await dom.workbench("(()=>{const input=document.querySelector('.quick-input-widget input[type=text]');input.focus();input.value='ReportSelectorProbe';input.dispatchEvent(new Event('input',{bubbles:true}));})()");
+    await until(() => dom.workbench("(()=>{const rows=[...document.querySelectorAll('.quick-input-list .monaco-list-row')];return rows.length===1 && rows[0].textContent.includes('ReportSelectorProbe');})()"), 'filtered reference option')
+      .catch(async error => { throw new Error(`${error.message}: ${JSON.stringify(await dom.workbench("document.querySelector('.quick-input-widget')?.textContent"))}`); });
+    await vscode.commands.executeCommand('workbench.action.acceptSelectedQuickOpenItem');
+    await until(async () => !tab.state.editing.busy && (await fs.readFile(file, 'utf8')).includes('<DefaultReportForm>CommonForm.ReportSelectorProbe</DefaultReportForm>'), 'reference autosave');
+    assert.equal(await fs.readFile(file, 'utf8'), saved.replace('<DefaultReportForm/>', '<DefaultReportForm>CommonForm.ReportSelectorProbe</DefaultReportForm>'));
+    await dom.evaluate("window.dispatchEvent(new KeyboardEvent('keydown',{key:'z',ctrlKey:true,bubbles:true}))");
+    await until(async () => !tab.state.editing.busy && (await fs.readFile(file, 'utf8')) === saved, 'reference undo');
     await dom.screenshot('editing.png');
     await dom.evaluate(`(()=>{const input=${selector};input.value='Keep my draft';input.dispatchEvent(new Event('input'));})()`);
     await until(() => Object.keys(tab.state.editing.drafts).length === 1, 'host retains draft');

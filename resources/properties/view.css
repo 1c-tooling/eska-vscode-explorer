@@ -207,4 +207,5 @@ button.property-input { text-align: start; }
 .boolean-editor .boolean-checkbox { cursor: pointer; pointer-events: auto; }
 .boolean-editor .boolean-checkbox:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 2px; }
 .draft-save { align-self: start; }
+.draft-actions { display: flex; flex-wrap: wrap; gap: 5px; }
 .property-editors + details { margin-top: 12px; }

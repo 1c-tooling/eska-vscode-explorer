@@ -54,7 +54,7 @@ function fixture(t) {
     project.info.eventSequence = String(Number(project.info.eventSequence) + 1);
     tabs.changed(tree, entries);
   }
-  return { tabs, tree, root, object, sibling, requests, opened, change,
+  return { tabs, tree, root, object, sibling, requests, opened, change, vscode,
     replaceTree(value) { currentTree = value; } };
 }
 
@@ -245,16 +245,38 @@ function editable(value = "before", snapshot = "a".repeat(64)) {
 }
 
 /** Open locked, then explicitly unlock through the same message path as the webview. */
-async function openEditable(f) {
+async function openEditable(f, schema = editable()) {
   const opening = f.tabs.show(f.tree, f.object);
   f.requests[0].resolve(response()); await opening;
   const [tab] = f.tabs.tabs.values();
   assert.equal(tab.state.editing.unlocked, false);
   const unlock = tab.receive({ type: "toggleLock", revision: tab.state.revision });
-  f.requests[1].resolve(editable()); await unlock;
+  f.requests[1].resolve(schema); await unlock;
   assert.equal(tab.state.editing.unlocked, true);
   return tab;
 }
+
+/** Reference controls save the selected backend option, rejecting raw webview proposals. */
+test("reference picker uses backend choices and nullable clearing without accepting arbitrary strings", async t => {
+  const f = fixture(t), schema = editable("");
+  schema.fields[0].schema = {kind:"reference",domain:"CommonForm",nullable:true};
+  const tab = await openEditable(f, schema);
+  await tab.receive({type:"commit",revision:tab.state.revision,field:0,change:{kind:"text",value:"CommonForm.Injected"}});
+  assert.equal(f.requests.length,2);
+  f.vscode.window.showQuickPick = async options => {
+    assert.equal(options[0].value, "");
+    return options.find(option => option.value === "CommonForm.Report");
+  };
+  const picking = tab.receive({type:"pickReference",revision:tab.state.revision,field:0});
+  assert.equal(f.requests[2].method,"metadata/propertyReferenceChoices");
+  f.requests[2].resolve({choices:[{value:"CommonForm.Report",caption:{"ru-RU":"Общая форма · Отчет"}}]});
+  await settle();
+  assert.equal(f.requests[3].method,"metadata/updateProperty");
+  assert.equal(f.requests[3].params.change.value,"CommonForm.Report");
+  const next = {...schema,snapshot:"b".repeat(64),fields:[{...schema.fields[0],value:"CommonForm.Report"}]};
+  f.requests[3].resolve({...response(),editing:next}); await picking;
+  assert.equal(Object.keys(tab.state.editing.drafts).length,0);
+});
 
 test("edits keep drafts through external conflicts and never write while blocked", async t => {
   const f = fixture(t), tab = await openEditable(f);
@@ -279,6 +301,34 @@ test("edits keep drafts through external conflicts and never write while blocked
   assert.equal(tab.state.editing.blocked, false);
   assert.equal(tab.state.editing.busy, false);
   assert.equal(Object.values(tab.state.editing.drafts)[0].value, "mine");
+});
+
+/** A failed picker selection remains visible and can only be retried from the host's retained draft. */
+test("reference drafts keep captions across conflicts and require an explicit save after rereading", async t => {
+  const f = fixture(t), schema = editable("");
+  schema.fields[0].schema = { kind: "reference", domain: "CommonForm", nullable: true };
+  const tab = await openEditable(f, schema);
+  f.vscode.window.showQuickPick = async options => options.at(-1);
+  const picking = tab.receive({ type: "pickReference", revision: tab.state.revision, field: 0 });
+  f.requests[2].resolve({ choices: [{ value: "CommonForm.Report", caption: { "ru-RU": "Общая форма · Отчет" } }] });
+  await settle();
+  f.requests[3].reject(new Error("connection closed")); await picking;
+  assert.equal(Object.values(tab.state.editing.draftTitles)[0], "Общая форма · Отчет");
+  await tab.receive({ type: "applyDraft", revision: tab.state.revision, field: 0 });
+  assert.equal(f.requests.length, 4, "blocked drafts are not written");
+  const reload = tab.receive({ type: "refresh" });
+  f.requests[4].resolve({}); await settle();
+  f.requests[5].resolve({ ...schema, snapshot: "b".repeat(64) }); await settle();
+  f.requests[6].resolve(response()); await reload;
+  assert.equal(Object.values(tab.state.editing.draftTitles)[0], "Общая форма · Отчет");
+  assert.equal(f.requests.length, 7, "rereading never retries a write");
+  const saving = tab.receive({ type: "applyDraft", revision: tab.state.revision, field: 0,
+    change: { kind: "text", value: "CommonForm.Injected" } });
+  assert.equal(f.requests[7].params.change.value, "CommonForm.Report");
+  assert.equal(f.requests[7].params.snapshot, "b".repeat(64));
+  f.requests[7].resolve({ ...response(), editing: schema }); await saving;
+  assert.equal(Object.keys(tab.state.editing.draftTitles).length, 0);
+  assert.equal(Object.keys(tab.state.editing.drafts).length, 0);
 });
 
 test("successful autosave survives its own invalidation and keeps newer draft input", async t => {

@@ -40,7 +40,7 @@ class PropertyTab implements vscode.Disposable {
   private version = "";
   private controller: AbortController | undefined;
   private state: ViewState;
-  private editor: EditingView = { unlocked: false, busy: false, blocked: false, schema: undefined, drafts: {} };
+  private editor: EditingView = { unlocked: false, busy: false, blocked: false, schema: undefined, drafts: {}, draftTitles: {} };
   private readonly pendingEdits = new Map<string, PropertyChange>();
   private pendingInvalidation = false;
   private lockAfterSave = false;
@@ -192,7 +192,7 @@ class PropertyTab implements vscode.Disposable {
       this.publish();
     } else if (input.type === "refresh") {
       await this.refresh();
-    } else if (["toggleLock", "draft", "commit", "cancelDraft", "pickType", "undo", "redo"].includes(String(input.type))) {
+    } else if (["toggleLock", "draft", "commit", "applyDraft", "cancelDraft", "pickType", "pickReference", "undo", "redo"].includes(String(input.type))) {
       await this.edit(input);
     } else if (input.type === "openReference" && typeof input.target === "string"
       && input.revision === this.state.revision && this.state.status === "ready" && !this.editor.blocked
@@ -283,9 +283,15 @@ class PropertyTab implements vscode.Disposable {
     const id = fieldId(field.path);
     if (input.type === "cancelDraft") {
       delete this.editor.drafts[id];
+      delete this.editor.draftTitles[id];
       this.pendingEdits.delete(id);
       this.state = this.makeState(this.state.status, this.state.notice);
       this.publish();
+      return;
+    }
+    if (input.type === "applyDraft") {
+      const change = this.editor.drafts[id];
+      if (change) await this.writeEdit(id, change);
       return;
     }
     if (input.type === "pickType") {
@@ -301,6 +307,25 @@ class PropertyTab implements vscode.Disposable {
         if (!selected || revision !== this.revision || this.disposed) return;
         const change = { kind: "dataType", key: selected.item.key } as PropertyChange;
         this.editor.drafts[id] = change;
+        this.editor.draftTitles[id] = selected.label;
+        await this.writeEdit(id, change);
+      } catch { this.editorNotice("requestFailed"); }
+      return;
+    }
+    if (input.type === "pickReference") {
+      if (this.editor.busy || this.editor.blocked || field.schema.kind !== "reference") return;
+      try {
+        const revision = this.revision;
+        const result = await this.tree.request(this.entry.project, "metadata/propertyReferenceChoices", { objectId: this.entry.node.id.objectId, path: field.path });
+        const options = (Array.isArray(result.choices) ? result.choices : []).filter(isRecord)
+          .filter(item => typeof item.value === "string" && isRecord(item.caption))
+          .map(item => ({ label: String((item.caption as Record<string, unknown>)[this.language()] ?? item.value), value: item.value as string }));
+        if (field.schema.nullable) options.unshift({ label: message(vscode.env.language, "propertyUnset"), value: "" });
+        const selected = await vscode.window.showQuickPick(options, { title: message(vscode.env.language, "propertyChooseReference"), matchOnDescription: true });
+        if (!selected || revision !== this.revision || this.disposed) return;
+        const change: PropertyChange = { kind: "text", value: selected.value };
+        this.editor.drafts[id] = change;
+        this.editor.draftTitles[id] = selected.label;
         await this.writeEdit(id, change);
       } catch { this.editorNotice("requestFailed"); }
       return;
@@ -337,7 +362,10 @@ class PropertyTab implements vscode.Disposable {
       });
       if (this.disposed || this.tree !== this.currentTree()) return;
       this.editor.schema = editingSchema(result.editing);
-      if (id && JSON.stringify(this.editor.drafts[id]) === JSON.stringify(change)) delete this.editor.drafts[id];
+      if (id && JSON.stringify(this.editor.drafts[id]) === JSON.stringify(change)) {
+        delete this.editor.drafts[id];
+        delete this.editor.draftTitles[id];
+      }
       this.choices = propertyChoices(result, vscode.env.language);
       this.picture = picturePreview(result.picture);
       this.revision++;
@@ -404,14 +432,16 @@ class PropertyTab implements vscode.Disposable {
     const text = (key: Parameters<typeof message>[1], ...values: string[]): string => message(vscode.env.language, key, ...values);
     return {
       type: "state", revision: this.revision, title: heading.title, path: heading.path, status, notice,
-      language: this.language(), editing: { ...this.editor, busy: this.editor.busy || this.refreshing, drafts: { ...this.editor.drafts } },
+      language: this.language(), editing: { ...this.editor, busy: this.editor.busy || this.refreshing,
+        drafts: { ...this.editor.drafts }, draftTitles: { ...this.editor.draftTitles } },
       icons: this.icons(),
       picture: status === "ready" ? this.picture
         : status === "loading" && this.entry.node.metadataKind === "common-picture" ? { status: "loading" } : undefined,
       labels: {
         unlock: text("propertyUnlock"), lock: text("propertyLock"), editing: text("propertyEditing"),
-        undo: text("propertyUndo"), redo: text("propertyRedo"), apply: text("propertyApply"),
+        undo: text("propertyUndo"), redo: text("propertyRedo"), apply: text("propertyApply"), cancel: text("propertyCancel"),
         changeType: text("propertyChangeType"), unchanged: text("propertyOtherValues"),
+        chooseReference: text("propertyChooseReference"), unset: text("propertyUnset"),
         notEditable: text("propertyNotEditable"), saved: text("propertySaved"),
         properties: text("properties"), search: text("propertySearch"), refresh: text("propertyRefresh"),
         openXml: text("openXml"), empty: text("propertyEmpty"), noMatches: text("propertyNoMatches"),

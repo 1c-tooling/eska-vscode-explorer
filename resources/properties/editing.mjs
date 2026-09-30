@@ -37,13 +37,14 @@ export function editorView(document, property, fields, snapshot, post) {
     row.className = "property-editor";
     const label = document.createElement("label");
     const typeCount = fields.filter(item => item.field.schema.kind === "dataType").length;
-    const name = field.schema.kind === "dataType" ? (typeCount > 1 ? snapshot.labels.item.replace("{0}", String(field.path.at(-1).occurrence + 1)) : "")
+    const name = field.schema.kind === "reference" ? (fields.length > 1 ? snapshot.labels.item.replace("{0}", String(field.path.at(-1).occurrence + 1)) : "")
+      : field.schema.kind === "dataType" ? (typeCount > 1 ? snapshot.labels.item.replace("{0}", String(field.path.at(-1).occurrence + 1)) : "")
       : fields.length === 1 && (field.path.length === 1 || field.language) ? "" : fieldLabel(property, field, snapshot.language);
     label.textContent = name;
     const controlId = `edit-${index}`;
     label.htmlFor = controlId;
     const schema = field.schema;
-    const control = document.createElement(schema.kind === "enum" ? "select" : schema.kind === "dataType" ? "button"
+    const control = document.createElement(schema.kind === "enum" ? "select" : ["dataType", "reference"].includes(schema.kind) ? "button"
       : schema.kind === "text" && (value.includes("\n") || field.path.at(-1).key.name === "Comment") ? "textarea" : "input");
     control.id = controlId;
     control.dataset.editId = id;
@@ -51,11 +52,25 @@ export function editorView(document, property, fields, snapshot, post) {
     control.disabled = snapshot.editing.busy || snapshot.editing.blocked;
     control.setAttribute("aria-label", name || property.caption?.[snapshot.language] || property.key.name);
     const send = (type, change) => post({ type, revision: snapshot.revision, field: index, ...(change ? { change } : {}) });
-    if (schema.kind === "dataType") {
+    if (["dataType", "reference"].includes(schema.kind)) {
       control.type = "button";
-      control.textContent = `${field.caption?.[snapshot.language] ?? field.value} ▾`;
-      control.title = snapshot.labels.changeType;
-      control.addEventListener("click", () => send("pickType"));
+      control.textContent = `${snapshot.editing.draftTitles?.[id] ?? field.caption?.[snapshot.language] ?? (field.value || snapshot.labels.unset)} ▾`;
+      control.title = schema.kind === "reference" ? snapshot.labels.chooseReference : snapshot.labels.changeType;
+      control.addEventListener("click", () => send(schema.kind === "reference" ? "pickReference" : "pickType"));
+      if (draft) {
+        const actions = document.createElement("div");
+        actions.className = "draft-actions";
+        const apply = document.createElement("button");
+        apply.type = "button"; apply.className = "draft-save"; apply.textContent = snapshot.labels.apply;
+        apply.disabled = control.disabled;
+        apply.addEventListener("click", () => send("applyDraft"));
+        const cancel = document.createElement("button");
+        cancel.type = "button"; cancel.className = "draft-save"; cancel.textContent = snapshot.labels.cancel;
+        cancel.disabled = snapshot.editing.busy;
+        cancel.addEventListener("click", () => send("cancelDraft"));
+        actions.append(apply, cancel);
+        row.append(actions);
+      }
     } else {
       if (schema.kind === "boolean") { control.type = "checkbox"; control.checked = value === "true" || value === "1"; }
       else if (schema.kind === "enum") {
