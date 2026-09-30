@@ -390,7 +390,14 @@ class PropertyTab implements vscode.Disposable {
     } catch (error) {
       if (this.disposed) return;
       const domain = error instanceof ExplorerError ? error.domain : undefined;
-      if (domain === "property_invalid") this.editorNotice("propertyInvalid");
+      if (domain === "property_dependency") {
+        const property = error instanceof ExplorerError ? error.details?.property : undefined;
+        const choice = isRecord(property) ? this.choices.find(choice => choice.key.name === property.name
+          && choice.key.namespace === property.namespace) : undefined;
+        this.state = this.makeState(this.state.status, message(vscode.env.language, "propertyDependency",
+          choice?.caption?.[this.language()] ?? choice?.label ?? message(vscode.env.language, "properties")));
+        this.publish();
+      } else if (domain === "property_invalid") this.editorNotice("propertyInvalid");
       else if (domain === "property_unsupported" || domain === "property_read_only") this.editorNotice("propertyLocked");
       else this.blockEditing(domain === "property_conflict" || domain === "stale_generation" ? "propertyConflict" : "propertyWriteUnknown");
       this.pendingEdits.clear();

@@ -15,7 +15,7 @@ export type FailureCode =
 
 /** Only stable categories cross into the localized UI; raw protocol text stays private. */
 export class ExplorerError extends Error {
-  constructor(readonly code: FailureCode, readonly domain?: string) {
+  constructor(readonly code: FailureCode, readonly domain?: string, readonly details?: Record<string, unknown>) {
     super(code);
     this.name = "ExplorerError";
   }
@@ -119,5 +119,5 @@ export function responseError(value: Record<string, unknown>): ExplorerError {
     : kind === "source_missing" || kind === "unknown_node" || kind === "unknown_object" ? "sourceMissing"
     : kind === "xml_invalid" || kind === "source_invalid" ? "branchInvalid"
     : kind === "source_changed" ? "sourceChanged" : "requestFailed";
-  return new ExplorerError(code, kind);
+  return new ExplorerError(code, kind, isRecord(data) && isRecord(data.details) ? data.details : undefined);
 }

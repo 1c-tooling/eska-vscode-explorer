@@ -385,3 +385,21 @@ test("value input stays a draft after an external change and cannot bypass the h
   assert.match(Object.values(tab.state.editing.draftTitles)[0], /Keep input/);
   assert.equal(f.requests.length, 3, "accepting the dialog never overwrites a known conflict");
 });
+
+/** Domain rejection preserves the draft and leaves dependent controls available for explicit correction. */
+test("an incompatible type reports its dependent property without blocking the tab", async t => {
+  const f = fixture(t), schema = editable("old");
+  schema.fields[0].schema = { kind: "dataType", key: { namespace: "xs", name: "string" } };
+  const tab = await openEditable(f, schema);
+  f.vscode.window.showQuickPick = async options => options[0];
+  const picking = tab.receive({ type: "pickType", revision: tab.state.revision, field: 0 });
+  f.requests[2].resolve({ choices: [{ key: { namespace: "xs", name: "boolean" }, caption: { "ru-RU": "Булево" } }] });
+  await settle();
+  const { ExplorerError } = await import("../out/protocol.js");
+  f.requests[3].reject(new ExplorerError("requestFailed", "property_dependency", { property: { namespace: null, name: "Comment" } }));
+  await picking;
+  assert.equal(tab.state.editing.blocked, false);
+  assert.match(tab.state.notice, /Comment/);
+  assert.equal(Object.values(tab.state.editing.draftTitles)[0], "Булево");
+  assert.equal(f.requests.length, 4);
+});
