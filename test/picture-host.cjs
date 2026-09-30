@@ -1,0 +1,47 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs/promises');
+const path = require('node:path');
+const vscode = require('vscode');
+
+/** Exercise preview transport and refresh in an isolated native extension host. */
+exports.run = async function () {
+  const fixture = JSON.parse(process.env.ESKA_HOST_FIXTURE);
+  const { descriptor } = await import('./fixture.mjs');
+  const rootFile = path.join(fixture.source, 'Configuration.xml');
+  await fs.writeFile(rootFile, (await fs.readFile(rootFile, 'utf8')).replace('<ChildObjects>', '<ChildObjects><CommonPicture>Карта</CommonPicture>'));
+  const ext = path.join(fixture.source, 'CommonPictures', 'Карта', 'Ext');
+  await fs.mkdir(path.join(ext, 'Picture'), { recursive: true });
+  const properties = '<Synonym><v8:item xmlns:v8="http://v8.1c.ru/8.1/data/core"><v8:lang>ru</v8:lang><v8:content>Карта местности</v8:content></v8:item></Synonym><AvailabilityForChoice>true</AvailabilityForChoice>';
+  await fs.writeFile(path.join(fixture.source, 'CommonPictures', 'Карта.xml'), descriptor('CommonPicture', 'Карта', '', properties));
+  await fs.writeFile(path.join(ext, 'Picture.xml'), '<ExtPicture xmlns="http://v8.1c.ru/8.3/xcf/extrnprops" xmlns:xr="http://v8.1c.ru/8.3/xcf/readable"><Picture><xr:Abs>Picture.svg</xr:Abs></Picture></ExtPicture>');
+  const image = '<svg xmlns="http://www.w3.org/2000/svg" width="96" height="64" viewBox="0 0 96 64"><path fill="#3b82f6" d="M4 14 30 4 64 14 92 4v46L64 60 30 50 4 60z"/><path fill="#93c5fd" d="m30 4 34 10v46L30 50z"/><path fill="#ef4444" d="M48 4a14 14 0 0 0-14 14c0 10 14 26 14 26s14-16 14-26A14 14 0 0 0 48 4"/><circle cx="48" cy="18" r="5" fill="white"/></svg>';
+  const imageFile = path.join(ext, 'Picture', 'Picture.svg');
+  await fs.writeFile(imageFile, image);
+  await vscode.workspace.getConfiguration('eska.explorer').update('executable', process.env.ESKA_TEST_BINARY, vscode.ConfigurationTarget.Workspace);
+  await vscode.workspace.getConfiguration('eska.explorer').update('treeLanguage', 'ru-RU', vscode.ConfigurationTarget.Workspace);
+  const extension = vscode.extensions.all.find(value => value.packageJSON.name === 'eska-explorer');
+  const explorer = await extension.activate();
+  await vscode.commands.executeCommand('eska.explorer.connect');
+  const [root] = (await explorer.getChildren()).filter(entry => entry.node);
+  const common = (await explorer.getChildren(root)).find(entry => entry.node.id.collection?.kind === 'common');
+  const pictures = (await explorer.getChildren(common)).find(entry => entry.node.id.collection?.metadataKind === 'common-picture');
+  const [picture] = await explorer.getChildren(pictures);
+  await vscode.commands.executeCommand('eska.explorer.properties', picture);
+  const [tab] = explorer.propertiesTabs.tabs.values();
+  assert.equal(tab.state.picture.status, 'ready');
+  assert.equal(tab.state.picture.mimeType, 'image/svg+xml');
+  assert.equal(Buffer.from(tab.state.picture.data, 'base64').toString(), image);
+  if (process.env.ESKA_PICTURE_VISUAL_PROBE) await require(process.env.ESKA_PICTURE_VISUAL_PROBE).check(vscode, tab);
+  await fs.rm(imageFile);
+  await tab.receive({ type: 'refresh' });
+  assert.equal(tab.state.status, 'ready');
+  assert.equal(tab.state.picture.status, 'missing');
+  assert.ok(tab.state.properties.length > 0);
+  await fs.writeFile(imageFile, image.replace('96', '128'));
+  await tab.receive({ type: 'refresh' });
+  assert.equal(tab.state.picture.status, 'ready');
+  assert.notEqual(Buffer.from(tab.state.picture.data, 'base64').toString(), image);
+  await vscode.commands.executeCommand('eska.explorer.disconnect');
+  assert.equal(tab.state.picture, undefined);
+  await fs.writeFile(path.join(fixture.root, 'host-result.json'), JSON.stringify({ passed: true, suite: 'picture', vscode: vscode.version }));
+};

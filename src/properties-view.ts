@@ -2,6 +2,7 @@ import * as vscode from "vscode";
 import { message } from "./messages.js";
 import { ExplorerError, isRecord } from "./protocol.js";
 import { objectSynonym, propertyChoices, type PropertyChoice } from "./properties.js";
+import { picturePreview, type PicturePreview } from "./picture.js";
 import { nodeKey, type MetadataTree, type TreeEntry } from "./tree.js";
 
 type Language = "ru-RU" | "en-US";
@@ -15,6 +16,7 @@ interface ViewState {
   notice: string;
   labels: Record<string, string>;
   language: Language;
+  picture: PicturePreview | { status: "loading" } | undefined;
   properties: Pick<PropertyChoice, "index" | "label" | "key" | "caption" | "qualifiers" | "value" | "description">[];
 }
 
@@ -22,6 +24,7 @@ interface ViewState {
 class PropertyTab implements vscode.Disposable {
   readonly panel: vscode.WebviewPanel;
   private choices: PropertyChoice[] = [];
+  private picture: PicturePreview | undefined;
   private ready = false;
   private disposed = false;
   private revision = 0;
@@ -98,6 +101,7 @@ class PropertyTab implements vscode.Disposable {
     const revision = ++this.revision;
     const tree = this.tree;
     const entry = this.entry;
+    this.picture = undefined;
     this.state = this.makeState("loading", message(vscode.env.language, "propertyLoading"));
     this.publish();
     try {
@@ -107,6 +111,7 @@ class PropertyTab implements vscode.Disposable {
       if (controller.signal.aborted || this.disposed || revision !== this.revision) return;
       if (tree !== this.currentTree() || entry.project.nodes.get(nodeKey(entry.node.id)) !== entry) throw new ExplorerError("obsolete");
       this.choices = propertyChoices(result, vscode.env.language);
+      this.picture = picturePreview(result.picture);
       this.updateTitle();
       this.state = this.makeState("ready", "");
       this.publish();
@@ -127,6 +132,7 @@ class PropertyTab implements vscode.Disposable {
     this.dirty = false;
     this.revision++;
     this.choices = [];
+    this.picture = undefined;
     this.updateTitle();
     this.state = this.makeState("stale", message(vscode.env.language, "propertyStale"));
     this.publish();
@@ -182,6 +188,8 @@ class PropertyTab implements vscode.Disposable {
     return {
       type: "state", revision: this.revision, title: heading.title, path: heading.path, status, notice,
       language: this.language(),
+      picture: status === "ready" ? this.picture
+        : status === "loading" && this.entry.node.metadataKind === "common-picture" ? { status: "loading" } : undefined,
       labels: {
         properties: text("properties"), search: text("propertySearch"), refresh: text("propertyRefresh"),
         openXml: text("openXml"), empty: text("propertyEmpty"), noMatches: text("propertyNoMatches"),
@@ -189,6 +197,9 @@ class PropertyTab implements vscode.Disposable {
         xmlOnly: text("propertyXmlOnly"), count: text("propertyCount", "{0}"),
         items: text("propertyItems", "{0}"), item: text("propertyItem", "{0}"),
         enabled: text("propertyEnabled", "{0}", "{1}"),
+        picture: text("picturePreview"), pictureLoading: text("pictureLoading"), pictureMissing: text("pictureMissing"),
+        pictureUnsupported: text("pictureUnsupported"), pictureInvalid: text("pictureInvalid"),
+        pictureTooLarge: text("pictureTooLarge"), pictureUnavailable: text("pictureUnavailable"),
       },
       properties: this.choices.map(({ index, label, key, caption, qualifiers, value, description }) =>
         ({ index, label, key, ...(caption ? { caption } : {}), qualifiers, value, description })),
@@ -203,12 +214,15 @@ class PropertyTab implements vscode.Disposable {
     const lang = vscode.env.language.toLowerCase().startsWith("ru") ? "ru" : "en";
     return `<!doctype html><html lang="${lang}"><head><meta charset="utf-8">
       <meta name="viewport" content="width=device-width, initial-scale=1">
-      <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource}; script-src ${webview.cspSource};">
+      <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src ${webview.cspSource}; script-src ${webview.cspSource};">
       <link rel="stylesheet" href="${css}"><title>ESKA Properties</title></head>
       <body><main class="page"><header class="heading"><div id="breadcrumb" class="breadcrumb"></div>
       <div class="title-row"><h1 id="title"></h1><span id="read-only" class="badge"></span></div></header>
       <div class="toolbar"><label class="visually-hidden" for="search"></label>
       <input id="search" type="search" autocomplete="off"><button id="refresh" type="button"></button></div>
+      <figure id="picture-preview" class="picture-preview" hidden><div class="picture-frame" id="picture-frame">
+      <img id="picture-image" hidden><span id="picture-status" role="status"></span></div>
+      <figcaption id="picture-caption"></figcaption></figure>
       <p id="count" class="count" aria-live="polite"></p><p id="notice" class="notice" role="status"></p>
       <section id="items" class="items" aria-label="Properties"></section></main>
       <script type="module" src="${script}"></script></body></html>`;
