@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { propertyChoices, propertyFingerprint } from "../out/properties.js";
 import { parsePresentation, referenceTargets } from "../out/property-presentation.js";
 import { searchable } from "../resources/properties/model.mjs";
-import { presentationView, technicalText, hasTechnicalDetails } from "../resources/properties/presentation.mjs";
+import { presentationView } from "../resources/properties/presentation.mjs";
 
 const caption = { "ru-RU": "Организации", "en-US": "Companies" };
 const reference = { kind: "reference", caption, category: { "ru-RU": "Справочник", "en-US": "Catalog" },
@@ -37,9 +37,6 @@ test("search covers readable and technical values while source fingerprint ignor
   assert.equal(propertyFingerprint(value), propertyFingerprint(renamed));
   renamed.value.text = "Catalog.Other";
   assert.notEqual(propertyFingerprint(value), propertyFingerprint(renamed));
-  assert.ok(hasTechnicalDetails(value));
-  assert.match(technicalText(value), /Catalog.Companies/);
-  assert.match(technicalText(value), /http:\/\/v8.1c.ru/);
 });
 
 /** A small DOM records content and actions without executing workspace strings as markup. */

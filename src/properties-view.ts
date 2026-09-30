@@ -223,7 +223,7 @@ class PropertyTab implements vscode.Disposable {
         xmlOnly: text("propertyXmlOnly"), count: text("propertyCount", "{0}"),
         items: text("propertyItems", "{0}"), item: text("propertyItem", "{0}"),
         enabled: text("propertyEnabled", "{0}", "{1}"),
-        technical: text("propertyTechnical"), referenceMissing: text("propertyReferenceMissing"),
+        referenceMissing: text("propertyReferenceMissing"),
         referenceUnavailable: text("propertyReferenceUnavailable"),
         picture: text("picturePreview"), pictureLoading: text("pictureLoading"), pictureMissing: text("pictureMissing"),
         pictureUnsupported: text("pictureUnsupported"), pictureInvalid: text("pictureInvalid"),

@@ -8,11 +8,15 @@ exports.run = async function () {
   const fixture = JSON.parse(process.env.ESKA_HOST_FIXTURE);
   const { descriptor } = await import('./fixture.mjs');
   const rootFile = path.join(fixture.source, 'Configuration.xml');
-  await fs.writeFile(rootFile, descriptor('Configuration', 'Тест', '<Catalog>Товары</Catalog><CommonForm>Main</CommonForm>',
-    '<DefaultReportForm>CommonForm.Main</DefaultReportForm><DefaultReportVariantForm>CommonForm.Missing</DefaultReportVariantForm>'));
+  await fs.writeFile(rootFile, descriptor('Configuration', 'Тест', '<Catalog>Товары</Catalog><CommonForm>Main</CommonForm><Style>DarkStyle</Style><Language>Русский</Language>',
+    '<DefaultReportForm>CommonForm.Main</DefaultReportForm><DefaultReportVariantForm>CommonForm.Missing</DefaultReportVariantForm><DefaultStyle>Style.DarkStyle</DefaultStyle><DefaultLanguage>Language.Русский</DefaultLanguage>'));
   await fs.mkdir(path.join(fixture.source, 'CommonForms'), { recursive: true });
   await fs.writeFile(path.join(fixture.source, 'CommonForms', 'Main.xml'), descriptor('CommonForm', 'Main', '',
     '<Synonym xmlns:v="http://v8.1c.ru/8.1/data/core"><v:item><v:lang>ru</v:lang><v:content>Форма отчета</v:content></v:item></Synonym>'));
+  for (const [folder, kind, name] of [['Styles', 'Style', 'DarkStyle'], ['Languages', 'Language', 'Русский']]) {
+    await fs.mkdir(path.join(fixture.source, folder), { recursive: true });
+    await fs.writeFile(path.join(fixture.source, folder, `${name}.xml`), descriptor(kind, name, '', ''));
+  }
   const type = '<Type xmlns:v="http://v8.1c.ru/8.1/data/core" xmlns:s="http://www.w3.org/2001/XMLSchema" xmlns:c="http://v8.1c.ru/8.1/data/enterprise/current-config"><v:Type>c:CatalogRef.Товары</v:Type><v:Type>s:string</v:Type><v:StringQualifiers><v:Length>100</v:Length><v:AllowedLength>Variable</v:AllowedLength></v:StringQualifiers></Type>';
   const properties = type + '<FillValue xmlns:x="http://www.w3.org/2001/XMLSchema-instance" x:nil="true"/>';
   await fs.writeFile(path.join(fixture.source, 'Catalogs', 'Товары.xml'), descriptor('Catalog', 'Товары',
@@ -29,10 +33,17 @@ exports.run = async function () {
   const ref = tab.state.properties.find(field => field.key.name === 'DefaultReportForm').presentation;
   assert.equal(ref.caption['ru-RU'], 'Форма отчета');
   assert.equal(ref.status, 'resolved');
+  for (const name of ['DefaultStyle', 'DefaultLanguage']) {
+    const reference = tab.state.properties.find(field => field.key.name === name).presentation;
+    assert.equal(reference.status, 'resolved');
+    await tab.receive({ type: 'openReference', revision: tab.state.revision, target: reference.target });
+    assert.equal([...explorer.propertiesTabs.tabs.values()].find(value => value !== tab && value.state.properties.some(field => field.value.text === reference.caption['ru-RU']))?.state.status, 'ready');
+  }
+  tab.panel.reveal();
   const visual = process.env.ESKA_PRESENTATION_VISUAL_PROBE ? require(process.env.ESKA_PRESENTATION_VISUAL_PROBE) : undefined;
   if (visual) await visual.check(vscode, tab, 'references');
   await tab.receive({ type: 'openReference', revision: tab.state.revision, target: ref.target });
-  const targetTab = [...explorer.propertiesTabs.tabs.values()].find(value => value !== tab);
+  const targetTab = [...explorer.propertiesTabs.tabs.values()].find(value => value.state.title === 'Форма отчета');
   assert.equal(targetTab.state.title, 'Форма отчета');
   assert.equal(targetTab.state.status, 'ready');
   const catalogs = (await explorer.getChildren(root)).find(entry => entry.node?.id.collection?.metadataKind === 'catalog');

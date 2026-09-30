@@ -116,7 +116,6 @@ button:focus-visible, summary:focus-visible { outline: 1px solid var(--vscode-fo
   border-width: 0 1.5px 1.5px 0;
   transform: rotate(45deg);
 }
-.technical-name { overflow-wrap: anywhere; color: var(--vscode-descriptionForeground); font-size: 0.85em; font-weight: 400; }
 .source-button { flex: none; padding: 3px 0; color: var(--vscode-textLink-foreground);
   background: transparent; border: 0; }
 .source-button:hover { color: var(--vscode-textLink-activeForeground); text-decoration: underline; }
@@ -158,7 +157,6 @@ button:focus-visible, summary:focus-visible { outline: 1px solid var(--vscode-fo
 .collection-value { padding: 8px 0; }
 .checklist-row { display: flex; align-items: flex-start; gap: 10px; min-height: 38px; padding: 7px 0; }
 .checklist-row .name-text { padding-top: 2px; line-height: 1.5; }
-.checklist-row .technical-name { font-size: 0.85em; }
 .collection-group > .collection { padding-top: 4px; }
 @media (max-width: 560px) {
   .page { padding: 20px 16px 40px; }
@@ -187,8 +185,3 @@ button:focus-visible, summary:focus-visible { outline: 1px solid var(--vscode-fo
 .icon-dark { display: block; }
 .vscode-light .icon-dark, .vscode-high-contrast .icon-dark, .vscode-high-contrast-light .icon-dark { display: none; }
 .vscode-light .icon-light, .vscode-high-contrast .icon-contrast, .vscode-high-contrast-light .icon-contrast-light { display: block; }
-.technical-details { margin-top: 10px; }
-.technical-details > summary { color: var(--vscode-descriptionForeground); font-size: 0.85em; padding: 4px 0; }
-.technical-value { white-space: pre-wrap; overflow-wrap: anywhere; margin: 8px 0 0; padding: 10px;
-  font-family: var(--vscode-editor-font-family); font-size: 0.85em; line-height: 1.5;
-  background: var(--vscode-textCodeBlock-background); border-radius: 3px; }

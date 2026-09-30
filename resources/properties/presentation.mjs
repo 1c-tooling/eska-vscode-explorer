@@ -46,25 +46,3 @@ export function presentationView(document, view, language, labels, icons, openRe
   }
   return group;
 }
-
-/** Show exact names, namespaces, annotations and scalar text in a copyable technical view. */
-export function technicalText(field, depth = 0) {
-  if (depth > 32) return "";
-  const indent = "  ".repeat(depth);
-  const name = key => key.namespace ? `{${key.namespace}}${key.name}` : key.name;
-  const lines = [`${indent}${name(field.key)}`];
-  for (const qualifier of field.qualifiers) lines.push(`${indent}  @${name(qualifier.key)} = ${qualifier.value}`);
-  if (field.value.kind === "text") lines.push(`${indent}  ${JSON.stringify(field.value.text)}`);
-  else if (field.value.kind === "localized") {
-    for (const item of field.value.items) lines.push(`${indent}  ${item.language}: ${JSON.stringify(item.content)}`);
-  } else if (field.value.kind === "record") {
-    for (const child of field.value.fields) lines.push(technicalText(child, depth + 1));
-  } else lines.push(`${indent}  ${field.value.issue}`);
-  return lines.join("\n");
-}
-
-/** Offer details only when the main view abbreviates or interprets source information. */
-export function hasTechnicalDetails(field) {
-  return Boolean(field.presentation || field.qualifiers.length || field.value.caption
-    || (field.value.kind === "record" && field.value.fields.some(hasTechnicalDetails)));
-}

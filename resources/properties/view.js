@@ -1,4 +1,4 @@
-import { presentationView, technicalText, hasTechnicalDetails } from "./presentation.mjs";
+import { presentationView } from "./presentation.mjs";
 import { createPictureView } from "./picture.mjs";
 import { booleanValue, checklistEntry, childrenWithPaths, identity, isCollection, localizedEntries, searchable, summary, translated } from "./model.mjs";
 
@@ -35,11 +35,10 @@ function element(tag, className, text) {
   return node;
 }
 
-/** Keep raw identities visible without repeating identical human-readable text. */
-function namedText(title, raw) {
+/** Display the readable caption; raw identities remain searchable and available in XML. */
+function namedText(title) {
   const node = element("span", "name-text");
   node.append(element("span", "caption", title));
-  if (raw && raw !== title) node.append(element("span", "technical-name", raw));
   return node;
 }
 
@@ -59,8 +58,7 @@ function propertyName(tag, className, field) {
   const title = translated(field, snapshot.language, field.key.name);
   const checked = booleanValue(field.value);
   if (checked !== undefined) node.append(checkbox(checked, title));
-  node.append(namedText(title, field.key.name));
-  node.title = field.key.namespace ?? "";
+  node.append(namedText(title));
   return node;
 }
 
@@ -71,9 +69,9 @@ function childQuery(field, query) {
 }
 
 /** Native details retain keyboard behavior and restore the user's expansion choice. */
-function disclosure(path, title, preview, technical = false) {
+function disclosure(path, title, preview) {
   const details = element("details", "record");
-  details.open = (!technical && Boolean(search.value.trim())) || (expanded.get(path) ?? false);
+  details.open = Boolean(search.value.trim()) || (expanded.get(path) ?? false);
   const heading = element("summary", "record-summary");
   heading.append(title);
   if (preview) heading.append(element("span", "record-preview", preview));
@@ -82,7 +80,7 @@ function disclosure(path, title, preview, technical = false) {
   details.addEventListener("toggle", () => {
     if (open === details.open) return;
     open = details.open;
-    if (!technical && search.value.trim()) return;
+    if (search.value.trim()) return;
     expanded.set(path, open);
     saveState();
   });
@@ -109,7 +107,7 @@ function collectionEntry(root, field, path, index, query, depth) {
   if (flag) {
     const row = element("div", "checklist-row");
     const title = translated(flag.name, snapshot.language, flag.name.text);
-    row.append(checkbox(flag.checked, title), namedText(title, flag.name.text));
+    row.append(checkbox(flag.checked, title), namedText(title));
     return row;
   }
   if (field.presentation || field.value.kind !== "record") {
@@ -119,7 +117,7 @@ function collectionEntry(root, field, path, index, query, depth) {
     return row;
   }
   const name = identity(field, snapshot.language);
-  const title = namedText(name?.title ?? `${translated(field, snapshot.language, field.key.name)} · ${snapshot.labels.item.replace("{0}", String(index + 1))}`, name?.raw);
+  const title = namedText(name?.title ?? `${translated(field, snapshot.language, field.key.name)} · ${snapshot.labels.item.replace("{0}", String(index + 1))}`);
   const details = disclosure(path, title, summary(field, snapshot.language));
   const body = element("div", "entry-body");
   body.append(valueView(field, `${path}/body`, childQuery(field, query), depth + 1));
@@ -159,7 +157,7 @@ function valueView(field, path, query, depth = 0) {
   if (value.kind === "text") {
     const translatedValue = translated(value, snapshot.language, value.text);
     const node = element("div", "value text-value");
-    node.append(namedText(translatedValue || "—", value.caption ? value.text : undefined));
+    node.append(namedText(translatedValue || "—"));
     return node;
   }
   const localized = localizedEntries(value);
@@ -193,12 +191,6 @@ function propertyView(property, path, query) {
   head.append(propertyName("h2", "property-name", property), button);
   card.append(head);
   if (checked === undefined) card.append(valueView(property, path, childQuery(property, query)));
-  if (hasTechnicalDetails(property)) {
-    const details = disclosure(`${path}/technical`, element("span", "technical-label", snapshot.labels.technical), undefined, true);
-    details.classList.add("technical-details");
-    details.append(element("pre", "technical-value", technicalText(property)));
-    card.append(details);
-  }
   return card;
 }
 
