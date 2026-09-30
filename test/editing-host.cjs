@@ -80,7 +80,7 @@ exports.run = async function () {
   await fs.mkdir(path.join(fixture.source, 'CommonForms'), { recursive: true });
   await fs.writeFile(path.join(fixture.source, 'CommonForms/ReportSelectorProbe.xml'), '<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" version="2.20"><CommonForm uuid="11111111-1111-1111-1111-111111111111"><Properties><Name>ReportSelectorProbe</Name><FormType>Managed</FormType></Properties></CommonForm></MetaDataObject>');
   await fs.mkdir(path.join(fixture.source, 'Catalogs'), { recursive: true });
-  await fs.writeFile(path.join(fixture.source, 'Catalogs/ValueEditorProbe.xml'), '<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" xmlns:v="http://v8.1c.ru/8.1/data/core" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:s="http://www.w3.org/2001/XMLSchema-instance"><Catalog uuid="22222222-2222-2222-2222-222222222222"><Properties><Name>ValueEditorProbe</Name></Properties><ChildObjects><Attribute uuid="33333333-3333-3333-3333-333333333333"><Properties><Name>Value</Name><Type><v:Type>xs:string</v:Type></Type><FillValue s:nil="true"/></Properties></Attribute></ChildObjects></Catalog></MetaDataObject>');
+  await fs.writeFile(path.join(fixture.source, 'Catalogs/ValueEditorProbe.xml'), '<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" xmlns:v="http://v8.1c.ru/8.1/data/core" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:s="http://www.w3.org/2001/XMLSchema-instance"><Catalog uuid="22222222-2222-2222-2222-222222222222"><Properties><Name>ValueEditorProbe</Name><DescriptionLength>50</DescriptionLength><StandardAttributes xmlns:r="http://v8.1c.ru/8.3/xcf/readable"><r:StandardAttribute name="Description"><r:FillValue s:nil="true"/></r:StandardAttribute></StandardAttributes></Properties><ChildObjects><Attribute uuid="33333333-3333-3333-3333-333333333333"><Properties><Name>Value</Name><Type><v:Type>xs:string</v:Type></Type><FillValue s:nil="true"/></Properties></Attribute></ChildObjects></Catalog></MetaDataObject>');
   await fs.mkdir(path.join(fixture.source, 'Ext'), { recursive: true });
   await fs.writeFile(path.join(fixture.source, 'Ext/ParentConfigurations.bin'), '{6,0,0,0,0,0}');
   await vscode.workspace.getConfiguration('eska.explorer').update('executable', process.env.ESKA_TEST_BINARY, vscode.ConfigurationTarget.Workspace);
@@ -148,26 +148,31 @@ exports.run = async function () {
     await vscode.commands.executeCommand('eska.explorer.properties', root);
     const [reopened] = explorer.propertiesTabs.tabs.values();
     assert.equal(reopened.state.editing.unlocked, false);
-    await valueEditor(explorer, root, fixture);
+    await valueEditor(explorer, root, fixture, false);
+    await valueEditor(explorer, root, fixture, true);
     await fs.writeFile(path.join(fixture.root, 'host-result.json'), JSON.stringify({ passed: true, suite: 'property-editing', vscode: vscode.version }));
   } finally { dom.close(); }
 };
 
 /** Exercise both native dialog stages and ensure one typed value creates only the intended XML diff. */
-async function valueEditor(explorer, root, fixture) {
+async function valueEditor(explorer, root, fixture, standard) {
   const catalogs = (await explorer.getChildren(root)).find(entry => entry.node.id.collection?.metadataKind === 'catalog');
   const catalog = (await explorer.getChildren(catalogs)).find(entry => entry.node.label.text === 'ValueEditorProbe');
-  const attributes = (await explorer.getChildren(catalog)).find(entry => entry.node.id.collection?.metadataKind === 'attribute');
-  const [attribute] = await explorer.getChildren(attributes);
+  let entry = catalog;
+  if (!standard) {
+    const attributes = (await explorer.getChildren(catalog)).find(entry => entry.node.id.collection?.metadataKind === 'attribute');
+    [entry] = await explorer.getChildren(attributes);
+  }
   const file = path.join(fixture.source, 'Catalogs/ValueEditorProbe.xml'), original = await fs.readFile(file, 'utf8');
-  await vscode.commands.executeCommand('eska.explorer.properties', attribute);
-  const tab = [...explorer.propertiesTabs.tabs.values()].find(tab => tab.entry.node.id.objectId === attribute.node.id.objectId);
+  await vscode.commands.executeCommand('eska.explorer.properties', entry);
+  const tab = [...explorer.propertiesTabs.tabs.values()].find(tab => tab.entry.node.id.objectId === entry.node.id.objectId);
   const dom = await frame(tab);
   try {
     await dom.evaluate("document.getElementById('read-only').click()");
     await until(() => tab.state.editing.unlocked, 'value editor unlock');
     const index = tab.state.editing.schema.fields.findIndex(field => field.schema.kind === 'value');
     await until(() => dom.evaluate(`Boolean(document.getElementById('edit-${index}'))`), 'value editor button');
+    await dom.evaluate(`(()=>{const input=document.getElementById('edit-${index}');for(let parent=input.parentElement;parent;parent=parent.parentElement){if(parent.tagName==='DETAILS')parent.open=true;}input.scrollIntoView({block:'center'});})()`);
     await dom.evaluate(`document.getElementById('edit-${index}').click()`);
     await until(() => dom.workbench("document.querySelector('.quick-input-list')?.textContent.includes('String')"), 'value type picker');
     await dom.workbench("(()=>{const input=document.querySelector('.quick-input-widget input[type=text]');input.value='String';input.dispatchEvent(new Event('input',{bubbles:true}));})()");
@@ -176,8 +181,10 @@ async function valueEditor(explorer, root, fixture) {
     await until(() => dom.workbench("document.querySelector('.quick-input-title')?.textContent === 'String'"), 'value input dialog');
     await dom.workbench("(()=>{const input=document.querySelector('.quick-input-widget input[type=text]');input.value='My <value>';input.dispatchEvent(new Event('input',{bubbles:true}));})()");
     await vscode.commands.executeCommand('workbench.action.acceptSelectedQuickOpenItem');
-    const expected = original.replace('<FillValue s:nil="true"/>', '<FillValue s:type="xs:string">My &lt;value&gt;</FillValue>');
+    const tag = standard ? 'r:FillValue' : 'FillValue';
+    const expected = original.replace(`<${tag} s:nil="true"/>`, `<${tag} s:type="xs:string">My &lt;value&gt;</${tag}>`);
     await until(async () => !tab.state.editing.busy && await fs.readFile(file, 'utf8') === expected, 'typed value autosave');
+    await dom.screenshot(standard ? 'standard-value-editing.png' : 'value-editing.png');
     await dom.evaluate("window.dispatchEvent(new KeyboardEvent('keydown',{key:'z',ctrlKey:true,bubbles:true}))");
     await until(async () => !tab.state.editing.busy && await fs.readFile(file, 'utf8') === original, 'typed value undo');
   } finally { dom.close(); tab.dispose(); }
