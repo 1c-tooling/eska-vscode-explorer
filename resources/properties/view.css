@@ -34,6 +34,13 @@ body { margin: 0; }
 #picture-status { text-align: center; color: var(--vscode-descriptionForeground); font-size: 0.85em; overflow-wrap: anywhere; }
 .picture-preview figcaption { margin-top: 6px; text-align: center; color: var(--vscode-descriptionForeground);
   font-size: 0.85em; min-height: 1.2em; }
+@media (min-width: 601px) {
+  /* Share the search row with the frame; the caption occupies its own row below. */
+  .picture-preview { display: grid; grid-template-rows: subgrid; grid-row: 1 / 4; align-self: stretch; }
+  .picture-frame { grid-row: 1 / 3; align-self: end; }
+  .picture-preview figcaption { grid-row: 3; }
+  .with-picture .toolbar { padding-bottom: 0; }
+}
 @media (max-width: 600px) {
   .page.with-picture { grid-template-columns: minmax(0, 1fr) 120px; column-gap: 16px; }
   .picture-preview { grid-row: 1; width: 120px; }
