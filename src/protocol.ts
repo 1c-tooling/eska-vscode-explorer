@@ -1,5 +1,5 @@
 /** The public IDE API is versioned independently from the eska executable. */
-export const API_VERSION = { major: 1, minor: 7 } as const;
+export const API_VERSION = { major: 1, minor: 8 } as const;
 export const MAX_HEADER = 8192;
 export const MAX_REQUEST = 1_048_576;
 export const MAX_RESPONSE = 67_108_864;

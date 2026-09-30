@@ -363,3 +363,25 @@ test("unknown write outcomes preserve input; re-opening creates a locked tab", a
   const [reopened] = f.tabs.tabs.values();
   assert.equal(reopened.state.editing.unlocked, false);
 });
+
+/** A native value dialog may remain open while a filesystem notification blocks the tab. */
+test("value input stays a draft after an external change and cannot bypass the host picker", async t => {
+  const f = fixture(t), schema = editable("");
+  const key = { namespace: "http://www.w3.org/2001/XMLSchema", name: "string" };
+  schema.fields[0].schema = { kind: "value", key: null, types: [{ key, constraints: { kind: "string", maxLength: 20 }, caption: { "ru-RU": "Строка", "en-US": "String" } }] };
+  const tab = await openEditable(f, schema);
+  await tab.receive({ type: "commit", revision: tab.state.revision, field: 0, change: { kind: "value", key, value: "Injected" } });
+  assert.equal(f.requests.length, 2);
+  let entered;
+  f.vscode.window.showQuickPick = async options => options.at(-1);
+  f.vscode.window.showInputBox = () => new Promise(resolve => { entered = resolve; });
+  const picking = tab.receive({ type: "pickValue", revision: tab.state.revision, field: 0 });
+  await settle();
+  f.change([f.object]);
+  f.requests[2].resolve({ ...schema, snapshot: "b".repeat(64) }); await settle();
+  entered("Keep input"); await picking;
+  assert.equal(tab.state.editing.blocked, true);
+  assert.equal(Object.values(tab.state.editing.drafts)[0].value, "Keep input");
+  assert.match(Object.values(tab.state.editing.draftTitles)[0], /Keep input/);
+  assert.equal(f.requests.length, 3, "accepting the dialog never overwrites a known conflict");
+});

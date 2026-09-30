@@ -1,6 +1,7 @@
 import { resolve } from "node:path";
 import { nativePath } from "./source.js";
 import { editingSchema, fieldId, propertyChange, type EditingView, type PropertyChange } from "./property-editing.js";
+import { pickPropertyValue } from "./property-value-picker.js";
 import * as vscode from "vscode";
 import { message } from "./messages.js";
 import { ExplorerError, isRecord } from "./protocol.js";
@@ -192,7 +193,7 @@ class PropertyTab implements vscode.Disposable {
       this.publish();
     } else if (input.type === "refresh") {
       await this.refresh();
-    } else if (["toggleLock", "draft", "commit", "applyDraft", "cancelDraft", "pickType", "pickReference", "undo", "redo"].includes(String(input.type))) {
+    } else if (["toggleLock", "draft", "commit", "applyDraft", "cancelDraft", "pickType", "pickReference", "pickValue", "undo", "redo"].includes(String(input.type))) {
       await this.edit(input);
     } else if (input.type === "openReference" && typeof input.target === "string"
       && input.revision === this.state.revision && this.state.status === "ready" && !this.editor.blocked
@@ -330,6 +331,21 @@ class PropertyTab implements vscode.Disposable {
       } catch { this.editorNotice("requestFailed"); }
       return;
     }
+    if (input.type === "pickValue") {
+      if (this.editor.busy || this.editor.blocked || field.schema.kind !== "value") return;
+      const revision = this.revision, objectId = this.entry.node.id.objectId;
+      try {
+        const selected = await pickPropertyValue(vscode.window, field, this.language(), this.editor.drafts[id],
+          type => this.tree.request(this.entry.project, "metadata/propertyValueChoices", { objectId, path: field.path, key: type.key }));
+        if (!selected || revision !== this.revision || this.disposed) return;
+        this.editor.drafts[id] = selected.change;
+        this.editor.draftTitles[id] = selected.title;
+        this.state = this.makeState(this.state.status, this.state.notice);
+        this.publish();
+        await this.writeEdit(id, selected.change);
+      } catch { this.editorNotice("requestFailed"); }
+      return;
+    }
     const change = propertyChange(input.change, field);
     if (!change) return;
     if (change.kind === "text" && change.value === field.value) delete this.editor.drafts[id];
@@ -442,6 +458,7 @@ class PropertyTab implements vscode.Disposable {
         undo: text("propertyUndo"), redo: text("propertyRedo"), apply: text("propertyApply"), cancel: text("propertyCancel"),
         changeType: text("propertyChangeType"), unchanged: text("propertyOtherValues"),
         chooseReference: text("propertyChooseReference"), unset: text("propertyUnset"),
+        chooseValue: text("propertyChooseValue"),
         notEditable: text("propertyNotEditable"), saved: text("propertySaved"),
         properties: text("properties"), search: text("propertySearch"), refresh: text("propertyRefresh"),
         openXml: text("openXml"), empty: text("propertyEmpty"), noMatches: text("propertyNoMatches"),

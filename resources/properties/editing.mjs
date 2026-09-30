@@ -44,7 +44,7 @@ export function editorView(document, property, fields, snapshot, post) {
     const controlId = `edit-${index}`;
     label.htmlFor = controlId;
     const schema = field.schema;
-    const control = document.createElement(schema.kind === "enum" ? "select" : ["dataType", "reference"].includes(schema.kind) ? "button"
+    const control = document.createElement(schema.kind === "enum" ? "select" : ["dataType", "reference", "value"].includes(schema.kind) ? "button"
       : schema.kind === "text" && (value.includes("\n") || field.path.at(-1).key.name === "Comment") ? "textarea" : "input");
     control.id = controlId;
     control.dataset.editId = id;
@@ -52,11 +52,11 @@ export function editorView(document, property, fields, snapshot, post) {
     control.disabled = snapshot.editing.busy || snapshot.editing.blocked;
     control.setAttribute("aria-label", name || property.caption?.[snapshot.language] || property.key.name);
     const send = (type, change) => post({ type, revision: snapshot.revision, field: index, ...(change ? { change } : {}) });
-    if (["dataType", "reference"].includes(schema.kind)) {
+    if (["dataType", "reference", "value"].includes(schema.kind)) {
       control.type = "button";
       control.textContent = `${snapshot.editing.draftTitles?.[id] ?? field.caption?.[snapshot.language] ?? (field.value || snapshot.labels.unset)} ▾`;
-      control.title = schema.kind === "reference" ? snapshot.labels.chooseReference : snapshot.labels.changeType;
-      control.addEventListener("click", () => send(schema.kind === "reference" ? "pickReference" : "pickType"));
+      control.title = schema.kind === "value" ? snapshot.labels.chooseValue : schema.kind === "reference" ? snapshot.labels.chooseReference : snapshot.labels.changeType;
+      control.addEventListener("click", () => send(schema.kind === "value" ? "pickValue" : schema.kind === "reference" ? "pickReference" : "pickType"));
       if (draft) {
         const actions = document.createElement("div");
         actions.className = "draft-actions";

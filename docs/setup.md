@@ -1,6 +1,6 @@
 # Connect a project to ESKA Explorer
 
-ESKA 0.11.0 or newer with compatible IDE API 1.7 is required.
+ESKA 0.11.0 or newer with compatible IDE API 1.8 is required.
 When using the global CLI, Explorer offers installation if it is missing or
 incompatible. Installation and updates require an explicit button click.
 `eska.explorer.executable` selects a development backend; an explicit path is
