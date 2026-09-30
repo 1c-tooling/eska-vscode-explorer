@@ -127,9 +127,6 @@ button:focus-visible, summary:focus-visible { outline: 1px solid var(--vscode-fo
 .localized-row { display: grid; grid-template-columns: 1fr; gap: 12px; }
 .multilingual .localized-row { grid-template-columns: minmax(52px, auto) 1fr; }
 .language { color: var(--vscode-descriptionForeground); font-size: 0.9em; }
-.qualifiers { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; }
-.qualifier { padding: 2px 6px; border-radius: 2px; color: var(--vscode-descriptionForeground);
-  background: var(--vscode-editorWidget-background, var(--vscode-input-background)); font-size: 0.85em; overflow-wrap: anywhere; }
 .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; }
 
 /* Complex fields span the available width; only leaf values use columns. */
@@ -137,7 +134,6 @@ button:focus-visible, summary:focus-visible { outline: 1px solid var(--vscode-fo
 .structure { width: 100%; min-width: 0; }
 .field { display: grid; grid-template-columns: minmax(140px, 34%) minmax(0, 1fr); gap: 8px 20px; padding: 8px 0; margin: 0; }
 .field > .value { min-width: 0; }
-.field > .qualifiers { grid-column: 1 / -1; }
 .complex-field { display: block; padding: 10px 0; }
 .complex-field > .field-name { font-weight: 500; margin-bottom: 8px; }
 .complex-field > .structure { border-top: 1px solid var(--vscode-settings-headerBorder, var(--vscode-panel-border)); }
@@ -174,3 +170,25 @@ button:focus-visible, summary:focus-visible { outline: 1px solid var(--vscode-fo
   .entry-body { padding: 4px 8px 8px; }
   .record-preview { flex-basis: 100%; padding-left: 20px; }
 }
+
+/* Semantic values retain the editor's typography and adapt to narrow property tabs. */
+.semantic-values { display: grid; gap: 12px; min-width: 0; }
+.semantic-row { display: flex; align-items: flex-start; gap: 9px; min-width: 0; }
+.semantic-content { min-width: 0; }
+.semantic-title { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; }
+.reference-name, .reference-link { overflow-wrap: anywhere; text-align: start; }
+.reference-link { color: var(--vscode-textLink-foreground); background: none; border: 0; padding: 0; }
+.reference-link:hover { color: var(--vscode-textLink-activeForeground); text-decoration: underline; }
+.reference-category, .type-constraints, .reference-status, .empty-value { color: var(--vscode-descriptionForeground); }
+.reference-category { font-size: 0.9em; }
+.type-constraints, .reference-status { margin-top: 4px; line-height: 1.5; overflow-wrap: anywhere; font-size: 0.9em; }
+.reference-icons { width: 18px; height: 18px; flex: none; margin-top: 1px; }
+.reference-icon { width: 18px; height: 18px; display: none; }
+.icon-dark { display: block; }
+.vscode-light .icon-dark, .vscode-high-contrast .icon-dark, .vscode-high-contrast-light .icon-dark { display: none; }
+.vscode-light .icon-light, .vscode-high-contrast .icon-contrast, .vscode-high-contrast-light .icon-contrast-light { display: block; }
+.technical-details { margin-top: 10px; }
+.technical-details > summary { color: var(--vscode-descriptionForeground); font-size: 0.85em; padding: 4px 0; }
+.technical-value { white-space: pre-wrap; overflow-wrap: anywhere; margin: 8px 0 0; padding: 10px;
+  font-family: var(--vscode-editor-font-family); font-size: 0.85em; line-height: 1.5;
+  background: var(--vscode-textCodeBlock-background); border-radius: 3px; }

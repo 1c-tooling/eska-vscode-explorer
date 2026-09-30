@@ -32,7 +32,7 @@ function fixture(t) {
   const tree = {
     connection: {},
     parent: entry => entry.node.parent ? project.nodes.get(nodeKey(entry.node.parent)) : undefined,
-    request: (_project, _method, _params, signal) => new Promise((resolve, reject) => requests.push({ resolve, reject, signal })),
+    request: (_project, _method, _params, signal) => new Promise((resolve, reject) => requests.push({ resolve, reject, signal, method: _method, params: _params, project: _project })),
   };
   let currentTree = tree;
   const tabs = new adapter.exports.PropertyTabs({ extensionUri: "/extension" }, () => "ru-RU", () => currentTree,
@@ -184,4 +184,54 @@ test("picture failures keep properties available and refresh replaces the displa
   assert.equal(tab.state.picture.data, "bmV3");
   f.tabs.stale();
   assert.equal(tab.state.picture, undefined);
+});
+
+/** A derived reference is authorized only by the validated snapshot from the same project. */
+function linkedResponse() {
+  const value = response(["DefaultForm"]);
+  value.properties[0].presentation = { kind: "reference", caption: { "ru-RU": "Форма", "en-US": "Form" },
+    category: { "ru-RU": "Общая форма", "en-US": "Common form" }, metadataKind: "common-form", status: "resolved", target: "sibling" };
+  return value;
+}
+
+test("reference actions reject forged and stale identities and open a separate property tab", async t => {
+  const f = fixture(t);
+  f.root.project.info.root = f.root.node.id;
+  f.tree.root = async () => f.root;
+  f.tree.children = async () => [f.object, f.sibling];
+  const opening = f.tabs.show(f.tree, f.object);
+  f.requests[0].resolve(linkedResponse());
+  await opening;
+  const [tab] = f.tabs.tabs.values();
+  await tab.receive({ type: "openReference", revision: tab.state.revision, target: "forged" });
+  await tab.receive({ type: "openReference", revision: tab.state.revision - 1, target: "sibling" });
+  assert.equal(f.requests.length, 1);
+  const click = tab.receive({ type: "openReference", revision: tab.state.revision, target: "sibling" });
+  assert.equal(f.requests[1].method, "metadata/reveal");
+  assert.equal(f.requests[1].project, f.object.project);
+  f.requests[1].resolve({ ancestry: [f.root.node.id, f.sibling.node.id], generation: "1" });
+  await settle();
+  assert.equal(f.tabs.tabs.size, 2);
+  assert.equal(f.requests[2].params.objectId, "sibling");
+  f.requests[2].resolve(response());
+  await click;
+});
+
+test("reference captions reload when a target changes and late navigation cannot open old tabs", async t => {
+  const f = fixture(t);
+  f.root.project.info.root = f.root.node.id;
+  f.tree.root = async () => f.root;
+  f.tree.children = async () => [f.object, f.sibling];
+  const opening = f.tabs.show(f.tree, f.object);
+  f.requests[0].resolve(linkedResponse());
+  await opening;
+  const [tab] = f.tabs.tabs.values();
+  const click = tab.receive({ type: "openReference", revision: tab.state.revision, target: "sibling" });
+  f.change([f.sibling]);
+  assert.equal(f.requests.length, 3, "a referenced object's change invalidates the displayed synonym");
+  f.requests[1].resolve({ ancestry: [f.root.node.id, f.sibling.node.id], generation: "1" });
+  await click;
+  assert.equal(f.tabs.tabs.size, 1);
+  f.requests[2].resolve(linkedResponse());
+  await settle();
 });

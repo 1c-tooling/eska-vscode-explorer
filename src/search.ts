@@ -60,7 +60,7 @@ export function parseSearch(value: Record<string, unknown>, limit: number): Omit
 }
 
 /** Revalidate the selected identity, then load only its authoritative ancestry, never a full traversal. */
-export async function revealHit(tree: MetadataTree, project: ProjectTree, hit: SearchHit, signal?: AbortSignal): Promise<TreeEntry> {
+export async function revealHit(tree: MetadataTree, project: ProjectTree, hit: Pick<SearchHit, "objectId" | "node">, signal?: AbortSignal): Promise<TreeEntry> {
   const result = await tree.request(project, "metadata/reveal", { objectId: hit.objectId }, signal);
   const path = result.ancestry;
   if (!Array.isArray(path) || !path.length || path.length > 512 || !path.every(isNodeId)
