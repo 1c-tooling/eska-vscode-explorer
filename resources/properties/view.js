@@ -1,3 +1,4 @@
+import { createPictureView } from "./picture.mjs";
 import { booleanValue, checklistEntry, childrenWithPaths, identity, isCollection, localizedEntries, searchable, summary, translated } from "./model.mjs";
 
 const vscode = acquireVsCodeApi();
@@ -9,6 +10,7 @@ const refresh = document.getElementById("refresh");
 const saved = vscode.getState();
 const expanded = new Map(Object.entries(saved?.expanded ?? {}).filter(([, value]) => typeof value === "boolean"));
 let snapshot;
+const pictureView = createPictureView(document);
 search.value = saved?.query ?? "";
 
 /** Persist only presentation state; property values remain backend-owned. */
@@ -20,6 +22,7 @@ refresh.addEventListener("click", () => vscode.postMessage({ type: "refresh" }))
 window.addEventListener("message", event => {
   if (event.data?.type !== "state") return;
   snapshot = event.data;
+  pictureView.render(snapshot);
   render();
 });
 
@@ -170,11 +173,13 @@ function valueView(field, path, query, depth = 0) {
   }
   const localized = localizedEntries(value);
   if (localized) {
-    const group = element("div", "localized");
+    const multipleLanguages = localized.length > 1;
+    const group = element("div", multipleLanguages ? "localized multilingual" : "localized");
     if (!localized.length) group.append(element("span", "value", "—"));
     for (const item of localized) {
       const row = element("div", "localized-row");
-      row.append(element("span", "language", item.language), element("span", "value text-value", item.content || "—"));
+      if (multipleLanguages) row.append(element("span", "language", item.language));
+      row.append(element("span", "value text-value", item.content || "—"));
       group.append(row);
     }
     return group;

@@ -160,3 +160,28 @@ test("a hidden failed tab recovers after its object changes", async t => {
   await settle();
   assert.equal(tab.state.status, "ready");
 });
+
+test("picture failures keep properties available and refresh replaces the displayed image", async t => {
+  const f = fixture(t);
+  f.object.node.metadataKind = "common-picture";
+  const opening = f.tabs.show(f.tree, f.object);
+  const [tab] = f.tabs.tabs.values();
+  assert.equal(tab.state.picture.status, "loading");
+  const first = { status: "ready", mimeType: "image/png", fileName: "100.png", data: "YWJj" };
+  f.requests[0].resolve({ ...response(), picture: first });
+  await opening;
+  assert.equal(tab.state.picture.data, first.data);
+  const refresh = tab.receive({ type: "refresh" });
+  assert.equal(tab.state.picture.status, "loading");
+  f.requests[1].resolve({ ...response(), picture: { status: "missing" } });
+  await refresh;
+  assert.equal(tab.state.status, "ready");
+  assert.equal(tab.state.properties.length, 2);
+  assert.equal(tab.state.picture.status, "missing");
+  const recovery = tab.receive({ type: "refresh" });
+  f.requests[2].resolve({ ...response(), picture: { ...first, data: "bmV3" } });
+  await recovery;
+  assert.equal(tab.state.picture.data, "bmV3");
+  f.tabs.stale();
+  assert.equal(tab.state.picture, undefined);
+});
