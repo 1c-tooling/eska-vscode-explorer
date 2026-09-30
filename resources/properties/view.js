@@ -1,3 +1,4 @@
+import { createPictureView } from "./picture.mjs";
 import { booleanValue, checklistEntry, childrenWithPaths, identity, isCollection, localizedEntries, searchable, summary, translated } from "./model.mjs";
 
 const vscode = acquireVsCodeApi();
@@ -9,7 +10,7 @@ const refresh = document.getElementById("refresh");
 const saved = vscode.getState();
 const expanded = new Map(Object.entries(saved?.expanded ?? {}).filter(([, value]) => typeof value === "boolean"));
 let snapshot;
-let pictureSource;
+const pictureView = createPictureView(document);
 search.value = saved?.query ?? "";
 
 /** Persist only presentation state; property values remain backend-owned. */
@@ -21,6 +22,7 @@ refresh.addEventListener("click", () => vscode.postMessage({ type: "refresh" }))
 window.addEventListener("message", event => {
   if (event.data?.type !== "state") return;
   snapshot = event.data;
+  pictureView.render(snapshot);
   render();
 });
 
@@ -215,7 +217,6 @@ function render() {
   search.placeholder = labels.search;
   search.setAttribute("aria-label", labels.search);
   refresh.textContent = labels.refresh;
-  renderPicture();
   const query = search.value.trim().toLocaleLowerCase();
   const matches = snapshot.status === "ready" ? childrenWithPaths(snapshot.properties, "properties")
     .filter(({ field }) => !query || searchable(field, snapshot.language).includes(query)) : [];
@@ -223,52 +224,6 @@ function render() {
   notice.textContent = snapshot.notice || (snapshot.status === "ready" && !matches.length
     ? query ? labels.noMatches : labels.empty : "");
   items.replaceChildren(...matches.map(({ field, path }) => propertyView(field, path, query)));
-}
-
-/** Keep the image stable while filtering, and ignore loads from superseded snapshots. */
-function renderPicture() {
-  const preview = snapshot.picture;
-  const figure = document.getElementById("picture-preview");
-  const frame = document.getElementById("picture-frame");
-  const caption = document.getElementById("picture-caption");
-  const status = document.getElementById("picture-status");
-  figure.hidden = !preview;
-  document.querySelector(".page").classList.toggle("with-picture", Boolean(preview));
-  figure.setAttribute("aria-label", snapshot.labels.picture);
-  const source = preview?.status === "ready" ? `data:${preview.mimeType};base64,${preview.data}` : undefined;
-  if (source && source === pictureSource) {
-    frame.querySelector("img").alt = snapshot.title;
-    return;
-  }
-  pictureSource = source;
-  frame.classList.remove("has-image");
-  frame.querySelector("img")?.remove();
-  caption.textContent = "";
-  status.hidden = false;
-  const messages = { loading: "pictureLoading", missing: "pictureMissing", unsupported: "pictureUnsupported",
-    invalid: "pictureInvalid", too_large: "pictureTooLarge", unavailable: "pictureUnavailable", ready: "pictureLoading" };
-  status.textContent = preview ? snapshot.labels[messages[preview.status]] : "";
-  if (!source) return;
-  const image = document.createElement("img");
-  image.id = "picture-image";
-  image.alt = snapshot.title;
-  image.hidden = true;
-  image.addEventListener("load", () => {
-    if (pictureSource !== source || !image.isConnected) return;
-    image.hidden = false;
-    status.hidden = true;
-    frame.classList.add("has-image");
-    const format = preview.mimeType === "image/svg+xml" ? "SVG" : preview.mimeType === "image/x-icon" ? "ICO"
-      : preview.mimeType.slice("image/".length).toUpperCase();
-    caption.textContent = `${format} · ${image.naturalWidth} × ${image.naturalHeight}`;
-    image.title = `${preview.fileName} · ${image.naturalWidth} × ${image.naturalHeight}`;
-  });
-  image.addEventListener("error", () => {
-    if (pictureSource !== source || !image.isConnected) return;
-    status.textContent = snapshot.labels.pictureInvalid;
-  });
-  frame.prepend(image);
-  image.src = source;
 }
 
 vscode.postMessage({ type: "ready" });

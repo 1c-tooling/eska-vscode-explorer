@@ -221,7 +221,7 @@ class PropertyTab implements vscode.Disposable {
       <div class="toolbar"><label class="visually-hidden" for="search"></label>
       <input id="search" type="search" autocomplete="off"><button id="refresh" type="button"></button></div>
       <figure id="picture-preview" class="picture-preview" hidden><div class="picture-frame" id="picture-frame">
-      <img id="picture-image" hidden><span id="picture-status" role="status"></span></div>
+      <span id="picture-status" role="status"></span></div>
       <figcaption id="picture-caption"></figcaption></figure>
       <p id="count" class="count" aria-live="polite"></p><p id="notice" class="notice" role="status"></p>
       <section id="items" class="items" aria-label="Properties"></section></main>

@@ -14,3 +14,11 @@ test("picture transport accepts only bounded base64 image data", () => {
     assert.deepEqual(picturePreview({ status }), { status });
   }
 });
+
+test("the image limit applies to decoded bytes, including base64 padding", () => {
+  const encodedLength = Math.ceil(8 * 1024 * 1024 / 3) * 4;
+  const tooLarge = "A".repeat(encodedLength);
+  const input = { status: "ready", mimeType: "image/png", fileName: "Picture.png", data: tooLarge };
+  assert.equal(picturePreview(input).status, "invalid");
+  assert.equal(picturePreview({ ...input, data: tooLarge.slice(0, -1) + "=" }).status, "ready");
+});
