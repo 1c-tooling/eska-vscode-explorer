@@ -90,7 +90,7 @@ test("real backend lazy trees, source positions and local invalidation for all f
     assert.equal(object.node.metadataKind, type === "configuration" || type === "extension" ? "catalog" : type === "report" ? "report" : "data-processor");
     const groups = await tree.children(object);
     assert.equal(label(groups[0]), "Модули");
-    assert.equal(groups[0].node.expandedByDefault, true);
+    assert.equal(groups[0].node.expandedByDefault, false);
     const modules = await tree.children(groups[0]);
     assert.equal(modules.length, 1, "binary-only manager module is hidden");
     assert.equal((await resolveSource(tree, modules[0])).path, fixture.module);
