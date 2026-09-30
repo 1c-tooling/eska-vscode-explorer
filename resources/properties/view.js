@@ -170,11 +170,13 @@ function valueView(field, path, query, depth = 0) {
   }
   const localized = localizedEntries(value);
   if (localized) {
-    const group = element("div", "localized");
+    const multipleLanguages = localized.length > 1;
+    const group = element("div", multipleLanguages ? "localized multilingual" : "localized");
     if (!localized.length) group.append(element("span", "value", "—"));
     for (const item of localized) {
       const row = element("div", "localized-row");
-      row.append(element("span", "language", item.language), element("span", "value text-value", item.content || "—"));
+      if (multipleLanguages) row.append(element("span", "language", item.language));
+      row.append(element("span", "value text-value", item.content || "—"));
       group.append(row);
     }
     return group;

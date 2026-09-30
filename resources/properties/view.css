@@ -86,7 +86,8 @@ button:focus-visible, summary:focus-visible { outline: 1px solid var(--vscode-fo
 .text-value { white-space: pre-wrap; overflow-wrap: anywhere; }
 .unsupported { color: var(--vscode-descriptionForeground); font-style: italic; }
 .localized { display: grid; gap: 6px; }
-.localized-row { display: grid; grid-template-columns: minmax(52px, auto) 1fr; gap: 12px; }
+.localized-row { display: grid; grid-template-columns: 1fr; gap: 12px; }
+.multilingual .localized-row { grid-template-columns: minmax(52px, auto) 1fr; }
 .language { color: var(--vscode-descriptionForeground); font-size: 0.9em; }
 .qualifiers { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; }
 .qualifier { padding: 2px 6px; border-radius: 2px; color: var(--vscode-descriptionForeground);
