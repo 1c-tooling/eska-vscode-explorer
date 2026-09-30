@@ -86,6 +86,7 @@ export function editorView(document, property, fields, snapshot, post) {
         if (control.tagName === "TEXTAREA") control.rows = Math.min(8, Math.max(2, value.split("\n").length));
         else control.type = "text";
         if (schema.kind === "integer" || schema.kind === "decimal") control.inputMode = "decimal";
+        if (schema.nullable) control.placeholder = snapshot.labels.unset;
         control.autocomplete = "off";
         control.spellcheck = false;
       }
