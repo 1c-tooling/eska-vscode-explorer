@@ -2,6 +2,9 @@ import * as vscode from "vscode";
 import { message } from "./messages.js";
 import { ExplorerError, isRecord } from "./protocol.js";
 import { objectSynonym, propertyChoices, type PropertyChoice } from "./properties.js";
+import { presentedItems, referenceTargets } from "./property-presentation.js";
+import { revealHit } from "./search.js";
+import { metadataIcons } from "./icons.js";
 import { picturePreview, type PicturePreview } from "./picture.js";
 import { nodeKey, type MetadataTree, type TreeEntry } from "./tree.js";
 
@@ -16,8 +19,9 @@ interface ViewState {
   notice: string;
   labels: Record<string, string>;
   language: Language;
+  icons: Record<string, Record<string, string>>;
   picture: PicturePreview | { status: "loading" } | undefined;
-  properties: Pick<PropertyChoice, "index" | "label" | "key" | "caption" | "qualifiers" | "value" | "description">[];
+  properties: Pick<PropertyChoice, "index" | "label" | "key" | "caption" | "qualifiers" | "value" | "description" | "presentation">[];
 }
 
 /** One editor tab belongs to one project-scoped metadata identity. */
@@ -36,8 +40,10 @@ class PropertyTab implements vscode.Disposable {
   constructor(private readonly context: vscode.ExtensionContext, private tree: MetadataTree, private entry: TreeEntry,
     private readonly language: () => Language, private readonly currentTree: () => MetadataTree | undefined,
     private readonly openXml: (entry: TreeEntry, choice: PropertyChoice) => Promise<void>,
+    private readonly openReference: (tree: MetadataTree, entry: TreeEntry) => Promise<void>,
     private readonly closed: () => void) {
-    const roots = [vscode.Uri.joinPath(context.extensionUri, "resources", "properties")];
+    const roots = [vscode.Uri.joinPath(context.extensionUri, "resources", "properties"),
+      vscode.Uri.joinPath(context.extensionUri, "resources", "icons")];
     const label = entry.node.label.kind === "name" ? entry.node.label.text : entry.node.label.translations[language()];
     const title = `${label} · ${message(vscode.env.language, "properties")}`;
     this.panel = vscode.window.createWebviewPanel("eska.explorer.properties", title, vscode.ViewColumn.Active,
@@ -66,7 +72,7 @@ class PropertyTab implements vscode.Disposable {
   changed(tree: MetadataTree, entries: TreeEntry[] | undefined): void {
     if (this.disposed || this.tree !== tree || this.version === this.projectVersion()) return;
     this.version = this.projectVersion();
-    if (entries) {
+    if (entries && !presentedItems(this.choices).some(item => item.status)) {
       let cursor: TreeEntry | undefined = this.entry;
       while (cursor && !entries.includes(cursor)) cursor = tree.parent(cursor);
       if (!cursor) return;
@@ -153,11 +159,30 @@ class PropertyTab implements vscode.Disposable {
       this.publish();
     } else if (input.type === "refresh") {
       await this.load();
+    } else if (input.type === "openReference" && typeof input.target === "string"
+      && input.revision === this.state.revision && this.state.status === "ready"
+      && this.tree === this.currentTree() && referenceTargets(this.choices).has(input.target)) {
+      await this.followReference(input.target);
     } else if (input.type === "openXml" && input.revision === this.state.revision && Number.isSafeInteger(input.index)) {
       const choice = this.choices[input.index as number];
       if (choice && this.state.status === "ready" && this.tree === this.currentTree()) {
         await this.openXml(this.entry, choice);
       }
+    }
+  }
+
+  /** Revalidate ancestry in the same project and discard navigation overtaken by refresh. */
+  private async followReference(target: string): Promise<void> {
+    const revision = this.revision;
+    const tree = this.tree;
+    try {
+      const entry = await revealHit(tree, this.entry.project, { objectId: target, node: { kind: "object", objectId: target } }, this.controller?.signal);
+      if (!this.disposed && revision === this.revision && tree === this.currentTree()) await this.openReference(tree, entry);
+    } catch (error) {
+      if (this.disposed || revision !== this.revision || tree !== this.currentTree()) return;
+      const failure = error instanceof ExplorerError ? error : new ExplorerError("requestFailed");
+      this.state = this.makeState("ready", message(vscode.env.language, failure.code));
+      this.publish();
     }
   }
 
@@ -188,6 +213,7 @@ class PropertyTab implements vscode.Disposable {
     return {
       type: "state", revision: this.revision, title: heading.title, path: heading.path, status, notice,
       language: this.language(),
+      icons: this.icons(),
       picture: status === "ready" ? this.picture
         : status === "loading" && this.entry.node.metadataKind === "common-picture" ? { status: "loading" } : undefined,
       labels: {
@@ -197,13 +223,23 @@ class PropertyTab implements vscode.Disposable {
         xmlOnly: text("propertyXmlOnly"), count: text("propertyCount", "{0}"),
         items: text("propertyItems", "{0}"), item: text("propertyItem", "{0}"),
         enabled: text("propertyEnabled", "{0}", "{1}"),
+        referenceMissing: text("propertyReferenceMissing"),
+        referenceUnavailable: text("propertyReferenceUnavailable"),
         picture: text("picturePreview"), pictureLoading: text("pictureLoading"), pictureMissing: text("pictureMissing"),
         pictureUnsupported: text("pictureUnsupported"), pictureInvalid: text("pictureInvalid"),
         pictureTooLarge: text("pictureTooLarge"), pictureUnavailable: text("pictureUnavailable"),
       },
-      properties: this.choices.map(({ index, label, key, caption, qualifiers, value, description }) =>
-        ({ index, label, key, ...(caption ? { caption } : {}), qualifiers, value, description })),
+      properties: this.choices.map(({ index, label, key, caption, qualifiers, value, description, presentation }) =>
+        ({ index, label, key, ...(caption ? { caption } : {}), qualifiers, value, description, ...(presentation ? { presentation } : {}) })),
     };
+  }
+
+  /** Reuse the packaged tree artwork; workspace data never supplies resource URLs. */
+  private icons(): Record<string, Record<string, string>> {
+    const kinds = new Set(presentedItems(this.choices).map(item => item.metadataKind));
+    return Object.fromEntries(Object.entries(metadataIcons).filter(([kind]) => kinds.has(kind)).map(([kind, name]) => [kind,
+      Object.fromEntries(["light", "dark", "contrast", "contrast-light"].map(theme => [theme,
+        this.panel.webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "resources", "icons", theme, `${name}.svg`)).toString()]))]));
   }
 
   /** Package local CSS/JS with a strict CSP; workspace text reaches the DOM only via textContent. */
@@ -214,7 +250,7 @@ class PropertyTab implements vscode.Disposable {
     const lang = vscode.env.language.toLowerCase().startsWith("ru") ? "ru" : "en";
     return `<!doctype html><html lang="${lang}"><head><meta charset="utf-8">
       <meta name="viewport" content="width=device-width, initial-scale=1">
-      <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src ${webview.cspSource}; script-src ${webview.cspSource};">
+      <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data: ${webview.cspSource}; style-src ${webview.cspSource}; script-src ${webview.cspSource};">
       <link rel="stylesheet" href="${css}"><title>ESKA Properties</title></head>
       <body><main class="page"><header class="heading"><div id="breadcrumb" class="breadcrumb"></div>
       <div class="title-row"><h1 id="title"></h1><span id="read-only" class="badge"></span></div></header>
@@ -253,7 +289,7 @@ export class PropertyTabs implements vscode.Disposable {
       await tab.show(tree, entry);
       return;
     }
-    tab = new PropertyTab(this.context, tree, entry, this.language, this.currentTree, this.openXml,
+    tab = new PropertyTab(this.context, tree, entry, this.language, this.currentTree, this.openXml, (tree, entry) => this.show(tree, entry),
       () => { this.tabs.delete(key); });
     this.tabs.set(key, tab);
     await tab.load();

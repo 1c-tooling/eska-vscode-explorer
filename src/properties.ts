@@ -1,11 +1,12 @@
 import { createHash } from "node:crypto";
+import { parsePresentation, type PropertyPresentation } from "./property-presentation.js";
 import { message } from "./messages.js";
 import { ExplorerError, isRecord } from "./protocol.js";
 
 export interface PropertyKey { namespace: string | null; name: string }
 export interface PropertyQualifier { key: PropertyKey; value: string; caption?: PropertyCaption }
 export interface PropertyCaption { "ru-RU": string; "en-US": string }
-export interface PropertyField { key: PropertyKey; caption?: PropertyCaption; qualifiers: PropertyQualifier[]; value: PropertyValue }
+export interface PropertyField { presentation?: PropertyPresentation; key: PropertyKey; caption?: PropertyCaption; qualifiers: PropertyQualifier[]; value: PropertyValue }
 export type PropertyValue = { kind: "text"; text: string; caption?: PropertyCaption; scalarType?: "boolean" }
   | { kind: "localized"; items: { language: string; content: string }[] }
   | { kind: "record"; fields: PropertyField[] }
@@ -13,16 +14,12 @@ export type PropertyValue = { kind: "text"; text: string; caption?: PropertyCapt
 
 const METADATA_NAMESPACE = "http://v8.1c.ru/8.3/MDClasses";
 
-export interface PropertyChoice {
+export interface PropertyChoice extends PropertyField {
   label: string;
   description: string;
   index: number;
   fingerprint: string;
   range: { start: number; end: number };
-  key: PropertyKey;
-  caption?: PropertyCaption;
-  qualifiers: PropertyQualifier[];
-  value: PropertyValue;
 }
 
 /** Prefer the tree language, then any nonempty synonym defined for the object. */
@@ -38,9 +35,9 @@ export function objectSynonym(properties: readonly PropertyChoice[], language: s
     ?? items[0])?.content.trim();
 }
 
-/** A small digest detects edits while the tab is open without retaining large values twice. */
+/** Source navigation ignores derived target captions, which can change in another descriptor. */
 export function propertyFingerprint(property: unknown): string {
-  return createHash("sha256").update(JSON.stringify(property)).digest("hex");
+  return createHash("sha256").update(JSON.stringify(property, (key, value) => key === "presentation" ? undefined : value)).digest("hex");
 }
 
 /** Namespace-aware keys stay distinct even when Designer uses different XML prefixes. */
@@ -59,7 +56,9 @@ function parseField(value: unknown, depth: number): PropertyField {
     if (!isRecord(qualifier) || typeof qualifier.value !== "string") throw new ExplorerError("protocolInvalid");
     return { key: parseKey(qualifier.key), value: qualifier.value, ...parseCaption(qualifier.caption) };
   });
-  return { key: parseKey(value.key), qualifiers, value: parseValue(value.value, depth), ...parseCaption(value.caption) };
+  const presentation = parsePresentation(value.presentation);
+  return { key: parseKey(value.key), qualifiers, value: parseValue(value.value, depth), ...parseCaption(value.caption),
+    ...(presentation ? { presentation } : {}) };
 }
 
 /** Validate optional presentation metadata without modifying the original scalar value. */

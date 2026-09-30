@@ -1,3 +1,4 @@
+import { presentationView } from "./presentation.mjs";
 import { createPictureView } from "./picture.mjs";
 import { booleanValue, checklistEntry, childrenWithPaths, identity, isCollection, localizedEntries, searchable, summary, translated } from "./model.mjs";
 
@@ -34,11 +35,10 @@ function element(tag, className, text) {
   return node;
 }
 
-/** Keep raw identities visible without repeating identical human-readable text. */
-function namedText(title, raw) {
+/** Display the readable caption; raw identities remain searchable and available in XML. */
+function namedText(title) {
   const node = element("span", "name-text");
   node.append(element("span", "caption", title));
-  if (raw && raw !== title) node.append(element("span", "technical-name", raw));
   return node;
 }
 
@@ -58,8 +58,7 @@ function propertyName(tag, className, field) {
   const title = translated(field, snapshot.language, field.key.name);
   const checked = booleanValue(field.value);
   if (checked !== undefined) node.append(checkbox(checked, title));
-  node.append(namedText(title, field.key.name));
-  node.title = field.key.namespace ?? "";
+  node.append(namedText(title));
   return node;
 }
 
@@ -88,18 +87,6 @@ function disclosure(path, title, preview) {
   return details;
 }
 
-/** XML annotations remain available beneath a value, with captions for known identities. */
-function qualifiersView(qualifiers) {
-  const group = element("div", "qualifiers");
-  for (const qualifier of qualifiers) {
-    const caption = translated(qualifier, snapshot.language, qualifier.value);
-    const chip = element("span", "qualifier", `@${qualifier.key.name} = ${caption}`);
-    chip.title = `${qualifier.key.namespace ?? ""} ${qualifier.value}`;
-    group.append(chip);
-  }
-  return group;
-}
-
 /** Structured scalar fields align in two columns; complex children get the full width. */
 function structureView(field, path, query, depth) {
   const group = element("div", "structure");
@@ -109,7 +96,6 @@ function structureView(field, path, query, depth) {
     const row = element("div", `field${complex ? " complex-field" : ""}${booleanValue(child.field.value) !== undefined ? " boolean-field" : ""}`);
     row.append(propertyName("div", "field-name", child.field));
     if (booleanValue(child.field.value) === undefined) row.append(valueView(child.field, child.path, childQuery(child.field, query), depth + 1));
-    if (child.field.qualifiers.length) row.append(qualifiersView(child.field.qualifiers));
     group.append(row);
   }
   return group;
@@ -121,22 +107,20 @@ function collectionEntry(root, field, path, index, query, depth) {
   if (flag) {
     const row = element("div", "checklist-row");
     const title = translated(flag.name, snapshot.language, flag.name.text);
-    row.append(checkbox(flag.checked, title), namedText(title, flag.name.text));
+    row.append(checkbox(flag.checked, title), namedText(title));
     return row;
   }
-  if (field.value.kind !== "record") {
+  if (field.presentation || field.value.kind !== "record") {
     const row = element("div", "collection-value");
     const checked = booleanValue(field.value);
     row.append(checked === undefined ? valueView(field, path, query, depth + 1) : propertyName("div", "field-name", field));
-    if (field.qualifiers.length) row.append(qualifiersView(field.qualifiers));
     return row;
   }
   const name = identity(field, snapshot.language);
-  const title = namedText(name?.title ?? `${translated(field, snapshot.language, field.key.name)} · ${snapshot.labels.item.replace("{0}", String(index + 1))}`, name?.raw);
+  const title = namedText(name?.title ?? `${translated(field, snapshot.language, field.key.name)} · ${snapshot.labels.item.replace("{0}", String(index + 1))}`);
   const details = disclosure(path, title, summary(field, snapshot.language));
   const body = element("div", "entry-body");
   body.append(valueView(field, `${path}/body`, childQuery(field, query), depth + 1));
-  if (field.qualifiers.length) body.append(qualifiersView(field.qualifiers));
   details.append(body);
   return details;
 }
@@ -165,10 +149,15 @@ function valueView(field, path, query, depth = 0) {
   const value = field.value;
   const labels = snapshot.labels;
   if (depth > 32) return element("span", "value unsupported", labels.xmlOnly);
+  if (field.presentation) {
+    const revision = snapshot.revision;
+    return presentationView(document, field.presentation, snapshot.language, labels, snapshot.icons,
+      target => vscode.postMessage({ type: "openReference", revision, target }));
+  }
   if (value.kind === "text") {
     const translatedValue = translated(value, snapshot.language, value.text);
     const node = element("div", "value text-value");
-    node.append(namedText(translatedValue || "—", value.caption ? value.text : undefined));
+    node.append(namedText(translatedValue || "—"));
     return node;
   }
   const localized = localizedEntries(value);
@@ -202,7 +191,6 @@ function propertyView(property, path, query) {
   head.append(propertyName("h2", "property-name", property), button);
   card.append(head);
   if (checked === undefined) card.append(valueView(property, path, childQuery(property, query)));
-  if (property.qualifiers.length) card.append(qualifiersView(property.qualifiers));
   return card;
 }
 

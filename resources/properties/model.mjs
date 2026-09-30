@@ -74,6 +74,10 @@ export function identity(field, language) {
 export function searchable(field, language, depth = 0) {
   if (depth > 32) return "";
   const parts = [field.key.name, translated(field, language, ""), ...field.qualifiers.flatMap(q => [q.key.name, q.value, translated(q, language, "")])];
+  const view = field.presentation;
+  if (view) for (const item of view.kind === "types" ? view.items : [view]) {
+    parts.push(item.caption[language], item.category?.[language] ?? "", item.detail?.[language] ?? "");
+  }
   if (field.value.kind === "text") parts.push(field.value.text, translated(field.value, language, ""));
   if (field.value.kind === "localized") parts.push(...field.value.items.flatMap(item => [item.language, item.content]));
   if (field.value.kind === "record") parts.push(...field.value.fields.map(item => searchable(item, language, depth + 1)));
@@ -82,6 +86,7 @@ export function searchable(field, language, depth = 0) {
 
 /** A short summary gives named collection entries useful context before expansion. */
 export function summary(field, language) {
+  if (field.presentation?.kind === "types") return field.presentation.items.map(item => item.caption[language]).join(" · ");
   if (field.value.kind !== "record") return "";
   const parts = [];
   /** Bound traversal and text size so large records cannot dominate their collection row. */
