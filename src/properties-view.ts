@@ -238,7 +238,7 @@ class PropertyTab implements vscode.Disposable {
   }
 
   /** Keep the displayed snapshot and draft values intact until an explicit reread. */
-  private blockEditing(key: "propertyConflict" | "propertyWriteUnknown"): void {
+  private blockEditing(key: "propertyConflict" | "propertyWriteUnknown" | "propertyBusy" | "propertyRecovery"): void {
     this.editor.blocked = true;
     this.pendingEdits.clear();
     this.editorNotice(key);
@@ -397,7 +397,9 @@ class PropertyTab implements vscode.Disposable {
         this.state = this.makeState(this.state.status, message(vscode.env.language, "propertyDependency",
           choice?.caption?.[this.language()] ?? choice?.label ?? message(vscode.env.language, "properties")));
         this.publish();
-      } else if (domain === "property_invalid") this.editorNotice("propertyInvalid");
+      } else if (domain === "property_edit_busy") this.blockEditing("propertyBusy");
+      else if (domain === "property_recovery_required") this.blockEditing("propertyRecovery");
+      else if (domain === "property_invalid") this.editorNotice("propertyInvalid");
       else if (domain === "property_unsupported" || domain === "property_read_only") this.editorNotice("propertyLocked");
       else this.blockEditing(domain === "property_conflict" || domain === "stale_generation" ? "propertyConflict" : "propertyWriteUnknown");
       this.pendingEdits.clear();

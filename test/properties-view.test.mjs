@@ -4,6 +4,7 @@ import { createRequire } from "node:module";
 import { readFileSync } from "node:fs";
 import { runInNewContext } from "node:vm";
 import { nodeKey } from "../out/tree.js";
+import { ExplorerError } from "../out/protocol.js";
 
 /** Exercise the real tab controller with deterministic visibility and delayed backend responses. */
 function fixture(t) {
@@ -403,3 +404,18 @@ test("an incompatible type reports its dependent property without blocking the t
   assert.equal(Object.values(tab.state.editing.draftTitles)[0], "Булево");
   assert.equal(f.requests.length, 4);
 });
+
+/** A concurrent or interrupted structural operation keeps the draft and never resubmits it automatically. */
+for (const [domain, notice] of [["property_edit_busy", /Другой процесс/], ["property_recovery_required", /Переименование.*прервано/]]) {
+  test(`${domain} blocks further autosaves and preserves input`, async t => {
+    const f = fixture(t), tab = await openEditable(f);
+    const change = { kind: "text", value: "keep" };
+    const saving = tab.receive({ type: "commit", revision: tab.state.revision, field: 0, change });
+    f.requests[2].reject(new ExplorerError("requestFailed", domain)); await saving;
+    assert.equal(tab.state.editing.blocked, true);
+    assert.match(tab.state.notice, notice);
+    assert.equal(Object.values(tab.state.editing.drafts)[0].value, "keep");
+    await tab.receive({ type: "commit", revision: tab.state.revision, field: 0, change });
+    assert.equal(f.requests.length, 3);
+  });
+}
