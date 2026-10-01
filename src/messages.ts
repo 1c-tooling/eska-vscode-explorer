@@ -49,6 +49,7 @@ const en = {
   propertyDraftsFirst: "Save or cancel the pending input before undoing saved changes.",
   propertyDirtyXml: "The XML editor has unsaved changes. Save or undo them before saving this property.",
   propertyInvalid: "This value is outside the allowed domain. Correct the input; the file was not changed.",
+  propertyIntegerRange: "Integer from {0} to {1}",
   propertyDependency: "First clear or change “{0}”: its current value is incompatible with this change.",
 
   supportLoading: "Checking 1C support rules…",
@@ -172,6 +173,7 @@ const ru: Record<keyof typeof en, string> = {
   propertyDraftsFirst: "Сохраните или отмените введённое значение перед отменой сохранённых изменений.",
   propertyDirtyXml: "В редакторе XML есть несохранённые изменения. Сохраните или отмените их перед записью свойства.",
   propertyInvalid: "Значение выходит за допустимые ограничения. Исправьте ввод; файл не изменён.",
+  propertyIntegerRange: "Целое число от {0} до {1}",
   propertyDependency: "Сначала очистите или измените «{0}»: текущее значение несовместимо с этим изменением.",
 
   supportLoading: "Проверка правил поддержки 1С…",

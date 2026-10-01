@@ -85,7 +85,14 @@ export function editorView(document, property, fields, snapshot, post) {
         control.value = value;
         if (control.tagName === "TEXTAREA") control.rows = Math.min(8, Math.max(2, value.split("\n").length));
         else control.type = "text";
-        if (schema.kind === "integer" || schema.kind === "decimal") control.inputMode = "decimal";
+        if (schema.kind === "integer" || schema.kind === "decimal") control.inputMode = schema.kind === "integer" ? "numeric" : "decimal";
+        if (schema.kind === "integer" && Number.isSafeInteger(schema.min) && Number.isSafeInteger(schema.max)) {
+          const hint = document.createElement("small");
+          hint.id = `${controlId}-range`; hint.className = "property-constraint";
+          hint.textContent = snapshot.labels.integerRange.replace("{0}", String(schema.min)).replace("{1}", String(schema.max));
+          control.setAttribute("aria-describedby", hint.id);
+          row.append(hint);
+        }
         if (schema.nullable) control.placeholder = snapshot.labels.unset;
         control.autocomplete = "off";
         control.spellcheck = false;

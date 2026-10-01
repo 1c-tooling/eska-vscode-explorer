@@ -195,6 +195,7 @@ button:focus-visible, summary:focus-visible { outline: 1px solid var(--vscode-fo
 button:disabled { cursor: default; opacity: .6; }
 .property-editors { display: grid; gap: 14px; margin-top: 2px; }
 .property-editor { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 5px 10px; max-width: 700px; }
+.property-constraint { grid-column: 1; grid-row: 3; color: var(--vscode-descriptionForeground); }
 .property-editor > label { grid-column: 1 / -1; color: var(--vscode-descriptionForeground); }
 .property-input { grid-column: 1; width: 100%; min-width: 0; min-height: 30px; padding: 5px 8px; font: inherit;
   color: var(--vscode-input-foreground); background: var(--vscode-input-background);
