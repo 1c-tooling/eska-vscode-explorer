@@ -97,7 +97,7 @@ test("native CLI update checks validate status, method and version before displa
 
 test("compatible API major still requires search and file-event support", () => {
   const hello = { apiVersion: API_VERSION, server: { name: "eska", version: "0.11.0" },
-    capabilities: { designerXml: true, readOnly: true, multiContext: false, search: true, clientFileEvents: true },
+    capabilities: { designerXml: true, readOnly: false, propertyEditing: true, metadataRename: true, linkedPropertyEdits: true, unsignedIntegerProperties: true, multiContext: false, search: true, clientFileEvents: true },
     limits: { maxHeaderBytes: MAX_HEADER, maxRequestBytes: MAX_REQUEST, maxResponseBytes: MAX_RESPONSE } };
   assert.equal(parseHandshake(hello), "0.11.0");
   for (const capability of ["search", "clientFileEvents"]) assert.throws(() => parseHandshake({ ...hello, capabilities: { ...hello.capabilities, [capability]: false } }), { code: "incompatible" });

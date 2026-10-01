@@ -62,6 +62,29 @@ async function fixture(t) {
   return { root, setup, events };
 }
 
+/** An explicitly selected backend must work even if global discovery would fail. */
+test("development override bypasses global probes and installation without bypassing cancellation", async t => {
+  const { root, setup } = await fixture(t);
+  replace(t, installation, "inspectGlobal", async () => { assert.fail("unrelated global CLI was probed"); });
+  replace(t, installation, "latestRelease", async () => { assert.fail("development connection queried a release"); });
+  const path = join(root, "development/eska");
+  assert.equal(await setup.ensure(undefined, path), path);
+  assert.equal(await setup.ensure(AbortSignal.abort(), path), undefined);
+  await setup.shutdown();
+  assert.equal(await setup.ensure(undefined, path), undefined);
+  assert.equal(ui.tasks.length, 0);
+});
+
+/** The ordinary default still resolves and checks the global CLI. */
+test("default backend keeps global compatibility preflight", async t => {
+  const { root, setup } = await fixture(t);
+  const path = join(root, "global/eska");
+  let probes = 0;
+  replace(t, installation, "inspectGlobal", async () => { probes++; return { path, version: "0.14.1", compatible: true }; });
+  assert.equal(await setup.ensure(), path);
+  assert.equal(probes, 1);
+});
+
 test("declining a CLI update starts no task; accepting handles early completion and reconnects", async t => {
   const { root, setup, events } = await fixture(t);
   const path = join(root, "bin/eska");

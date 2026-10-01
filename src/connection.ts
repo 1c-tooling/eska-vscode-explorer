@@ -17,6 +17,7 @@ export class Connection {
   private disposed = false;
   private current: ConnectionState = { kind: "disconnected" };
   private lastTarget: ConnectionTarget | undefined;
+  private structuralRequest: Promise<unknown> | undefined;
   private readonly listeners = new Set<(method: string, params: unknown) => void>();
 
   constructor(
@@ -32,8 +33,20 @@ export class Connection {
 
   /** A replaced session cannot publish responses into the replacement tree. */
   async request(sessionId: string, method: string, params: Record<string, unknown> = {}, signal?: AbortSignal): Promise<unknown> {
+    while (this.structuralRequest) {
+      try { await this.structuralRequest; } catch { /* Recheck the live session after a failed structural operation. */ }
+      if (signal?.aborted) throw new ExplorerError("cancelled");
+    }
     const child = this.sessionChild(sessionId);
-    const result = await child.request(method, { ...params, sessionId }, undefined, signal);
+    const structural = ["metadata/renamePreview", "metadata/renameApply", "metadata/undoProperty"].includes(method)
+      || (method === "metadata/updateProperty" && typeof params?.contextSnapshot === "string");
+    // Backend scans cannot stop midway. Keep the barrier until their actual reply, even if a tab closes.
+    const pending = child.request(method, { ...params, sessionId }, structural ? 600_000 : undefined, structural ? undefined : signal);
+    if (structural) this.structuralRequest = pending;
+    let result: unknown;
+    try { result = await pending; }
+    finally { if (this.structuralRequest === pending) this.structuralRequest = undefined; }
+    if (signal?.aborted) throw new ExplorerError("cancelled");
     if (child !== this.sessionChild(sessionId)) throw new ExplorerError("obsolete");
     return result;
   }
@@ -86,7 +99,7 @@ export class Connection {
         });
         this.child = child;
         const response = await child.request("initialize", {
-          apiVersion: API_VERSION, client: { name: "eska-explorer", version: this.version }, locale: target.locale,
+          apiVersion: API_VERSION, client: { name: "eska-explorer", version: this.version }, locale: target.locale, allowPropertyEdits: true,
         }, 10_000);
         const version = parseHandshake(response);
         negotiated = true;

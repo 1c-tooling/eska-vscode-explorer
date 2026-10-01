@@ -1,10 +1,11 @@
 # Connect a project to ESKA Explorer
 
-A global ESKA 0.11.0 or newer with compatible IDE API 1.0 is required.
-Explorer offers installation if it is missing or incompatible. Installation and
-updates require an explicit button click. `eska.explorer.executable` selects a
-development backend; a compatible global CLI is still required. For Remote,
-installation belongs to the workspace host. [CLI management (Russian)](cli-management.md).
+ESKA 0.11.0 or newer with compatible IDE API 1.9 is required.
+When using the global CLI, Explorer offers installation if it is missing or
+incompatible. Installation and updates require an explicit button click.
+`eska.explorer.executable` selects a development backend; an explicit path is
+checked directly and does not require a global CLI. For Remote, installation
+belongs to the workspace host. [CLI management (Russian)](cli-management.md).
 
 If an existing project has no `eska.toml`, open a terminal at its root and run
 `eska init`. Select the project type, source directory and workflow using the CLI
@@ -18,5 +19,5 @@ or build a 1C configuration automatically. CLI installation requires confirmatio
 ## Install the extension
 
 Install the VSIX using **Extensions → Install from VSIX…**, then reload if prompted.
-The extension ID is `1c-tooling.eska-explorer`. A compatible global backend is required.
+The extension ID is `1c-tooling.eska-explorer`. A compatible backend is required.
 [Packaging instructions](packaging.md).

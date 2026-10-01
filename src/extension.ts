@@ -601,11 +601,10 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
       if (!this.folders().some((value) => value.uri.toString() === folder.uri.toString())) return;
       assertHost(vscode.workspace.isTrusted, folder.uri.scheme, vscode.env.remoteName);
       this.selected = folder;
-      const global = await this.setup.ensure(controller.signal);
-      if (!global || this.disposed || controller.signal.aborted) return;
-      if (!this.folders().some(value => value.uri.toString() === folder.uri.toString())) return;
       const configured = vscode.workspace.getConfiguration("eska.explorer", folder.uri).get<string>("executable", "eska");
-      const executable = configured === "eska" ? global : configured;
+      const executable = await this.setup.ensure(controller.signal, configured);
+      if (!executable || this.disposed || controller.signal.aborted) return;
+      if (!this.folders().some(value => value.uri.toString() === folder.uri.toString())) return;
       // Release the picker guard before the asynchronous handshake, allowing disconnect/restart.
       this.selecting = false;
       await this.connection.connect({ executable, path: folder.uri.fsPath, name: folder.name,

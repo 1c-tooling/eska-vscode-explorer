@@ -1,5 +1,5 @@
 /** The public IDE API is versioned independently from the eska executable. */
-export const API_VERSION = { major: 1, minor: 0 } as const;
+export const API_VERSION = { major: 1, minor: 11 } as const;
 export const MAX_HEADER = 8192;
 export const MAX_REQUEST = 1_048_576;
 export const MAX_RESPONSE = 67_108_864;
@@ -15,7 +15,7 @@ export type FailureCode =
 
 /** Only stable categories cross into the localized UI; raw protocol text stays private. */
 export class ExplorerError extends Error {
-  constructor(readonly code: FailureCode, readonly domain?: string) {
+  constructor(readonly code: FailureCode, readonly domain?: string, readonly details?: Record<string, unknown>) {
     super(code);
     this.name = "ExplorerError";
   }
@@ -50,7 +50,7 @@ export function parseHandshake(value: unknown): string {
   const { apiVersion, server, capabilities, limits } = value;
   if (apiVersion.major !== API_VERSION.major || !Number.isSafeInteger(apiVersion.minor)
     || (apiVersion.minor as number) < API_VERSION.minor || server.name !== "eska"
-    || capabilities.designerXml !== true || capabilities.readOnly !== true
+    || capabilities.designerXml !== true || (capabilities.readOnly !== false || capabilities.propertyEditing !== true || capabilities.metadataRename !== true || capabilities.linkedPropertyEdits !== true || capabilities.unsignedIntegerProperties !== true)
     || capabilities.multiContext !== false || capabilities.search !== true || capabilities.clientFileEvents !== true) {
     throw new ExplorerError("incompatible");
   }
@@ -119,5 +119,5 @@ export function responseError(value: Record<string, unknown>): ExplorerError {
     : kind === "source_missing" || kind === "unknown_node" || kind === "unknown_object" ? "sourceMissing"
     : kind === "xml_invalid" || kind === "source_invalid" ? "branchInvalid"
     : kind === "source_changed" ? "sourceChanged" : "requestFailed";
-  return new ExplorerError(code, kind);
+  return new ExplorerError(code, kind, isRecord(data) && isRecord(data.details) ? data.details : undefined);
 }

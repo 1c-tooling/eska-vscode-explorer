@@ -4,11 +4,13 @@ import { createRequire } from "node:module";
 import { readFileSync } from "node:fs";
 import { runInNewContext } from "node:vm";
 import { nodeKey } from "../out/tree.js";
+import { ExplorerError } from "../out/protocol.js";
 
 /** Exercise the real tab controller with deterministic visibility and delayed backend responses. */
 function fixture(t) {
   const requests = [], opened = [];
   const vscode = {
+    workspace: { isTrusted: true, textDocuments: [] },
     env: { language: "ru-RU" }, ViewColumn: { Active: -1 },
     Uri: { joinPath: (...parts) => parts.join("/") },
     window: { createWebviewPanel: () => {
@@ -28,7 +30,7 @@ function fixture(t) {
   const adapter = { exports: {} };
   runInNewContext(`(function(require,module,exports){${readFileSync(new URL("../out/properties-view.js", import.meta.url), "utf8")}\n})`, { AbortController })(
     name => name === "vscode" ? vscode : require(name), adapter, adapter.exports);
-  const project = { key: "project", nodes: new Map(), info: { generation: "1", eventSequence: "0", scope: { kind: "standalone" }, type: "configuration" } };
+  const project = { key: "project", nodes: new Map(), info: { generation: "1", eventSequence: "0", scope: { kind: "standalone" }, type: "configuration", sourcePath: { value: "/project/src", encoding: "utf-8" } } };
   const tree = {
     connection: {},
     parent: entry => entry.node.parent ? project.nodes.get(nodeKey(entry.node.parent)) : undefined,
@@ -53,7 +55,7 @@ function fixture(t) {
     project.info.eventSequence = String(Number(project.info.eventSequence) + 1);
     tabs.changed(tree, entries);
   }
-  return { tabs, tree, root, object, sibling, requests, opened, change,
+  return { tabs, tree, root, object, sibling, requests, opened, change, vscode,
     replaceTree(value) { currentTree = value; } };
 }
 
@@ -234,4 +236,253 @@ test("reference captions reload when a target changes and late navigation cannot
   assert.equal(f.tabs.tabs.size, 1);
   f.requests[2].resolve(linkedResponse());
   await settle();
+});
+
+/** The schema's paths, snapshot and writable flag come from the backend, not webview input. */
+function editable(value = "before", snapshot = "a".repeat(64)) {
+  return { snapshot, source: { value: "Configuration.xml", encoding: "utf-8" }, writable: true, undo: false, redo: false,
+    fields: [{ path: [{ key: { namespace: null, name: "Comment" }, occurrence: 0 }], value, language: null,
+      captions: [{ "ru-RU": "Комментарий", "en-US": "Comment" }], schema: { kind: "text" } }] };
+}
+
+/** Open locked, then explicitly unlock through the same message path as the webview. */
+async function openEditable(f, schema = editable()) {
+  const opening = f.tabs.show(f.tree, f.object);
+  f.requests[0].resolve(response()); await opening;
+  const [tab] = f.tabs.tabs.values();
+  assert.equal(tab.state.editing.unlocked, false);
+  const unlock = tab.receive({ type: "toggleLock", revision: tab.state.revision });
+  f.requests[1].resolve(schema); await unlock;
+  assert.equal(tab.state.editing.unlocked, true);
+  return tab;
+}
+
+/** Reference controls save the selected backend option, rejecting raw webview proposals. */
+test("reference picker uses backend choices and nullable clearing without accepting arbitrary strings", async t => {
+  const f = fixture(t), schema = editable("");
+  schema.fields[0].schema = {kind:"reference",domain:"CommonForm",nullable:true};
+  const tab = await openEditable(f, schema);
+  await tab.receive({type:"commit",revision:tab.state.revision,field:0,change:{kind:"text",value:"CommonForm.Injected"}});
+  assert.equal(f.requests.length,2);
+  f.vscode.window.showQuickPick = async options => {
+    assert.equal(options[0].value, "");
+    return options.find(option => option.value === "CommonForm.Report");
+  };
+  const picking = tab.receive({type:"pickReference",revision:tab.state.revision,field:0});
+  assert.equal(f.requests[2].method,"metadata/propertyReferenceChoices");
+  f.requests[2].resolve({choices:[{value:"CommonForm.Report",caption:{"ru-RU":"Общая форма · Отчет"}}]});
+  await settle();
+  assert.equal(f.requests[3].method,"metadata/updateProperty");
+  assert.equal(f.requests[3].params.change.value,"CommonForm.Report");
+  const next = {...schema,snapshot:"b".repeat(64),fields:[{...schema.fields[0],value:"CommonForm.Report"}]};
+  f.requests[3].resolve({...response(),editing:next}); await picking;
+  assert.equal(Object.keys(tab.state.editing.drafts).length,0);
+});
+
+test("edits keep drafts through external conflicts and never write while blocked", async t => {
+  const f = fixture(t), tab = await openEditable(f);
+  const change = { kind: "text", value: "mine" };
+  await tab.receive({ type: "draft", revision: tab.state.revision, field: 0, change });
+  f.change([f.object]);
+  assert.equal(f.requests[2].method, "metadata/propertyEditing");
+  f.requests[2].resolve(editable("external", "b".repeat(64))); await settle();
+  assert.equal(tab.state.editing.blocked, true);
+  assert.equal(Object.values(tab.state.editing.drafts)[0].value, "mine");
+  await tab.receive({ type: "commit", revision: tab.state.revision, field: 0, change });
+  assert.equal(f.requests.length, 3, "a conflict cannot trigger an automatic overwrite");
+  await tab.receive({ type: "openXml", revision: tab.state.revision, index: 0 });
+  assert.equal(f.opened.length, 0);
+  const reload = tab.receive({ type: "refresh" });
+  assert.equal(f.requests[3].method, "metadata/refresh", "explicit reread invalidates the stale backend cache");
+  f.requests[3].resolve({}); await settle();
+  assert.equal(f.requests[4].method, "metadata/propertyEditing");
+  f.requests[4].resolve(editable("external", "b".repeat(64))); await settle();
+  f.requests[5].resolve(response()); await reload;
+  assert.equal(tab.state.status, "ready");
+  assert.equal(tab.state.editing.blocked, false);
+  assert.equal(tab.state.editing.busy, false);
+  assert.equal(Object.values(tab.state.editing.drafts)[0].value, "mine");
+});
+
+/** A failed picker selection remains visible and can only be retried from the host's retained draft. */
+test("reference drafts keep captions across conflicts and require an explicit save after rereading", async t => {
+  const f = fixture(t), schema = editable("");
+  schema.fields[0].schema = { kind: "reference", domain: "CommonForm", nullable: true };
+  const tab = await openEditable(f, schema);
+  f.vscode.window.showQuickPick = async options => options.at(-1);
+  const picking = tab.receive({ type: "pickReference", revision: tab.state.revision, field: 0 });
+  f.requests[2].resolve({ choices: [{ value: "CommonForm.Report", caption: { "ru-RU": "Общая форма · Отчет" } }] });
+  await settle();
+  f.requests[3].reject(new Error("connection closed")); await picking;
+  assert.equal(Object.values(tab.state.editing.draftTitles)[0], "Общая форма · Отчет");
+  await tab.receive({ type: "applyDraft", revision: tab.state.revision, field: 0 });
+  assert.equal(f.requests.length, 4, "blocked drafts are not written");
+  const reload = tab.receive({ type: "refresh" });
+  f.requests[4].resolve({}); await settle();
+  f.requests[5].resolve({ ...schema, snapshot: "b".repeat(64) }); await settle();
+  f.requests[6].resolve(response()); await reload;
+  assert.equal(Object.values(tab.state.editing.draftTitles)[0], "Общая форма · Отчет");
+  assert.equal(f.requests.length, 7, "rereading never retries a write");
+  const saving = tab.receive({ type: "applyDraft", revision: tab.state.revision, field: 0,
+    change: { kind: "text", value: "CommonForm.Injected" } });
+  assert.equal(f.requests[7].params.change.value, "CommonForm.Report");
+  assert.equal(f.requests[7].params.snapshot, "b".repeat(64));
+  f.requests[7].resolve({ ...response(), editing: schema }); await saving;
+  assert.equal(Object.keys(tab.state.editing.draftTitles).length, 0);
+  assert.equal(Object.keys(tab.state.editing.drafts).length, 0);
+});
+
+test("successful autosave survives its own invalidation and keeps newer draft input", async t => {
+  const f = fixture(t), tab = await openEditable(f);
+  const revision = tab.state.revision;
+  const saving = tab.receive({ type: "commit", revision, field: 0, change: { kind: "text", value: "first" } });
+  assert.equal(f.requests[2].method, "metadata/updateProperty");
+  assert.equal(f.requests[2].params.snapshot, "a".repeat(64));
+  f.change([f.object]);
+  assert.equal(f.requests.length, 3);
+  await tab.receive({ type: "draft", revision, field: 0, change: { kind: "text", value: "second" } });
+  f.requests[2].resolve({ ...response(), editing: { ...editable("first", "b".repeat(64)), undo: true } });
+  await settle();
+  f.requests[3].resolve({ ...editable("first", "b".repeat(64)), undo: true }); await saving;
+  assert.equal(tab.state.editing.blocked, false);
+  assert.equal(Object.values(tab.state.editing.drafts)[0].value, "second");
+  assert.equal(tab.state.editing.schema.undo, true);
+  await tab.receive({ type: "cancelDraft", revision: tab.state.revision, field: 0 });
+  assert.equal(Object.keys(tab.state.editing.drafts).length, 0);
+});
+
+test("unknown write outcomes preserve input; re-opening creates a locked tab", async t => {
+  const f = fixture(t), tab = await openEditable(f);
+  const saving = tab.receive({ type: "commit", revision: tab.state.revision, field: 0, change: { kind: "text", value: "keep" } });
+  f.requests[2].reject(new Error("connection ended after dispatch")); await saving;
+  assert.equal(f.requests.length, 3);
+  assert.equal(tab.state.editing.blocked, true);
+  assert.equal(Object.values(tab.state.editing.drafts)[0].value, "keep");
+  tab.dispose();
+  const opening = f.tabs.show(f.tree, f.object);
+  f.requests[3].resolve(response()); await opening;
+  const [reopened] = f.tabs.tabs.values();
+  assert.equal(reopened.state.editing.unlocked, false);
+});
+
+/** A native value dialog may remain open while a filesystem notification blocks the tab. */
+test("value input stays a draft after an external change and cannot bypass the host picker", async t => {
+  const f = fixture(t), schema = editable("");
+  const key = { namespace: "http://www.w3.org/2001/XMLSchema", name: "string" };
+  schema.fields[0].schema = { kind: "value", key: null, types: [{ key, constraints: { kind: "string", maxLength: 20 }, caption: { "ru-RU": "Строка", "en-US": "String" } }] };
+  const tab = await openEditable(f, schema);
+  await tab.receive({ type: "commit", revision: tab.state.revision, field: 0, change: { kind: "value", key, value: "Injected" } });
+  assert.equal(f.requests.length, 2);
+  let entered;
+  f.vscode.window.showQuickPick = async options => options.at(-1);
+  f.vscode.window.showInputBox = () => new Promise(resolve => { entered = resolve; });
+  const picking = tab.receive({ type: "pickValue", revision: tab.state.revision, field: 0 });
+  await settle();
+  f.change([f.object]);
+  f.requests[2].resolve({ ...schema, snapshot: "b".repeat(64) }); await settle();
+  entered("Keep input"); await picking;
+  assert.equal(tab.state.editing.blocked, true);
+  assert.equal(Object.values(tab.state.editing.drafts)[0].value, "Keep input");
+  assert.match(Object.values(tab.state.editing.draftTitles)[0], /Keep input/);
+  assert.equal(f.requests.length, 3, "accepting the dialog never overwrites a known conflict");
+});
+
+/** Domain rejection preserves the draft and leaves dependent controls available for explicit correction. */
+test("an incompatible type reports its dependent property without blocking the tab", async t => {
+  const f = fixture(t), schema = editable("old");
+  schema.fields[0].schema = { kind: "dataType", key: { namespace: "xs", name: "string" } };
+  const tab = await openEditable(f, schema);
+  f.vscode.window.showQuickPick = async options => options[0];
+  const picking = tab.receive({ type: "pickType", revision: tab.state.revision, field: 0 });
+  f.requests[2].resolve({ choices: [{ key: { namespace: "xs", name: "boolean" }, caption: { "ru-RU": "Булево" } }] });
+  await settle();
+  const { ExplorerError } = await import("../out/protocol.js");
+  f.requests[3].reject(new ExplorerError("requestFailed", "property_dependency", { property: { namespace: null, name: "Comment" } }));
+  await picking;
+  assert.equal(tab.state.editing.blocked, false);
+  assert.match(tab.state.notice, /Comment/);
+  assert.equal(Object.values(tab.state.editing.draftTitles)[0], "Булево");
+  assert.equal(f.requests.length, 4);
+});
+
+/** A concurrent or interrupted structural operation keeps the draft and never resubmits it automatically. */
+for (const [domain, notice] of [["property_edit_busy", /Другой процесс/], ["property_recovery_required", /Изменение.*прервано/]]) {
+  test(`${domain} blocks further autosaves and preserves input`, async t => {
+    const f = fixture(t), tab = await openEditable(f);
+    const change = { kind: "text", value: "keep" };
+    const saving = tab.receive({ type: "commit", revision: tab.state.revision, field: 0, change });
+    f.requests[2].reject(new ExplorerError("requestFailed", domain)); await saving;
+    assert.equal(tab.state.editing.blocked, true);
+    assert.match(tab.state.notice, notice);
+    assert.equal(Object.values(tab.state.editing.drafts)[0].value, "keep");
+    await tab.receive({ type: "commit", revision: tab.state.revision, field: 0, change });
+    assert.equal(f.requests.length, 3);
+  });
+}
+
+/** A moved descriptor keeps its drafts but adopts the new source before dirty-editor checks allow writing. */
+test("an unchanged renamed child updates its source and reuses the same property tab", async t => {
+  const f = fixture(t), tab = await openEditable(f);
+  const revision = tab.state.revision;
+  await tab.receive({ type: "draft", revision, field: 0, change: { kind: "text", value: "keep" } });
+  f.object.node.id.objectId = "new/child";
+  f.project = f.object.project;
+  f.project.nodes.set(nodeKey(f.object.node.id), f.object);
+  f.change([f.object]);
+  assert.equal(tab.state.editing.busy, true);
+  f.requests[2].resolve({ ...editable(), source: { value: "New/Child.xml", encoding: "utf-8" } });
+  await settle();
+  assert.equal(tab.state.editing.schema.source.value, "New/Child.xml");
+  assert.equal(Object.values(tab.state.editing.drafts)[0].value, "keep");
+  await f.tabs.show(f.tree, f.object);
+  assert.equal(f.tabs.tabs.size, 1);
+  f.vscode.workspace.textDocuments.push({ isDirty: true, uri: { scheme: "file", fsPath: "/project/src/New/Child.xml" } });
+  await tab.receive({ type: "commit", revision: tab.state.revision, field: 0, change: { kind: "text", value: "keep" } });
+  assert.equal(f.requests.length, 3);
+  assert.match(tab.state.notice, /несохранённые изменения/);
+});
+
+/** Related descriptors have their own fingerprint; an unchanged primary snapshot cannot conceal a conflict. */
+test("linked editing keeps drafts when a sibling changes its dependency token", async t => {
+  const f = fixture(t), schema = { ...editable(), contextSnapshot: "c".repeat(64), linkedObjects: 1 };
+  schema.fields[0].linked = true;
+  const tab = await openEditable(f, schema);
+  await tab.receive({ type: "draft", revision: tab.state.revision, field: 0, change: { kind: "text", value: "mine" } });
+  f.change([f.sibling]);
+  assert.equal(f.requests[2].method, "metadata/propertyEditing");
+  f.requests[2].resolve({ ...schema, contextSnapshot: "d".repeat(64) }); await settle();
+  assert.equal(tab.state.editing.blocked, true);
+  assert.equal(Object.values(tab.state.editing.drafts)[0].value, "mine");
+  assert.equal(f.requests.length, 3);
+});
+
+/** An atomic change or its undo cannot overwrite an unsaved dependent document. */
+test("linked writes pass the displayed context and block while project XML has unsaved changes", async t => {
+  const f = fixture(t), schema = { ...editable(), contextSnapshot: "c".repeat(64), linkedObjects: 1 };
+  schema.fields[0].linked = true;
+  const tab = await openEditable(f, schema);
+  f.vscode.workspace.textDocuments = [{ isDirty: true, uri: { scheme: "file", fsPath: "/project/src/Documents/Other.xml" } }];
+  const input = { type: "commit", revision: tab.state.revision, field: 0, change: { kind: "text", value: "mine" } };
+  await tab.receive(input);
+  assert.equal(f.requests.length, 2);
+  f.vscode.workspace.textDocuments = [];
+  const saving = tab.receive(input);
+  assert.equal(f.requests[2].params.contextSnapshot, schema.contextSnapshot);
+  f.requests[2].resolve({ ...response(), editing: { ...schema, snapshot: "b".repeat(64), undo: true, undoLinked: true } }); await saving;
+  const undo = tab.receive({ type: "undo", revision: tab.state.revision });
+  assert.equal(f.requests[3].params.contextSnapshot, schema.contextSnapshot);
+  f.requests[3].resolve({ ...response(), editing: schema }); await undo;
+});
+
+/** A multi-file validation failure identifies the document that must be repaired and retains the input. */
+test("linked dependency errors show the blocking document without losing the draft", async t => {
+  const f = fixture(t), schema = { ...editable(), contextSnapshot: "c".repeat(64) };
+  schema.fields[0].linked = true;
+  const tab = await openEditable(f, schema);
+  const saving = tab.receive({ type: "commit", revision: tab.state.revision, field: 0, change: { kind: "text", value: "mine" } });
+  f.requests[2].reject(new ExplorerError("requestFailed", "property_dependency", { objectId: "document:A", objectName: "Приход" }));
+  await saving;
+  assert.match(tab.state.notice, /«Приход»/);
+  assert.equal(Object.values(tab.state.editing.drafts)[0].value, "mine");
+  assert.equal(f.requests.length, 3);
 });
