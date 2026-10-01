@@ -312,7 +312,9 @@ class PropertyTab implements vscode.Disposable {
       delete this.editor.drafts[id];
       delete this.editor.draftTitles[id];
       this.pendingEdits.delete(id);
-      this.state = this.makeState(this.state.status, this.state.notice);
+      const notice = !this.editor.blocked && !this.editor.busy && !Object.keys(this.editor.drafts).length
+        ? message(vscode.env.language, "propertyEditingHint") : this.state.notice;
+      this.state = this.makeState(this.state.status, notice);
       this.publish();
       return;
     }
