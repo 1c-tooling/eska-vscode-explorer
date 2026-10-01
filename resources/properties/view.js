@@ -242,6 +242,7 @@ function propertyView(property, path, query) {
     const restriction = schema?.readOnlyProperties?.find(item => item.key.name === property.key.name && item.key.namespace === property.key.namespace);
     const reason = restriction?.reason === "numerator_inherited" ? snapshot.labels.inheritedNumerator
       : restriction?.reason === "hierarchy_disabled" ? snapshot.labels.hierarchyDisabled
+      : restriction?.reason === "ext_dimension_types_missing" ? snapshot.labels.extDimensionTypesMissing
       : restriction?.reason === "level_limit_disabled" ? snapshot.labels.levelLimitDisabled
       : restriction?.reason === "linked_context_unavailable" ? snapshot.labels.linkedUnavailable : undefined;
     if (reason) card.append(element("p", "property-restriction", reason));
