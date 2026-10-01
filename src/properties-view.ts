@@ -573,6 +573,7 @@ class PropertyTab implements vscode.Disposable {
         chooseReference: text("propertyChooseReference"), unset: text("propertyUnset"),
         chooseValue: text("propertyChooseValue"), rename: text("rename"),
         integerRange: text("propertyIntegerRange", "{0}", "{1}"),
+        inheritedNumerator: text("propertyInheritedNumerator"),
         notEditable: text("propertyNotEditable"), saved: text("propertySaved"),
         properties: text("properties"), search: text("propertySearch"), refresh: text("propertyRefresh"),
         openXml: text("openXml"), empty: text("propertyEmpty"), noMatches: text("propertyNoMatches"),

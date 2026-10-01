@@ -237,6 +237,10 @@ function propertyView(property, path, query) {
       card.append(original);
     }
   } else if (!directBoolean && checked === undefined) card.append(valueView(property, path, childQuery(property, query)));
+  if (snapshot.editing?.unlocked && snapshot.editing.schema?.readOnlyProperties?.some(item =>
+    item.key.name === property.key.name && item.key.namespace === property.key.namespace && item.reason === "numerator_inherited")) {
+    card.append(element("p", "property-restriction", snapshot.labels.inheritedNumerator));
+  }
   return card;
 }
 

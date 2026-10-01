@@ -50,6 +50,7 @@ const en = {
   propertyDirtyXml: "The XML editor has unsaved changes. Save or undo them before saving this property.",
   propertyInvalid: "This value is outside the allowed domain. Correct the input; the file was not changed.",
   propertyIntegerRange: "Integer from {0} to {1}",
+  propertyInheritedNumerator: "Set by the document's number generator.",
   propertyDependency: "First clear or change “{0}”: its current value is incompatible with this change.",
 
   supportLoading: "Checking 1C support rules…",
@@ -174,6 +175,7 @@ const ru: Record<keyof typeof en, string> = {
   propertyDirtyXml: "В редакторе XML есть несохранённые изменения. Сохраните или отмените их перед записью свойства.",
   propertyInvalid: "Значение выходит за допустимые ограничения. Исправьте ввод; файл не изменён.",
   propertyIntegerRange: "Целое число от {0} до {1}",
+  propertyInheritedNumerator: "Задаётся нумератором документа.",
   propertyDependency: "Сначала очистите или измените «{0}»: текущее значение несовместимо с этим изменением.",
 
   supportLoading: "Проверка правил поддержки 1С…",

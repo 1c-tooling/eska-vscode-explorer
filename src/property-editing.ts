@@ -26,6 +26,7 @@ export interface EditingSchema {
   undo: boolean;
   redo: boolean;
   fields: EditingField[];
+  readOnlyProperties?: { key: PropertyKey; reason: string }[];
   renameAvailable?: boolean;
   undoRename?: boolean;
   redoRename?: boolean;
@@ -58,10 +59,17 @@ function isValueSchema(value: Record<string, unknown>): boolean {
     && (type.constraints.kind !== "date" || ["DateTime", "Date", "Time"].includes(String(type.constraints.fractions))));
 }
 
+/** Unknown restriction reasons remain readable without becoming writable controls. */
+function isReadOnlyProperties(value: unknown): boolean {
+  return value === undefined || (Array.isArray(value)
+    && value.every(item => isRecord(item) && isKey(item.key) && typeof item.reason === "string"));
+}
+
 /** Validate the backend schema before exposing a write control or storing its file location. */
 export function editingSchema(value: unknown): EditingSchema {
   if (!isRecord(value) || typeof value.snapshot !== "string" || !/^[a-f0-9]{64}$/.test(value.snapshot)
     || !isWirePath(value.source) || typeof value.writable !== "boolean" || typeof value.undo !== "boolean"
+    || !isReadOnlyProperties(value.readOnlyProperties)
     || typeof value.redo !== "boolean" || ["renameAvailable", "undoRename", "redoRename"].some(key => value[key] !== undefined && typeof value[key] !== "boolean") || !Array.isArray(value.fields) || value.fields.some(field => !isRecord(field)
       || !Array.isArray(field.path) || !field.path.length || field.path.length > 64
       || field.path.some(step => !isRecord(step) || !isKey(step.key) || !Number.isSafeInteger(step.occurrence) || (step.occurrence as number) < 0)
