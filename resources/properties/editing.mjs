@@ -43,7 +43,7 @@ export function editorView(document, property, fields, snapshot, post) {
     row.className = "property-editor";
     const label = document.createElement("label");
     const typeCount = fields.filter(item => item.field.schema.kind === "dataType").length;
-    const name = field.schema.kind === "reference" && field.schema.domain !== "ChoiceParameterField" ? (fields.length > 1 ? snapshot.labels.item.replace("{0}", String(field.path.at(-1).occurrence + 1)) : "")
+    const name = field.schema.kind === "reference" && !["ChoiceParameterField", "TypeLinkField"].includes(field.schema.domain) ? (fields.length > 1 ? snapshot.labels.item.replace("{0}", String(field.path.at(-1).occurrence + 1)) : "")
       : field.schema.kind === "dataType" ? (typeCount > 1 ? snapshot.labels.item.replace("{0}", String(field.path.at(-1).occurrence + 1)) : "")
       : fields.length === 1 && (field.path.length === 1 || field.language) ? "" : fieldLabel(property, field, snapshot.language, snapshot.labels);
     label.textContent = name;
