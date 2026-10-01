@@ -365,7 +365,8 @@ class PropertyTab implements vscode.Disposable {
       const revision = this.revision, objectId = this.entry.node.id.objectId;
       try {
         const selected = await pickPropertyValue(vscode.window, field, this.language(), this.editor.drafts[id],
-          type => this.tree.request(this.entry.project, "metadata/propertyValueChoices", { objectId, path: field.path, key: type.key }));
+          type => this.tree.request(this.entry.project, "metadata/propertyValueChoices", { objectId, path: field.path, key: type.key }),
+          () => this.tree.request(this.entry.project, "metadata/propertyTypeChoices", { objectId, path: field.path }));
         if (!selected || revision !== this.revision || this.disposed) return;
         this.editor.drafts[id] = selected.change;
         this.editor.draftTitles[id] = selected.title;
@@ -582,7 +583,7 @@ class PropertyTab implements vscode.Disposable {
         changeType: text("propertyChangeType"), unchanged: text("propertyOtherValues"),
         chooseReference: text("propertyChooseReference"), unset: text("propertyUnset"),
         chooseValue: text("propertyChooseValue"), rename: text("rename"),
-        choiceParameterName: text("propertyChoiceParameterName"),
+        choiceParameterName: text("propertyChoiceParameterName"), parameterName: text("propertyParameterName"),
         integerRange: text("propertyIntegerRange", "{0}", "{1}"),
         inheritedNumerator: text("propertyInheritedNumerator"),
         hierarchyDisabled: text("propertyHierarchyDisabled"),

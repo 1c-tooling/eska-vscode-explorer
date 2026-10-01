@@ -10,10 +10,11 @@ type Selection = { change: Extract<PropertyChange, { kind: "value" }>; title: st
 export async function pickPropertyValue(window: Pick<typeof vscode.window, "showQuickPick" | "showInputBox">,
   field: EditingField, language: Language,
   draft: PropertyChange | undefined,
-  choices: (type: ValueType) => Promise<Record<string, unknown>>): Promise<Selection | undefined> {
+  choices: (type: ValueType) => Promise<Record<string, unknown>>,
+  types?: () => Promise<Record<string, unknown>>): Promise<Selection | undefined> {
   const options: { label: string; type: ValueType | undefined }[] = [
     { label: message(language, "propertyUnset"), type: undefined },
-    ...(field.schema.types ?? []).map(type => ({ label: type.caption[language], type })),
+    ...(await availableTypes(field, types)).map(type => ({ label: type.caption[language], type })),
   ];
   const selected = await window.showQuickPick(options, { title: message(language, "propertyChooseValue") });
   if (!selected) return undefined;
@@ -62,4 +63,27 @@ function dateValue(value: string, type: ValueType, language: Language): string {
   const date = language === "ru-RU" ? `${match[3]}-${match[2]}-${match[1]}` : `${match[1]}-${match[2]}-${match[3]}`;
   const time = match[4] ?? "00:00:00";
   return `${date}T${time.length === 5 ? `${time}:00` : time}`;
+}
+
+/** Choice parameters load declared reference types on demand, retaining the backend's primitive constraints. */
+async function availableTypes(field: EditingField, load?: () => Promise<Record<string, unknown>>): Promise<ValueType[]> {
+  const inline = field.schema.types ?? [];
+  if (field.schema.domain !== "choiceParameter" || !load) return inline;
+  const result = await load();
+  if (!Array.isArray(result.choices)) throw new Error("Invalid value type choices");
+  return result.choices.map(choice => {
+    if (!isRecord(choice) || !isRecord(choice.key) || typeof choice.key.namespace !== "string"
+      || typeof choice.key.name !== "string" || !isRecord(choice.caption)
+      || typeof choice.caption["ru-RU"] !== "string" || typeof choice.caption["en-US"] !== "string") {
+      throw new Error("Invalid value type choice");
+    }
+    const key = { namespace: choice.key.namespace, name: choice.key.name };
+    const caption = { "ru-RU": choice.caption["ru-RU"], "en-US": choice.caption["en-US"] };
+    const known = inline.find(type => type.key.namespace === key.namespace && type.key.name === key.name);
+    if (known) return { ...known, caption };
+    if (choice.key.namespace !== "http://v8.1c.ru/8.1/data/enterprise/current-config" || typeof choice.metadataKind !== "string") {
+      throw new Error("Unsupported value type choice");
+    }
+    return { key, caption, constraints: { kind: "reference" } };
+  });
 }

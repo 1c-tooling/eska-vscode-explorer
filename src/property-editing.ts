@@ -18,7 +18,7 @@ export interface EditingField {
   captions: PropertyCaption[];
   caption?: PropertyCaption;
   options?: { value: string; caption: PropertyCaption }[];
-  schema: { kind: "text" | "boolean" | "integer" | "unsignedInteger" | "decimal" | "enum" | "dataType" | "reference" | "value"; min?: number | string; max?: number | string; key?: PropertyKey | null; nullable?: boolean; types?: ValueType[] };
+  schema: { domain?: string; kind: "text" | "boolean" | "integer" | "unsignedInteger" | "decimal" | "enum" | "dataType" | "reference" | "value"; min?: number | string; max?: number | string; key?: PropertyKey | null; nullable?: boolean; types?: ValueType[] };
 }
 export interface EditingSchema {
   contextSnapshot?: string | null;

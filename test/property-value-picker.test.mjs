@@ -35,3 +35,24 @@ test("calendar display and entry never use timezone conversion", async () => {
     assert.ok(!display.includes("T"));
   }
 });
+
+test("choice parameters load project reference types lazily and retain primitive choices", async () => {
+  const current = field("string");
+  current.schema.domain = "choiceParameter";
+  const key = { namespace: "http://v8.1c.ru/8.1/data/enterprise/current-config", name: "EnumRef.Status" };
+  const caption = { "ru-RU": "Перечисление: Статус", "en-US": "Enum: Status" };
+  let typesRequested = 0, valuesRequested = 0, stage = 0;
+  const window = { showQuickPick: async options => { stage++; return options.at(-1); } };
+  const result = await pickPropertyValue(window, current, "ru-RU", undefined, async type => {
+    valuesRequested++; assert.deepEqual(type.key, key);
+    return { choices: [{ value: "Enum.Status.EnumValue.Ready", caption: { "ru-RU": "Готов", "en-US": "Ready" } }] };
+  }, async () => { typesRequested++; return { choices: [current.schema.types[0], { key, caption, metadataKind: "enum" }] }; });
+  assert.equal(stage, 2); assert.equal(typesRequested, 1); assert.equal(valuesRequested, 1);
+  assert.deepEqual(result, { change: { kind: "value", key, value: "Enum.Status.EnumValue.Ready" }, title: "Готов" });
+  let initial;
+  await pickPropertyValue({ showQuickPick: async options => options[1], showInputBox: async options => { initial = options.value; return undefined; } },
+    current, "ru-RU", { kind: "value", key: current.schema.key, value: "draft" }, async () => ({}), async () => ({ choices: [current.schema.types[0]] }));
+  assert.equal(initial, "draft");
+  await assert.rejects(pickPropertyValue(window, current, "ru-RU", undefined, async () => ({}),
+    async () => ({ choices: [{ key: { namespace: "foreign", name: "value" }, caption }] })), /Unsupported value type/);
+});

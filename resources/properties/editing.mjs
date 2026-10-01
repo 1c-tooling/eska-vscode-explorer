@@ -9,13 +9,17 @@ export function editableFields(property, editing) {
 }
 
 /** Extract collection identities for readable labels without using them as write addresses. */
-function fieldLabel(property, field, language) {
+function fieldLabel(property, field, language, ui) {
   if (field.language) return field.language;
   let node = property;
   const labels = [];
   for (let i = 1; i < field.path.length; i++) {
     const step = field.path[i];
     node = node?.value.kind === "record" ? node.value.fields.filter(child => child.key.name === step.key.name && child.key.namespace === step.key.namespace)[step.occurrence] : undefined;
+    if (step.key.namespace === "http://v8.1c.ru/8.1/data/core" && step.key.name === "Value") {
+      labels.push(ui.item.replace("{0}", String(step.occurrence + 1)));
+      continue;
+    }
     const identity = node?.qualifiers.find(item => item.key.name === "name");
     const link = step.key.name === "Link" && step.key.namespace === "http://v8.1c.ru/8.3/xcf/readable";
     const discriminator = node?.value.kind === "record" ? node.value.fields.find(child => (link ? child.key.name === "Name" : ["functionality", "permission"].includes(child.key.name)) && child.value.kind === "text") : undefined;
@@ -23,6 +27,7 @@ function fieldLabel(property, field, language) {
     else if (discriminator) labels.push(discriminator.value.caption?.[language] ?? discriminator.value.text);
     else if (i === field.path.length - 1 && !(step.key.name === "use" && labels.length)) labels.push(field.captions[i]?.[language] ?? step.key.name);
   }
+  if (field.schema.domain === "choiceParameterName" && field.path.at(-1).key.name === "item") labels.push(ui.parameterName);
   return labels.join(" · ");
 }
 
@@ -40,7 +45,7 @@ export function editorView(document, property, fields, snapshot, post) {
     const typeCount = fields.filter(item => item.field.schema.kind === "dataType").length;
     const name = field.schema.kind === "reference" && field.schema.domain !== "ChoiceParameterField" ? (fields.length > 1 ? snapshot.labels.item.replace("{0}", String(field.path.at(-1).occurrence + 1)) : "")
       : field.schema.kind === "dataType" ? (typeCount > 1 ? snapshot.labels.item.replace("{0}", String(field.path.at(-1).occurrence + 1)) : "")
-      : fields.length === 1 && (field.path.length === 1 || field.language) ? "" : fieldLabel(property, field, snapshot.language);
+      : fields.length === 1 && (field.path.length === 1 || field.language) ? "" : fieldLabel(property, field, snapshot.language, snapshot.labels);
     label.textContent = name;
     const controlId = `edit-${index}`;
     label.htmlFor = controlId;
