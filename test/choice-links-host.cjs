@@ -8,8 +8,8 @@ const { frame, until } = require('./webview-host.cjs');
 exports.run = async function () {
   const fixture = JSON.parse(process.env.ESKA_HOST_FIXTURE);
   const file = fixture.descriptor;
-  const links = '<ChoiceParameterLinks xmlns:r="http://v8.1c.ru/8.3/xcf/readable"><r:Link><r:Name>Filter.Owner</r:Name><r:DataPath>Catalog.Товары.StandardAttribute.Code</r:DataPath><r:ValueChange>Clear</r:ValueChange></r:Link><r:Link><r:Name>Other</r:Name><r:DataPath>Catalog.Товары.StandardAttribute.Description</r:DataPath><r:ValueChange>DontChange</r:ValueChange></r:Link></ChoiceParameterLinks>';
-  const original = (await fs.readFile(file, 'utf8')).replace('<Name>Артикул</Name>', '<Name>Артикул</Name>' + links);
+  const links = '<ChoiceParameterLinks xmlns:r="http://v8.1c.ru/8.3/xcf/readable"><r:Link><r:Name>Filter.Owner</r:Name><r:DataPath xmlns:s="http://www.w3.org/2001/XMLSchema-instance" xmlns:x="http://www.w3.org/2001/XMLSchema" s:type="x:string">Catalog.Товары.StandardAttribute.Code</r:DataPath><r:ValueChange>Clear</r:ValueChange></r:Link><r:Link><r:Name>Other</r:Name><r:DataPath xmlns:s="http://www.w3.org/2001/XMLSchema-instance" xmlns:x="http://www.w3.org/2001/XMLSchema" s:type="x:string">Catalog.Товары.StandardAttribute.Description</r:DataPath><r:ValueChange>DontChange</r:ValueChange></r:Link></ChoiceParameterLinks>';
+  const original = (await fs.readFile(file, 'utf8')).replace('<Name>Артикул</Name>', '<Name>Артикул</Name>' + links).replace('<Name>Товары</Name>', '<Name>Товары</Name><CodeLength>9</CodeLength><DescriptionLength>50</DescriptionLength>');
   await fs.writeFile(file, original);
   await fs.mkdir(path.join(fixture.source, 'Ext'), { recursive: true });
   await fs.writeFile(path.join(fixture.source, 'Ext/ParentConfigurations.bin'), '{6,0,0,0,0,0}');
@@ -52,7 +52,20 @@ exports.run = async function () {
     await until(() => dom.evaluate(`document.getElementById('edit-${name}').value === 'Filter.Recipient'`), 'saved name displayed');
     await dom.evaluate(`(() => {const select = document.getElementById('edit-${mode}'); select.value = 'DontChange'; select.dispatchEvent(new Event('change', {bubbles:true})); })()`);
     await until(async () => !tab.state.editing.busy && await fs.readFile(file, 'utf8') === renamed.replace('>Clear<', '>DontChange<'), 'mode autosaved');
+    const source = fields.findIndex(field => field.schema.domain === 'ChoiceParameterField');
+    assert.ok(source >= 0);
+    await until(() => dom.evaluate(`!!document.getElementById('edit-${source}')`), 'source field rendered');
+    assert.match(await dom.evaluate(`document.querySelector('label[for="edit-${source}"]').textContent`), /Filter.Recipient/);
+    await dom.evaluate(`document.getElementById('edit-${source}').click()`);
+    await until(() => dom.workbench("Boolean(document.querySelector('.quick-input-widget:not([style*=\"display: none\"]) input'))"), 'source field picker');
+    await dom.workbench("(()=>{const input=document.querySelector('.quick-input-widget input[type=text]');input.focus();input.value='Deletion mark';input.dispatchEvent(new Event('input',{bubbles:true}));})()");
+    await until(() => dom.workbench("(()=>{const rows=[...document.querySelectorAll('.quick-input-list .monaco-list-row')];return rows.length===1 && /Deletion mark/i.test(rows[0].textContent);})()"), 'localized standard field');
+    await vscode.commands.executeCommand('workbench.action.acceptSelectedQuickOpenItem');
+    const modes = renamed.replace('>Clear<', '>DontChange<');
+    await until(async () => !tab.state.editing.busy && await fs.readFile(file, 'utf8') === modes.replace('>Catalog.Товары.StandardAttribute.Code<', '>Catalog.Товары.StandardAttribute.DeletionMark<'), 'source autosaved');
     await dom.screenshot('choice-links-properties.png');
+    await dom.evaluate("document.getElementById('undo').click()");
+    await until(async () => !tab.state.editing.busy && await fs.readFile(file, 'utf8') === modes, 'source undo');
     for (const expected of [renamed, original]) {
       await dom.evaluate("document.getElementById('undo').click()");
       await until(async () => !tab.state.editing.busy && await fs.readFile(file, 'utf8') === expected, 'choice link undo');
