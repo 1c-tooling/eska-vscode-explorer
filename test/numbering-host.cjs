@@ -38,7 +38,7 @@ exports.run = async function () {
     assert.equal(await dom.evaluate('document.querySelectorAll(".property-restriction").length'), 0);
     await dom.evaluate("document.getElementById('read-only').click()");
     await until(() => tab.state.editing.unlocked, 'unlock');
-    await until(() => dom.evaluate('document.querySelectorAll(".property-restriction").length === 5'), 'inherited reasons');
+    await until(() => dom.evaluate('[...document.querySelectorAll(".property-restriction")].filter(node => node.textContent.includes("Set by")).length === 5'), 'inherited reasons');
     assert.equal(await dom.evaluate('document.querySelector(".property-restriction").textContent'), "Set by the document's number generator.");
     assert.equal(tab.state.editing.schema.fields.some(field => field.path[0].key.name === 'NumberLength'), false);
     const index = tab.state.editing.schema.fields.findIndex(field => field.path[0].key.name === 'Autonumbering');
@@ -46,6 +46,29 @@ exports.run = async function () {
     await until(async () => !tab.state.editing.busy && (await fs.readFile(file,'utf8')).includes('<Autonumbering>false</Autonumbering>'), 'independent flag save');
     assert.equal(await fs.readFile(file,'utf8'), original.replace('<Autonumbering>true</Autonumbering>', '<Autonumbering>false</Autonumbering>'));
     await dom.screenshot('numbering-properties.png');
+    dom.close();
+    const numerators = (await explorer.getChildren(group)).find(entry => entry.node.id.collection?.metadataKind === 'document-numerator');
+    assert.ok(numerators, 'document number generators');
+    const [numerator] = await explorer.getChildren(numerators);
+    await vscode.commands.executeCommand('eska.explorer.properties', numerator);
+    const numeratorTab = [...explorer.propertiesTabs.tabs.values()].find(tab => tab.entry === numerator);
+    const numeratorDom = await frame(numeratorTab);
+    try {
+      await until(() => numeratorDom.evaluate("!document.getElementById('read-only').disabled"), 'numerator loaded');
+      await numeratorDom.evaluate("document.getElementById('read-only').click()");
+      try { await until(() => numeratorTab.state.editing.unlocked, 'numerator unlock'); }
+      catch (error) { throw new Error(`${error}: ${JSON.stringify(numeratorTab.state.editing)}; status=${numeratorTab.state.status}; notice=${numeratorTab.state.notice}`); }
+      await until(() => numeratorDom.evaluate('[...document.querySelectorAll(".property-restriction")].some(node => node.textContent.includes("documents: 1"))'), 'linked hint');
+      const length = numeratorTab.state.editing.schema.fields.findIndex(field => field.path[0].key.name === 'NumberLength');
+      await numeratorDom.evaluate(`(() => { const control = document.getElementById('edit-${length}'); control.value = '15'; control.dispatchEvent(new Event('input', {bubbles:true})); control.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true})); })()`);
+      await until(async () => !numeratorTab.state.editing.busy && (await fs.readFile(file,'utf8')).includes('<NumberLength>15</NumberLength>'), 'linked length save');
+      const expected = original.replace('<Autonumbering>true</Autonumbering>', '<Autonumbering>false</Autonumbering>');
+      assert.equal(await fs.readFile(file,'utf8'), expected.replace('<NumberLength>9</NumberLength>', '<NumberLength>15</NumberLength>'));
+      assert.equal(numeratorTab.state.editing.schema.undoLinked, true);
+      await numeratorDom.evaluate("document.getElementById('undo').click()");
+      await until(async () => !numeratorTab.state.editing.busy && await fs.readFile(file,'utf8') === expected, 'linked length undo');
+      await numeratorDom.screenshot('numerator-properties.png');
+    } finally { numeratorDom.close(); }
     await fs.writeFile(path.join(fixture.root,'host-result.json'),JSON.stringify({passed:true,suite:'property-numbering',vscode:vscode.version}));
   } finally { dom.close(); }
 };

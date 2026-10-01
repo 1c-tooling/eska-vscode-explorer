@@ -94,7 +94,7 @@ class PropertyTab implements vscode.Disposable {
   changed(tree: MetadataTree, entries: TreeEntry[] | undefined): void {
     if (this.disposed || this.tree !== tree || this.version === this.projectVersion()) return;
     this.version = this.projectVersion();
-    if (entries && !presentedItems(this.choices).some(item => item.status)) {
+    if (entries && !this.editor.schema?.contextSnapshot && !presentedItems(this.choices).some(item => item.status)) {
       let cursor: TreeEntry | undefined = this.entry;
       while (cursor && !entries.includes(cursor)) cursor = tree.parent(cursor);
       if (!cursor) return;
@@ -242,6 +242,7 @@ class PropertyTab implements vscode.Disposable {
   /** Read external changes without discarding drafts or mistaking our own watcher event for a conflict. */
   private async checkExternalChange(): Promise<void> {
     const expected = this.editor.schema?.snapshot;
+    const context = this.editor.schema?.contextSnapshot;
     if (!expected || this.entry.node.id.kind !== "object") return;
     const check = ++this.externalCheck;
     const objectId = this.entry.node.id.objectId;
@@ -249,9 +250,9 @@ class PropertyTab implements vscode.Disposable {
     this.state = this.makeState(this.state.status, this.state.notice); this.publish();
     try {
       const result = editingSchema(await this.tree.request(this.entry.project, "metadata/propertyEditing", { objectId }));
-      if (this.disposed || check !== this.externalCheck || expected !== this.editor.schema?.snapshot
+      if (this.disposed || check !== this.externalCheck || expected !== this.editor.schema?.snapshot || context !== this.editor.schema?.contextSnapshot
         || this.entry.node.id.kind !== "object" || objectId !== this.entry.node.id.objectId) return;
-      if (result.snapshot !== expected || !result.writable) this.blockEditing("propertyConflict");
+      if (result.snapshot !== expected || result.contextSnapshot !== context || !result.writable) this.blockEditing("propertyConflict");
       else this.editor.schema = result;
     } catch { if (!this.disposed && check === this.externalCheck) this.blockEditing("propertyConflict"); }
     finally {
@@ -468,6 +469,8 @@ class PropertyTab implements vscode.Disposable {
     }
     const field = schema.fields.find(field => fieldId(field.path) === id);
     if (!direction && (!field || !change)) return;
+    const linked = direction ? (direction === "undo" ? schema.undoLinked : schema.redoLinked) : field?.linked;
+    if (linked && this.dirtyProject()) { this.editorNotice("propertyLinkedDirty"); return; }
     const path = resolve(nativePath(this.entry.project.info.sourcePath), nativePath(schema.source));
     if (vscode.workspace.textDocuments.some(document => document.isDirty && resolve(document.uri.fsPath) === path)) {
       this.editorNotice("propertyDirtyXml"); return;
@@ -477,6 +480,7 @@ class PropertyTab implements vscode.Disposable {
     try {
       const result = await this.tree.request(this.entry.project, direction ? "metadata/undoProperty" : "metadata/updateProperty", {
         objectId: this.entry.node.id.objectId, snapshot: schema.snapshot,
+        ...(linked ? { contextSnapshot: schema.contextSnapshot } : {}),
         ...(direction ? { direction } : { path: field?.path, change }),
       });
       if (this.disposed || this.tree !== this.currentTree()) return;
@@ -493,7 +497,13 @@ class PropertyTab implements vscode.Disposable {
     } catch (error) {
       if (this.disposed) return;
       const domain = error instanceof ExplorerError ? error.domain : undefined;
-      if (domain === "property_dependency") {
+      if (domain === "property_dependency" && error instanceof ExplorerError && typeof error.details?.objectName === "string") {
+        this.state = this.makeState(this.state.status, message(vscode.env.language, "propertyLinkedDependency", error.details.objectName));
+        this.publish();
+      } else if (domain === "property_read_only" && error instanceof ExplorerError && typeof error.details?.objectName === "string") {
+        this.state = this.makeState(this.state.status, message(vscode.env.language, "propertyLinkedReadOnly", error.details.objectName));
+        this.publish();
+      } else if (domain === "property_dependency") {
         const property = error instanceof ExplorerError ? error.details?.property : undefined;
         const choice = isRecord(property) ? this.choices.find(choice => choice.key.name === property.name
           && choice.key.namespace === property.namespace) : undefined;
@@ -574,6 +584,9 @@ class PropertyTab implements vscode.Disposable {
         chooseValue: text("propertyChooseValue"), rename: text("rename"),
         integerRange: text("propertyIntegerRange", "{0}", "{1}"),
         inheritedNumerator: text("propertyInheritedNumerator"),
+        linkedUnavailable: text("propertyLinkedUnavailable"),
+        linkedDocuments: text("propertyLinkedDocuments", "{0}"),
+        numeratorAssignment: text("propertyNumeratorAssignment"),
         notEditable: text("propertyNotEditable"), saved: text("propertySaved"),
         properties: text("properties"), search: text("propertySearch"), refresh: text("propertyRefresh"),
         openXml: text("openXml"), empty: text("propertyEmpty"), noMatches: text("propertyNoMatches"),

@@ -38,7 +38,8 @@ export class Connection {
       if (signal?.aborted) throw new ExplorerError("cancelled");
     }
     const child = this.sessionChild(sessionId);
-    const structural = ["metadata/renamePreview", "metadata/renameApply", "metadata/undoProperty"].includes(method);
+    const structural = ["metadata/renamePreview", "metadata/renameApply", "metadata/undoProperty"].includes(method)
+      || (method === "metadata/updateProperty" && typeof params?.contextSnapshot === "string");
     // Backend scans cannot stop midway. Keep the barrier until their actual reply, even if a tab closes.
     const pending = child.request(method, { ...params, sessionId }, structural ? 600_000 : undefined, structural ? undefined : signal);
     if (structural) this.structuralRequest = pending;

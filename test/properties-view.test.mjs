@@ -406,7 +406,7 @@ test("an incompatible type reports its dependent property without blocking the t
 });
 
 /** A concurrent or interrupted structural operation keeps the draft and never resubmits it automatically. */
-for (const [domain, notice] of [["property_edit_busy", /Другой процесс/], ["property_recovery_required", /Переименование.*прервано/]]) {
+for (const [domain, notice] of [["property_edit_busy", /Другой процесс/], ["property_recovery_required", /Изменение.*прервано/]]) {
   test(`${domain} blocks further autosaves and preserves input`, async t => {
     const f = fixture(t), tab = await openEditable(f);
     const change = { kind: "text", value: "keep" };
@@ -440,4 +440,49 @@ test("an unchanged renamed child updates its source and reuses the same property
   await tab.receive({ type: "commit", revision: tab.state.revision, field: 0, change: { kind: "text", value: "keep" } });
   assert.equal(f.requests.length, 3);
   assert.match(tab.state.notice, /несохранённые изменения/);
+});
+
+/** Related descriptors have their own fingerprint; an unchanged primary snapshot cannot conceal a conflict. */
+test("linked editing keeps drafts when a sibling changes its dependency token", async t => {
+  const f = fixture(t), schema = { ...editable(), contextSnapshot: "c".repeat(64), linkedObjects: 1 };
+  schema.fields[0].linked = true;
+  const tab = await openEditable(f, schema);
+  await tab.receive({ type: "draft", revision: tab.state.revision, field: 0, change: { kind: "text", value: "mine" } });
+  f.change([f.sibling]);
+  assert.equal(f.requests[2].method, "metadata/propertyEditing");
+  f.requests[2].resolve({ ...schema, contextSnapshot: "d".repeat(64) }); await settle();
+  assert.equal(tab.state.editing.blocked, true);
+  assert.equal(Object.values(tab.state.editing.drafts)[0].value, "mine");
+  assert.equal(f.requests.length, 3);
+});
+
+/** An atomic change or its undo cannot overwrite an unsaved dependent document. */
+test("linked writes pass the displayed context and block while project XML has unsaved changes", async t => {
+  const f = fixture(t), schema = { ...editable(), contextSnapshot: "c".repeat(64), linkedObjects: 1 };
+  schema.fields[0].linked = true;
+  const tab = await openEditable(f, schema);
+  f.vscode.workspace.textDocuments = [{ isDirty: true, uri: { scheme: "file", fsPath: "/project/src/Documents/Other.xml" } }];
+  const input = { type: "commit", revision: tab.state.revision, field: 0, change: { kind: "text", value: "mine" } };
+  await tab.receive(input);
+  assert.equal(f.requests.length, 2);
+  f.vscode.workspace.textDocuments = [];
+  const saving = tab.receive(input);
+  assert.equal(f.requests[2].params.contextSnapshot, schema.contextSnapshot);
+  f.requests[2].resolve({ ...response(), editing: { ...schema, snapshot: "b".repeat(64), undo: true, undoLinked: true } }); await saving;
+  const undo = tab.receive({ type: "undo", revision: tab.state.revision });
+  assert.equal(f.requests[3].params.contextSnapshot, schema.contextSnapshot);
+  f.requests[3].resolve({ ...response(), editing: schema }); await undo;
+});
+
+/** A multi-file validation failure identifies the document that must be repaired and retains the input. */
+test("linked dependency errors show the blocking document without losing the draft", async t => {
+  const f = fixture(t), schema = { ...editable(), contextSnapshot: "c".repeat(64) };
+  schema.fields[0].linked = true;
+  const tab = await openEditable(f, schema);
+  const saving = tab.receive({ type: "commit", revision: tab.state.revision, field: 0, change: { kind: "text", value: "mine" } });
+  f.requests[2].reject(new ExplorerError("requestFailed", "property_dependency", { objectId: "document:A", objectName: "Приход" }));
+  await saving;
+  assert.match(tab.state.notice, /«Приход»/);
+  assert.equal(Object.values(tab.state.editing.drafts)[0].value, "mine");
+  assert.equal(f.requests.length, 3);
 });

@@ -237,9 +237,17 @@ function propertyView(property, path, query) {
       card.append(original);
     }
   } else if (!directBoolean && checked === undefined) card.append(valueView(property, path, childQuery(property, query)));
-  if (snapshot.editing?.unlocked && snapshot.editing.schema?.readOnlyProperties?.some(item =>
-    item.key.name === property.key.name && item.key.namespace === property.key.namespace && item.reason === "numerator_inherited")) {
-    card.append(element("p", "property-restriction", snapshot.labels.inheritedNumerator));
+  if (snapshot.editing?.unlocked) {
+    const schema = snapshot.editing.schema;
+    const restriction = schema?.readOnlyProperties?.find(item => item.key.name === property.key.name && item.key.namespace === property.key.namespace);
+    const reason = restriction?.reason === "numerator_inherited" ? snapshot.labels.inheritedNumerator
+      : restriction?.reason === "linked_context_unavailable" ? snapshot.labels.linkedUnavailable : undefined;
+    if (reason) card.append(element("p", "property-restriction", reason));
+    if (editors.some(({ field }) => field.linked)) {
+      const hint = property.key.name === "Numerator" ? snapshot.labels.numeratorAssignment
+        : schema.linkedObjects > 0 ? snapshot.labels.linkedDocuments.replace("{0}", String(schema.linkedObjects)) : undefined;
+      if (hint) card.append(element("p", "property-restriction", hint));
+    }
   }
   return card;
 }

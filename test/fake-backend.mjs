@@ -38,7 +38,7 @@ function handle(request) {
     initialized = true;
     const result = { apiVersion: mode === "incompatible" ? { major: 2, minor: 0 } : API_VERSION,
       server: { name: "eska", version: "test" },
-      capabilities: { search: true, clientFileEvents: true, designerXml: true, readOnly: false, propertyEditing: true, metadataRename: true, multiContext: false },
+      capabilities: { search: true, clientFileEvents: true, designerXml: true, readOnly: false, propertyEditing: true, metadataRename: true, linkedPropertyEdits: true, multiContext: false },
       limits: { maxHeaderBytes: MAX_HEADER, maxRequestBytes: MAX_REQUEST, maxResponseBytes: MAX_RESPONSE } };
     if (mode === "slow") setTimeout(() => ok(result), 200);
     else ok(result);

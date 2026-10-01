@@ -1,5 +1,5 @@
 /** The public IDE API is versioned independently from the eska executable. */
-export const API_VERSION = { major: 1, minor: 9 } as const;
+export const API_VERSION = { major: 1, minor: 10 } as const;
 export const MAX_HEADER = 8192;
 export const MAX_REQUEST = 1_048_576;
 export const MAX_RESPONSE = 67_108_864;
@@ -50,7 +50,7 @@ export function parseHandshake(value: unknown): string {
   const { apiVersion, server, capabilities, limits } = value;
   if (apiVersion.major !== API_VERSION.major || !Number.isSafeInteger(apiVersion.minor)
     || (apiVersion.minor as number) < API_VERSION.minor || server.name !== "eska"
-    || capabilities.designerXml !== true || (capabilities.readOnly !== false || capabilities.propertyEditing !== true || capabilities.metadataRename !== true)
+    || capabilities.designerXml !== true || (capabilities.readOnly !== false || capabilities.propertyEditing !== true || capabilities.metadataRename !== true || capabilities.linkedPropertyEdits !== true)
     || capabilities.multiContext !== false || capabilities.search !== true || capabilities.clientFileEvents !== true) {
     throw new ExplorerError("incompatible");
   }

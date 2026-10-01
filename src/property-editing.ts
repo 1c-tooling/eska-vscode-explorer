@@ -11,6 +11,7 @@ export interface ValueType {
   options?: { value: string; caption: PropertyCaption }[];
 }
 export interface EditingField {
+  linked?: boolean;
   path: FieldStep[];
   value: string;
   language: string | null;
@@ -20,6 +21,10 @@ export interface EditingField {
   schema: { kind: "text" | "boolean" | "integer" | "decimal" | "enum" | "dataType" | "reference" | "value"; min?: number; max?: number; key?: PropertyKey | null; nullable?: boolean; types?: ValueType[] };
 }
 export interface EditingSchema {
+  contextSnapshot?: string | null;
+  linkedObjects?: number;
+  undoLinked?: boolean;
+  redoLinked?: boolean;
   snapshot: string;
   source: WirePath;
   writable: boolean;
@@ -70,9 +75,14 @@ export function editingSchema(value: unknown): EditingSchema {
   if (!isRecord(value) || typeof value.snapshot !== "string" || !/^[a-f0-9]{64}$/.test(value.snapshot)
     || !isWirePath(value.source) || typeof value.writable !== "boolean" || typeof value.undo !== "boolean"
     || !isReadOnlyProperties(value.readOnlyProperties)
-    || typeof value.redo !== "boolean" || ["renameAvailable", "undoRename", "redoRename"].some(key => value[key] !== undefined && typeof value[key] !== "boolean") || !Array.isArray(value.fields) || value.fields.some(field => !isRecord(field)
+    || ((value.undoLinked === true || value.redoLinked === true) && typeof value.contextSnapshot !== "string")
+    || (value.contextSnapshot !== undefined && value.contextSnapshot !== null && (typeof value.contextSnapshot !== "string" || !/^[a-f0-9]{64}$/.test(value.contextSnapshot)))
+    || (value.linkedObjects !== undefined && (!Number.isSafeInteger(value.linkedObjects) || (value.linkedObjects as number) < 0))
+    || typeof value.redo !== "boolean" || ["renameAvailable", "undoRename", "redoRename", "undoLinked", "redoLinked"].some(key => value[key] !== undefined && typeof value[key] !== "boolean") || !Array.isArray(value.fields) || value.fields.some(field => !isRecord(field)
       || !Array.isArray(field.path) || !field.path.length || field.path.length > 64
       || field.path.some(step => !isRecord(step) || !isKey(step.key) || !Number.isSafeInteger(step.occurrence) || (step.occurrence as number) < 0)
+      || (field.linked !== undefined && typeof field.linked !== "boolean")
+      || (field.linked === true && typeof value.contextSnapshot !== "string")
       || typeof field.value !== "string" || !Array.isArray(field.captions)
       || !isRecord(field.schema) || !["text", "boolean", "integer", "decimal", "enum", "dataType", "reference", "value"].includes(String(field.schema.kind))
       || (field.schema.kind === "value" && !isValueSchema(field.schema)))) {
