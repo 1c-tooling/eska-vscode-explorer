@@ -18,7 +18,7 @@ export interface EditingField {
   captions: PropertyCaption[];
   caption?: PropertyCaption;
   options?: { value: string; caption: PropertyCaption }[];
-  schema: { kind: "text" | "boolean" | "integer" | "decimal" | "enum" | "dataType" | "reference" | "value"; min?: number; max?: number; key?: PropertyKey | null; nullable?: boolean; types?: ValueType[] };
+  schema: { kind: "text" | "boolean" | "integer" | "unsignedInteger" | "decimal" | "enum" | "dataType" | "reference" | "value"; min?: number | string; max?: number | string; key?: PropertyKey | null; nullable?: boolean; types?: ValueType[] };
 }
 export interface EditingSchema {
   contextSnapshot?: string | null;
@@ -84,11 +84,24 @@ export function editingSchema(value: unknown): EditingSchema {
       || (field.linked !== undefined && typeof field.linked !== "boolean")
       || (field.linked === true && typeof value.contextSnapshot !== "string")
       || typeof field.value !== "string" || !Array.isArray(field.captions)
-      || !isRecord(field.schema) || !["text", "boolean", "integer", "decimal", "enum", "dataType", "reference", "value"].includes(String(field.schema.kind))
+      || !isRecord(field.schema) || !["text", "boolean", "integer", "unsignedInteger", "decimal", "enum", "dataType", "reference", "value"].includes(String(field.schema.kind))
+      || !integerBounds(field.schema)
       || (field.schema.kind === "value" && !isValueSchema(field.schema)))) {
     throw new ExplorerError("protocolInvalid");
   }
   return value as unknown as EditingSchema;
+}
+
+/** Integer domains are exact: ordinary bounds are safe numbers; full u64 bounds are decimal strings. */
+function integerBounds(schema: Record<string, unknown>): boolean {
+  if (schema.kind === "integer") {
+    return Number.isSafeInteger(schema.min) && Number.isSafeInteger(schema.max)
+      && (schema.min as number) <= (schema.max as number);
+  }
+  if (schema.kind !== "unsignedInteger") return true;
+  const valid = (value: unknown): value is string => typeof value === "string"
+    && /^(0|[1-9][0-9]{0,19})$/.test(value) && BigInt(value) <= 18_446_744_073_709_551_615n;
+  return valid(schema.min) && valid(schema.max) && BigInt(schema.min) <= BigInt(schema.max);
 }
 
 /** UI messages can propose only the operation advertised for the selected field. */
