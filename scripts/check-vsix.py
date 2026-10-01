@@ -24,7 +24,7 @@ def check(archive):
         required = ['package.json', 'package.nls.json', 'package.nls.ru.json', 'README.md', 'CHANGELOG.md', 'LICENSE', 'resources/icons/support/LICENSE', 'resources/icons/support/NOTICE.md']
         if manifest.get('icon'):
             required.append(manifest['icon'])
-        required += [path.relative_to(root).as_posix() for pattern in ['out/*.js', 'resources/icons/**/*.svg', 'resources/properties/*.css', 'resources/properties/*.js', 'resources/properties/*.mjs', 'docs/*.md', 'docs/measurements/*.json'] for path in root.glob(pattern)]
+        required += [path.relative_to(root).as_posix() for pattern in ['out/*.js', 'resources/icons/**/*.svg', 'resources/properties/*.css', 'resources/properties/*.js', 'resources/properties/*.mjs', 'resources/rename/*.css', 'resources/rename/*.js', 'docs/*.md', 'docs/measurements/*.json'] for path in root.glob(pattern)]
         # vsce publishes a LICENSE without an extension as LICENSE.txt.
         packaged = {name: 'extension/' + ('LICENSE.txt' if name == 'LICENSE' else name) for name in required}
         expected = set(packaged.values()) | {'extension.vsixmanifest', '[Content_Types].xml'}

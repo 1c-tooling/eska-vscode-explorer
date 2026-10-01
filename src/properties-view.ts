@@ -1,6 +1,8 @@
-import { resolve } from "node:path";
+import { isAbsolute, relative, resolve, sep } from "node:path";
 import { nativePath } from "./source.js";
 import { editingSchema, fieldId, propertyChange, type EditingView, type PropertyChange } from "./property-editing.js";
+import { renamePlan } from "./metadata-rename.js";
+import { reviewRename } from "./property-rename-review.js";
 import { pickPropertyValue } from "./property-value-picker.js";
 import * as vscode from "vscode";
 import { message } from "./messages.js";
@@ -46,6 +48,10 @@ class PropertyTab implements vscode.Disposable {
   private pendingInvalidation = false;
   private lockAfterSave = false;
   private refreshing = false;
+  private externalCheck = 0;
+  private checkingExternal = false;
+  private renameController: AbortController | undefined;
+  private renameDraft: string | undefined;
 
   constructor(private readonly context: vscode.ExtensionContext, private tree: MetadataTree, private entry: TreeEntry,
     private readonly language: () => Language, private readonly currentTree: () => MetadataTree | undefined,
@@ -66,6 +72,12 @@ class PropertyTab implements vscode.Disposable {
     });
     this.panel.webview.onDidReceiveMessage((input: unknown) => { void this.receive(input); });
     this.updateTitle();
+  }
+
+  /** Prefer a retained entry after rename; logical identity also allows reconnecting an existing tab. */
+  matches(entry: TreeEntry, exact = false): boolean {
+    return exact ? this.entry === entry : this.entry.project.key === entry.project.key
+      && nodeKey(this.entry.node.id) === nodeKey(entry.node.id);
   }
 
   /** Existing object tabs return to focus and bind to the freshest tree entry. */
@@ -165,6 +177,7 @@ class PropertyTab implements vscode.Disposable {
 
   /** Connection replacement leaves the tab visible but prevents stale XML navigation. */
   stale(): void {
+    this.renameController?.abort();
     this.editor.unlocked = false;
     this.editor.blocked = true;
     this.pendingEdits.clear();
@@ -193,7 +206,7 @@ class PropertyTab implements vscode.Disposable {
       this.publish();
     } else if (input.type === "refresh") {
       await this.refresh();
-    } else if (["toggleLock", "draft", "commit", "applyDraft", "cancelDraft", "pickType", "pickReference", "pickValue", "undo", "redo"].includes(String(input.type))) {
+    } else if (["toggleLock", "draft", "commit", "applyDraft", "cancelDraft", "pickType", "pickReference", "pickValue", "rename", "undo", "redo"].includes(String(input.type))) {
       await this.edit(input);
     } else if (input.type === "openReference" && typeof input.target === "string"
       && input.revision === this.state.revision && this.state.status === "ready" && !this.editor.blocked
@@ -230,11 +243,23 @@ class PropertyTab implements vscode.Disposable {
   private async checkExternalChange(): Promise<void> {
     const expected = this.editor.schema?.snapshot;
     if (!expected || this.entry.node.id.kind !== "object") return;
+    const check = ++this.externalCheck;
+    const objectId = this.entry.node.id.objectId;
+    this.checkingExternal = true;
+    this.state = this.makeState(this.state.status, this.state.notice); this.publish();
     try {
-      const result = editingSchema(await this.tree.request(this.entry.project, "metadata/propertyEditing", { objectId: this.entry.node.id.objectId }));
-      if (this.disposed || expected !== this.editor.schema?.snapshot) return;
+      const result = editingSchema(await this.tree.request(this.entry.project, "metadata/propertyEditing", { objectId }));
+      if (this.disposed || check !== this.externalCheck || expected !== this.editor.schema?.snapshot
+        || this.entry.node.id.kind !== "object" || objectId !== this.entry.node.id.objectId) return;
       if (result.snapshot !== expected || !result.writable) this.blockEditing("propertyConflict");
-    } catch { if (!this.disposed) this.blockEditing("propertyConflict"); }
+      else this.editor.schema = result;
+    } catch { if (!this.disposed && check === this.externalCheck) this.blockEditing("propertyConflict"); }
+    finally {
+      if (check === this.externalCheck) {
+        this.checkingExternal = false;
+        if (!this.disposed) { this.state = this.makeState(this.state.status, this.state.notice); this.publish(); }
+      }
+    }
   }
 
   /** Keep the displayed snapshot and draft values intact until an explicit reread. */
@@ -255,7 +280,7 @@ class PropertyTab implements vscode.Disposable {
     if (this.refreshing || input.revision !== this.revision || this.state.status !== "ready" || this.tree !== this.currentTree()
       || this.entry.node.id.kind !== "object") return;
     if (input.type === "toggleLock") {
-      if (this.editor.busy) { this.lockAfterSave = true; return; }
+      if (this.editor.busy) { this.lockAfterSave = true; this.renameController?.abort(); return; }
       if (this.editor.unlocked) {
         this.editor.unlocked = false;
         this.editorNotice("propertyReadOnly");
@@ -266,7 +291,7 @@ class PropertyTab implements vscode.Disposable {
         const result = await this.tree.request(this.entry.project, "metadata/propertyEditing", { objectId: this.entry.node.id.objectId });
         if (revision !== this.revision || this.disposed) return;
         this.editor.schema = editingSchema(result);
-        if (!this.editor.schema.writable || !this.editor.schema.fields.length || !vscode.workspace.isTrusted) { this.editorNotice("propertyLocked"); return; }
+        if (!this.editor.schema.writable || (!this.editor.schema.fields.length && !this.editor.schema.renameAvailable) || !vscode.workspace.isTrusted) { this.editorNotice("propertyLocked"); return; }
         this.editor.unlocked = true;
         this.editor.blocked = false;
         this.editorNotice("propertyEditingHint");
@@ -274,6 +299,7 @@ class PropertyTab implements vscode.Disposable {
       return;
     }
     if (!this.editor.unlocked || !this.editor.schema) return;
+    if (input.type === "rename") { await this.rename(); return; }
     if (input.type === "undo" || input.type === "redo") {
       if (Object.keys(this.editor.drafts).length) { this.editorNotice("propertyDraftsFirst"); return; }
       await this.writeEdit(undefined, undefined, input.type);
@@ -358,11 +384,86 @@ class PropertyTab implements vscode.Disposable {
     }
   }
 
+  /** A structural operation touches references and payloads throughout the selected source. */
+  private dirtyProject(): boolean {
+    const source = resolve(nativePath(this.entry.project.info.sourcePath));
+    return vscode.workspace.textDocuments.some(document => {
+      if (!document.isDirty || document.uri.scheme !== "file") return false;
+      const path = relative(source, resolve(document.uri.fsPath));
+      return path !== "" && !isAbsolute(path) && !path.split(sep).includes("..");
+    });
+  }
+
+  /** Rename has an explicit review because it changes declared references and physical source paths. */
+  private async rename(): Promise<void> {
+    if (!this.editor.unlocked || !this.editor.schema?.renameAvailable || this.editor.busy || this.checkingExternal || this.editor.blocked
+      || !vscode.workspace.isTrusted || this.entry.node.id.kind !== "object") return;
+    const objectId = this.entry.node.id.objectId;
+    if (Object.keys(this.editor.drafts).length) { this.editorNotice("propertyDraftsFirst"); return; }
+    if (this.dirtyProject()) { this.editorNotice("renameDirtyProject"); return; }
+    const name = this.choices.find(choice => choice.key.name === "Name" && choice.value.kind === "text")?.value;
+    if (name?.kind !== "text") return;
+    const controller = new AbortController(); this.renameController = controller;
+    this.editor.busy = true;
+    this.editorNotice("propertyEditingHint");
+    let applying = false;
+    try {
+      const next = await vscode.window.showInputBox({ title: message(vscode.env.language, "rename"),
+        prompt: message(vscode.env.language, "renamePrompt"), value: this.renameDraft ?? name.text, ignoreFocusOut: true });
+      if (next === undefined || next === name.text || controller.signal.aborted) return;
+      this.renameDraft = next;
+      this.editorNotice("renameScanning");
+      const plan = renamePlan(await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification,
+        title: message(vscode.env.language, "renameScanning"), cancellable: false },
+      () => this.tree.request(this.entry.project, "metadata/renamePreview", { objectId, newName: next }, controller.signal)));
+      if (controller.signal.aborted || this.disposed || this.tree !== this.currentTree()) return;
+      if (!await reviewRename(vscode, this.context, this.entry.project.info.sourcePath, plan, this.language(), controller.signal)) {
+        this.renameDraft = undefined; this.editorNotice("propertyEditingHint"); return;
+      }
+      if (controller.signal.aborted || this.disposed || this.tree !== this.currentTree()) return;
+      if (Object.keys(this.editor.drafts).length) { this.editorNotice("propertyDraftsFirst"); return; }
+      if (this.dirtyProject()) { this.editorNotice("renameDirtyProject"); return; }
+      applying = true;
+      this.editorNotice("propertySaving");
+      const result = await this.tree.request(this.entry.project, "metadata/renameApply", {
+        objectId: plan.objectId, newName: plan.newName, snapshot: plan.snapshot, reviewedUncertain: true,
+      });
+      if (this.disposed || this.tree !== this.currentTree()) return;
+      this.editor.schema = editingSchema(result.editing);
+      this.choices = propertyChoices(result, vscode.env.language);
+      this.picture = picturePreview(result.picture);
+      this.renameDraft = undefined;
+      this.revision++; this.updateTitle(); this.editorNotice("propertySaved");
+    } catch (error) {
+      if (this.disposed || (controller.signal.aborted && !applying)) return;
+      const domain = error instanceof ExplorerError ? error.domain : undefined;
+      if (domain === "rename_invalid_name") this.editorNotice(error instanceof ExplorerError
+        && error.details?.reason === "reserved_property" ? "renameReservedName" : "renameInvalidName");
+      else if (domain === "rename_collision") this.editorNotice("renameCollision");
+      else if (domain === "property_edit_busy") this.blockEditing("propertyBusy");
+      else if (domain === "property_recovery_required") this.blockEditing("propertyRecovery");
+      else if (domain === "property_conflict" || domain === "stale_generation") this.blockEditing("propertyConflict");
+      else if (applying) this.blockEditing("propertyWriteUnknown");
+      else this.editorNotice("requestFailed");
+    } finally {
+      if (this.renameController === controller) this.renameController = undefined;
+      this.editor.busy = false;
+      if (this.lockAfterSave) { this.lockAfterSave = false; this.editor.unlocked = false; }
+      if (!this.disposed) {
+        this.state = this.makeState(this.state.status, this.state.notice); this.publish();
+        if (this.pendingInvalidation) { this.pendingInvalidation = false; await this.checkExternalChange(); }
+      }
+    }
+  }
+
   /** Never overwrite a dirty text editor; writes execute once and require an exact backend snapshot. */
   private async writeEdit(id?: string, change?: PropertyChange, direction?: "undo" | "redo"): Promise<void> {
     const schema = this.editor.schema;
-    if (!schema || !schema.writable || this.editor.busy || this.editor.blocked || !this.editor.unlocked
+    if (!schema || !schema.writable || this.editor.busy || this.checkingExternal || this.editor.blocked || !this.editor.unlocked
       || this.entry.node.id.kind !== "object" || !vscode.workspace.isTrusted) return;
+    if (direction && (direction === "undo" ? schema.undoRename : schema.redoRename) && this.dirtyProject()) {
+      this.editorNotice("renameDirtyProject"); return;
+    }
     const field = schema.fields.find(field => fieldId(field.path) === id);
     if (!direction && (!field || !change)) return;
     const path = resolve(nativePath(this.entry.project.info.sourcePath), nativePath(schema.source));
@@ -442,7 +543,8 @@ class PropertyTab implements vscode.Disposable {
     }
     const project = this.entry.project.info.scope.kind === "member" ? this.entry.project.info.scope.name
       : this.tree.connection.target?.name ?? message(vscode.env.language, this.entry.project.info.type);
-    return { title: objectSynonym(this.choices, this.language()) ?? names.at(-1) ?? message(vscode.env.language, "properties"),
+    const name = this.choices.find(choice => choice.key.name === "Name" && choice.value.kind === "text")?.value;
+    return { title: objectSynonym(this.choices, this.language()) ?? (name?.kind === "text" ? name.text : names.at(-1)) ?? message(vscode.env.language, "properties"),
       path: [project, ...names.slice(0, -1)].join(" › ") };
   }
 
@@ -457,7 +559,7 @@ class PropertyTab implements vscode.Disposable {
     const text = (key: Parameters<typeof message>[1], ...values: string[]): string => message(vscode.env.language, key, ...values);
     return {
       type: "state", revision: this.revision, title: heading.title, path: heading.path, status, notice,
-      language: this.language(), editing: { ...this.editor, busy: this.editor.busy || this.refreshing,
+      language: this.language(), editing: { ...this.editor, busy: this.editor.busy || this.refreshing || this.checkingExternal,
         drafts: { ...this.editor.drafts }, draftTitles: { ...this.editor.draftTitles } },
       icons: this.icons(),
       picture: status === "ready" ? this.picture
@@ -467,7 +569,7 @@ class PropertyTab implements vscode.Disposable {
         undo: text("propertyUndo"), redo: text("propertyRedo"), apply: text("propertyApply"), cancel: text("propertyCancel"),
         changeType: text("propertyChangeType"), unchanged: text("propertyOtherValues"),
         chooseReference: text("propertyChooseReference"), unset: text("propertyUnset"),
-        chooseValue: text("propertyChooseValue"),
+        chooseValue: text("propertyChooseValue"), rename: text("rename"),
         notEditable: text("propertyNotEditable"), saved: text("propertySaved"),
         properties: text("properties"), search: text("propertySearch"), refresh: text("propertyRefresh"),
         openXml: text("openXml"), empty: text("propertyEmpty"), noMatches: text("propertyNoMatches"),
@@ -519,15 +621,16 @@ class PropertyTab implements vscode.Disposable {
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
+    this.renameController?.abort();
     this.controller?.abort();
     this.panel.dispose();
     this.closed();
   }
 }
 
-/** The map reuses one tab per object and leaves other objects in separate editor tabs. */
+/** Retain one tab per object even when rename changes its logical identity. */
 export class PropertyTabs implements vscode.Disposable {
-  private readonly tabs = new Map<string, PropertyTab>();
+  private readonly tabs = new Set<PropertyTab>();
 
   constructor(private readonly context: vscode.ExtensionContext, private readonly language: () => Language,
     private readonly currentTree: () => MetadataTree | undefined,
@@ -535,15 +638,14 @@ export class PropertyTabs implements vscode.Disposable {
 
   async show(tree: MetadataTree, entry: TreeEntry): Promise<void> {
     if (entry.node.id.kind !== "object") return;
-    const key = JSON.stringify([entry.project.key, entry.node.id.objectId]);
-    let tab = this.tabs.get(key);
+    let tab = [...this.tabs].find(tab => tab.matches(entry, true)) ?? [...this.tabs].find(tab => tab.matches(entry));
     if (tab) {
       await tab.show(tree, entry);
       return;
     }
     tab = new PropertyTab(this.context, tree, entry, this.language, this.currentTree, this.openXml, (tree, entry) => this.show(tree, entry),
-      () => { this.tabs.delete(key); });
-    this.tabs.set(key, tab);
+      () => { if (tab) this.tabs.delete(tab); });
+    this.tabs.add(tab);
     await tab.load();
   }
 

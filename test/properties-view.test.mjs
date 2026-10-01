@@ -343,7 +343,7 @@ test("successful autosave survives its own invalidation and keeps newer draft in
   await tab.receive({ type: "draft", revision, field: 0, change: { kind: "text", value: "second" } });
   f.requests[2].resolve({ ...response(), editing: { ...editable("first", "b".repeat(64)), undo: true } });
   await settle();
-  f.requests[3].resolve(editable("first", "b".repeat(64))); await saving;
+  f.requests[3].resolve({ ...editable("first", "b".repeat(64)), undo: true }); await saving;
   assert.equal(tab.state.editing.blocked, false);
   assert.equal(Object.values(tab.state.editing.drafts)[0].value, "second");
   assert.equal(tab.state.editing.schema.undo, true);
@@ -419,3 +419,25 @@ for (const [domain, notice] of [["property_edit_busy", /Другой проце�
     assert.equal(f.requests.length, 3);
   });
 }
+
+/** A moved descriptor keeps its drafts but adopts the new source before dirty-editor checks allow writing. */
+test("an unchanged renamed child updates its source and reuses the same property tab", async t => {
+  const f = fixture(t), tab = await openEditable(f);
+  const revision = tab.state.revision;
+  await tab.receive({ type: "draft", revision, field: 0, change: { kind: "text", value: "keep" } });
+  f.object.node.id.objectId = "new/child";
+  f.project = f.object.project;
+  f.project.nodes.set(nodeKey(f.object.node.id), f.object);
+  f.change([f.object]);
+  assert.equal(tab.state.editing.busy, true);
+  f.requests[2].resolve({ ...editable(), source: { value: "New/Child.xml", encoding: "utf-8" } });
+  await settle();
+  assert.equal(tab.state.editing.schema.source.value, "New/Child.xml");
+  assert.equal(Object.values(tab.state.editing.drafts)[0].value, "keep");
+  await f.tabs.show(f.tree, f.object);
+  assert.equal(f.tabs.tabs.size, 1);
+  f.vscode.workspace.textDocuments.push({ isDirty: true, uri: { scheme: "file", fsPath: "/project/src/New/Child.xml" } });
+  await tab.receive({ type: "commit", revision: tab.state.revision, field: 0, change: { kind: "text", value: "keep" } });
+  assert.equal(f.requests.length, 3);
+  assert.match(tab.state.notice, /несохранённые изменения/);
+});

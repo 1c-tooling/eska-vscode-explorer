@@ -1,3 +1,4 @@
+import { renameTransition, renamedIdentity, type RenameTransition } from "./metadata-rename.js";
 import { Connection } from "./connection.js";
 import { ExplorerError, isRecord, isToken, parseWorkspace, type ProjectInfo, type WorkspaceSession } from "./protocol.js";
 
@@ -152,7 +153,7 @@ export class MetadataTree {
 
   /** Read requests may retry after an intervening change, but never loop indefinitely. */
   async request(project: ProjectTree, method: string, params: Record<string, unknown> = {}, signal?: AbortSignal): Promise<Record<string, unknown>> {
-    const mutation = method === "metadata/updateProperty" || method === "metadata/undoProperty";
+    const mutation = method === "metadata/updateProperty" || method === "metadata/undoProperty" || method === "metadata/renameApply";
     for (let attempt = 0; attempt < (mutation ? 1 : 3); attempt++) {
       if (signal?.aborted) throw new ExplorerError("cancelled");
       if (this.disposed) throw new ExplorerError("obsolete");
@@ -262,6 +263,7 @@ export class MetadataTree {
     }
     Object.assign(info, { generation: value.generation, eventSequence: value.eventSequence,
       requiresRefresh: value.requiresRefresh, requiresReopen: value.requiresReopen });
+    if (!gap && value.renamed !== undefined) this.renameEntries(project, renameTransition(value.renamed));
     const affected = value.affected === null || gap ? null : new Set(value.affected as string[]);
     const roots = new Set<TreeEntry>();
     for (const entry of project.nodes.values()) {
@@ -282,6 +284,23 @@ export class MetadataTree {
     });
     this.changed(project.rootDirty ? undefined : top);
     if (gap || info.requiresRefresh || info.requiresReopen) this.recover(project, info.requiresReopen);
+  }
+
+  /** Preserve open tab and expansion references while rekeying the server's logical identities. */
+  private renameEntries(project: ProjectTree, change: RenameTransition): void {
+    const remap = (id: NodeId): NodeId => id.kind === "object"
+      ? { ...id, objectId: renamedIdentity(id.objectId, change) } : { ...id, owner: renamedIdentity(id.owner, change) };
+    const entries = [...project.nodes.values()];
+    const mapped = entries.map(entry => ({ entry, id: remap(entry.node.id), parent: entry.node.parent ? remap(entry.node.parent) : null }));
+    // A stale removed destination may still be cached; the renamed source owns its new key.
+    const changed = mapped.filter(item => nodeKey(item.id) !== nodeKey(item.entry.node.id));
+    for (const item of changed) project.nodes.delete(nodeKey(item.entry.node.id));
+    for (const { entry, id, parent } of mapped) {
+      entry.node = { ...entry.node, id, parent };
+      entry.key = `${project.key}:${nodeKey(id)}`;
+    }
+    for (const { entry, id } of changed) project.nodes.set(nodeKey(id), entry);
+    project.info.root = { ...project.info.root, objectId: renamedIdentity(project.info.root.objectId, change) };
   }
 
   /** Stop accepting events before the connection is replaced or the view is disposed. */

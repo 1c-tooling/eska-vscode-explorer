@@ -26,6 +26,9 @@ export interface EditingSchema {
   undo: boolean;
   redo: boolean;
   fields: EditingField[];
+  renameAvailable?: boolean;
+  undoRename?: boolean;
+  redoRename?: boolean;
 }
 export interface EditingView {
   unlocked: boolean;
@@ -59,7 +62,7 @@ function isValueSchema(value: Record<string, unknown>): boolean {
 export function editingSchema(value: unknown): EditingSchema {
   if (!isRecord(value) || typeof value.snapshot !== "string" || !/^[a-f0-9]{64}$/.test(value.snapshot)
     || !isWirePath(value.source) || typeof value.writable !== "boolean" || typeof value.undo !== "boolean"
-    || typeof value.redo !== "boolean" || !Array.isArray(value.fields) || value.fields.some(field => !isRecord(field)
+    || typeof value.redo !== "boolean" || ["renameAvailable", "undoRename", "redoRename"].some(key => value[key] !== undefined && typeof value[key] !== "boolean") || !Array.isArray(value.fields) || value.fields.some(field => !isRecord(field)
       || !Array.isArray(field.path) || !field.path.length || field.path.length > 64
       || field.path.some(step => !isRecord(step) || !isKey(step.key) || !Number.isSafeInteger(step.occurrence) || (step.occurrence as number) < 0)
       || typeof field.value !== "string" || !Array.isArray(field.captions)

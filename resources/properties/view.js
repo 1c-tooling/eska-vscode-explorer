@@ -221,6 +221,12 @@ function propertyView(property, path, query) {
     title.append(editorView(document, property, editors, snapshot, input => vscode.postMessage(input)));
     card.classList.add("boolean-property");
   }
+  if (property.key.name === "Name" && snapshot.editing?.unlocked && snapshot.editing.schema?.renameAvailable) {
+    const rename = element("button", "source-button", snapshot.labels.rename); rename.type = "button";
+    rename.disabled = snapshot.editing.busy || snapshot.editing.blocked;
+    rename.addEventListener("click", () => vscode.postMessage({ type: "rename", revision }));
+    title.append(document.createTextNode(" "), rename);
+  }
   head.append(title, button);
   card.append(head);
   if (editors.length && !directBoolean) {

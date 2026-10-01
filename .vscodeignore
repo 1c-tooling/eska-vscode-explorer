@@ -9,6 +9,8 @@
 !resources/properties/*.css
 !resources/properties/*.js
 !resources/properties/*.mjs
+!resources/rename/*.css
+!resources/rename/*.js
 !docs/*.md
 !docs/measurements/*.json
 !resources/icon.png
