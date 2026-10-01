@@ -17,7 +17,8 @@ function fieldLabel(property, field, language) {
     const step = field.path[i];
     node = node?.value.kind === "record" ? node.value.fields.filter(child => child.key.name === step.key.name && child.key.namespace === step.key.namespace)[step.occurrence] : undefined;
     const identity = node?.qualifiers.find(item => item.key.name === "name");
-    const discriminator = node?.value.kind === "record" ? node.value.fields.find(child => ["functionality", "permission"].includes(child.key.name) && child.value.kind === "text") : undefined;
+    const link = step.key.name === "Link" && step.key.namespace === "http://v8.1c.ru/8.3/xcf/readable";
+    const discriminator = node?.value.kind === "record" ? node.value.fields.find(child => (link ? child.key.name === "Name" : ["functionality", "permission"].includes(child.key.name)) && child.value.kind === "text") : undefined;
     if (identity) labels.push(identity.caption?.[language] ?? identity.value);
     else if (discriminator) labels.push(discriminator.value.caption?.[language] ?? discriminator.value.text);
     else if (i === field.path.length - 1 && !(step.key.name === "use" && labels.length)) labels.push(field.captions[i]?.[language] ?? step.key.name);
@@ -91,6 +92,13 @@ export function editorView(document, property, fields, snapshot, post) {
           const hint = document.createElement("small");
           hint.id = `${controlId}-range`; hint.className = "property-constraint";
           hint.textContent = snapshot.labels.integerRange.replace("{0}", String(schema.min)).replace("{1}", String(schema.max));
+          control.setAttribute("aria-describedby", hint.id);
+          row.append(hint);
+        }
+        if (schema.kind === "text" && schema.domain === "choiceParameterName") {
+          const hint = document.createElement("small");
+          hint.id = `${controlId}-constraint`; hint.className = "property-constraint";
+          hint.textContent = snapshot.labels.choiceParameterName;
           control.setAttribute("aria-describedby", hint.id);
           row.append(hint);
         }
