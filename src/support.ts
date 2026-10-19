@@ -273,10 +273,18 @@ export class SupportController implements vscode.FileDecorationProvider {
   /** A bounded request returns only touched files; no global inventory or giant settings update is needed. */
   private async queryFiles(paths: string[], epoch: number): Promise<void> {
     if (epoch !== this.epoch || this.stopped || !this.enabled) return;
+    const directories = new Set<string>();
+    for (const path of new Set(paths)) {
+      try {
+        if ((await vscode.workspace.fs.stat(vscode.Uri.file(path))).type & vscode.FileType.Directory) directories.add(path);
+      } catch { /* Unavailable files still require the backend's conservative policy. */ }
+    }
+    if (epoch !== this.epoch || this.stopped || !this.enabled) return;
     const active = new Set([this.tree, ...this.additional].flatMap(tree => tree?.projects ?? []));
-    const snapshots = new Map([...this.snapshots].filter(([project]) => active.has(project)));
+    const snapshots = new Map([...this.snapshots].filter(([project]) => active.has(project)).map(([project, snapshot]) =>
+      [project, { ...snapshot, files: snapshot.files.filter(file => !directories.has(file.path)) }]));
     for (const tree of [this.tree, ...this.additional]) if (tree) for (const project of tree.projects) {
-      const selected = [...new Set(paths)].map(path => this.locate(path)).filter(item => item?.project === project);
+      const selected = [...new Set(paths)].filter(path => !directories.has(path)).map(path => this.locate(path)).filter(item => item?.project === project);
       if (!selected.length) continue;
       const previous = snapshots.get(project);
       const current = previous?.generation === project.info.generation && previous?.eventSequence === project.info.eventSequence;
