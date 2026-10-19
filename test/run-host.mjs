@@ -13,7 +13,7 @@ const playground = process.env.ESKA_TEST_ROOT ?? resolve(repository, "../eska-pl
 if (!isAbsolute(playground)) throw new Error("ESKA_TEST_ROOT must be absolute.");
 const root = await mkdtemp(join(playground, "explorer-host-"));
 try {
-  const fixture = await createTreeProject(join(root, "project"));
+  const fixture = await createTreeProject(join(root, "project"), process.env.ESKA_HOST_PROJECT_TYPE ?? "configuration");
   const bin = join(root, "bin");
   await mkdir(bin);
   const executableName = process.platform === "win32" ? "eska.exe" : "eska";
