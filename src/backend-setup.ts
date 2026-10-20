@@ -2,8 +2,8 @@ import * as vscode from "vscode";
 import { mkdir, open, rm } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join, dirname, delimiter } from "node:path";
-import { bootstrapCommand, checkUpdate, compareVersions, inspectGlobal, latestRelease, type GlobalCli, type InstallCommand } from "./installation.js";
-import { ExplorerError } from "./protocol.js";
+import { bootstrapCommand, checkUpdate, compareVersions, findGlobal, inspectGlobal, latestRelease, type GlobalCli, type InstallCommand } from "./installation.js";
+import { ExplorerError, type BackendKind } from "./protocol.js";
 import { message, type MessageKey } from "./messages.js";
 import type { DiagnosticLog } from "./diagnostics.js";
 
@@ -23,9 +23,17 @@ export class BackendSetup implements vscode.Disposable {
   private text(key: MessageKey, ...values: string[]): string { return message(vscode.env.language, key, ...values); }
 
   /** Resolve the chosen backend; Connection validates overrides with its own handshake. */
-  async ensure(signal = this.lifetime.signal, configured = "eska"): Promise<string | undefined> {
+  async ensure(signal = this.lifetime.signal, configured = "eska-project", backend: BackendKind = "project"): Promise<string | undefined> {
     signal = AbortSignal.any([signal, this.lifetime.signal]);
     if (this.busy || this.disposed || signal.aborted) return undefined;
+    if (backend === "project") {
+      if (configured !== "eska-project") return configured;
+      const path = await this.track(findGlobal(undefined, undefined, undefined, "eska-project"));
+      if (signal.aborted) return undefined;
+      if (!path) throw new ExplorerError("executableMissing");
+      return path;
+    }
+    if (configured === "eska-project") configured = "eska";
     if (configured !== "eska") return configured;
     const cli = await this.track(inspectGlobal(this.log, signal));
     if (signal.aborted) return undefined;
@@ -42,23 +50,28 @@ export class BackendSetup implements vscode.Disposable {
   }
 
   /** Check at most daily in the background; lack of network never prevents a working tree. */
-  async background(): Promise<void> {
+  async background(backend: BackendKind = "project"): Promise<void> {
+    if (backend !== "legacy") return;
     if (!vscode.workspace.getConfiguration("eska.explorer").get<boolean>("checkForUpdates", true) || this.checking || this.disposed) return;
     const last = this.context.globalState.get<number>("cliUpdateChecked", 0);
     if (Date.now() - last < 24 * 60 * 60 * 1000) return;
     await this.context.globalState.update("cliUpdateChecked", Date.now());
-    await this.check(false);
+    await this.check(false, backend);
   }
 
   /** One update command uses the same global CLI regardless of a custom development backend. */
-  async check(manual: boolean): Promise<void> {
+  async check(manual: boolean, backend: BackendKind = "project"): Promise<void> {
     if (this.checking || this.busy || this.disposed || !vscode.workspace.isTrusted) return;
+    if (backend === "project") {
+      if (manual) void vscode.window.showInformationMessage(this.text("projectLocalUpdate"));
+      return;
+    }
     this.checking = true;
     let approved = false;
     try {
       const cli = await this.track(inspectGlobal(this.log, this.lifetime.signal));
       if (this.disposed) return;
-      if (!cli) { if (manual && await this.ensure()) await this.reconnect(); return; }
+      if (!cli) { if (manual && await this.ensure(undefined, "eska", "legacy")) await this.reconnect(); return; }
       const release = cli.selfUpdate ? undefined : await this.track(latestRelease(this.lifetime.signal));
       const available = release ? release.version : (await this.track(checkUpdate(cli, this.lifetime.signal))).version;
       if (this.disposed) return;

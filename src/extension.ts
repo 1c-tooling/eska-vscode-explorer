@@ -11,7 +11,7 @@ import { SearchView } from "./search-view.js";
 import { Connection, type ConnectionState } from "./connection.js";
 import { assertHost } from "./host.js";
 import { message, type MessageKey } from "./messages.js";
-import { ExplorerError } from "./protocol.js";
+import { ExplorerError, type BackendKind } from "./protocol.js";
 import type { PropertyChoice } from "./properties.js";
 import { PropertyTabs } from "./properties-view.js";
 import { MetadataTree, type TreeEntry, type ProjectTree } from "./tree.js";
@@ -48,6 +48,7 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
   private readonly output = vscode.window.createOutputChannel("ESKA Explorer", { log: true });
   private readonly connection: Connection;
   private readonly setup: BackendSetup;
+  private readonly legacyNotices = new Set<string>();
   private readonly view: vscode.TreeView<Element>;
   private readonly status = vscode.window.createStatusBarItem("eska.explorer.connection", vscode.StatusBarAlignment.Right, 0);
   private readonly disposables: vscode.Disposable[] = [];
@@ -98,7 +99,7 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
       ["restart", () => this.connect(false)],
       ["disconnect", () => this.disconnect()],
       ["showLog", () => this.output.show(true)],
-      ["checkUpdates", () => this.setup.check(true)],
+      ["checkUpdates", () => this.setup.check(true, this.backendKind())],
       ["refresh", () => this.refresh()],
       ["search", () => this.search()],
       ["revealActiveFile", () => this.revealActiveFile()],
@@ -140,7 +141,8 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
       }
     }));
     this.disposables.push(vscode.workspace.onDidChangeConfiguration((event) => {
-      if (event.affectsConfiguration("eska.explorer.executable", this.selected?.uri)) {
+      if (event.affectsConfiguration("eska.explorer.executable", this.selected?.uri)
+        || event.affectsConfiguration("eska.explorer.backend", this.selected?.uri)) {
         void this.disconnect();
       }
       if (event.affectsConfiguration("eska.explorer.supportPolicy")) {
@@ -601,13 +603,14 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
       if (!this.folders().some((value) => value.uri.toString() === folder.uri.toString())) return;
       assertHost(vscode.workspace.isTrusted, folder.uri.scheme, vscode.env.remoteName);
       this.selected = folder;
-      const configured = vscode.workspace.getConfiguration("eska.explorer", folder.uri).get<string>("executable", "eska");
-      const executable = await this.setup.ensure(controller.signal, configured);
+      const backend = this.backendKind();
+      const configured = vscode.workspace.getConfiguration("eska.explorer", folder.uri).get<string>("executable", "eska-project");
+      const executable = await this.setup.ensure(controller.signal, configured, backend);
       if (!executable || this.disposed || controller.signal.aborted) return;
       if (!this.folders().some(value => value.uri.toString() === folder.uri.toString())) return;
       // Release the picker guard before the asynchronous handshake, allowing disconnect/restart.
       this.selecting = false;
-      await this.connection.connect({ executable, path: folder.uri.fsPath, name: folder.name,
+      await this.connection.connect({ executable, backend, path: folder.uri.fsPath, name: folder.name,
         locale: vscode.env.language.toLowerCase().startsWith("ru") ? "ru-RU" : "en-US" });
     } catch (error) {
       if (!controller.signal.aborted && !this.disposed) this.showError(error instanceof ExplorerError ? error : new ExplorerError("spawnFailed"));
@@ -616,6 +619,13 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
 
   /** Read workspace folders afresh after pickers or asynchronous lifecycle operations. */
   private folders(): readonly vscode.WorkspaceFolder[] { return vscode.workspace.workspaceFolders ?? []; }
+
+  /** Backend selection changes process arguments and negotiated identity without rewriting a custom path. */
+  private backendKind(): BackendKind {
+    const value = vscode.workspace.getConfiguration("eska.explorer", this.selected?.uri).get<string>("backend", "project");
+    if (value !== "project" && value !== "legacy") throw new ExplorerError("incompatible");
+    return value;
+  }
 
   /** Process logs never become the view's labels or user-facing error text. */
   private update(state: ConnectionState): void {
@@ -654,10 +664,14 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
     this.updateKeyboardContext();
     this.changed.fire(undefined);
     if (state.kind === "ready") {
-      this.status.text = `ESKA v${state.version}`;
-      this.status.tooltip = this.text("statusTooltip", state.version, state.target.executable);
+      this.status.text = this.text(state.target.backend === "legacy" ? "legacyStatus" : "projectStatus", state.version);
+      this.status.tooltip = this.text(state.target.backend === "legacy" ? "statusTooltip" : "projectStatusTooltip", state.version, state.target.executable);
       this.status.show();
-      void this.setup.background();
+      void this.setup.background(state.target.backend ?? "project");
+      if (state.target.backend === "legacy" && !this.legacyNotices.has(state.target.executable)) {
+        this.legacyNotices.add(state.target.executable);
+        void vscode.window.showWarningMessage(this.text("legacyBackendSelected"));
+      }
     } else {
       // Never leave a successful connection indicator after disconnect or process failure.
       this.status.hide();
@@ -669,7 +683,7 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
 
   /** Setup instructions are a packaged document, not an automatic init or executable installer. */
   private showError(error: ExplorerError): void {
-    const setup = error.code === "manifestMissing" || error.code === "executableMissing" || error.code === "incompatible" || error.code === "handshakeFailed";
+    const setup = error.code === "manifestMissing" || error.code === "executableMissing" || error.code === "incompatible" || error.code === "handshakeFailed" || error.code === "legacyBackend";
     void vscode.window.showErrorMessage(this.text(error.code), this.text(setup ? "initialization" : "log"))
       .then((choice) => {
         if (!choice || this.disposed) return;

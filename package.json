@@ -284,9 +284,23 @@
     "configuration": {
       "title": "ESKA: 1C Explorer",
       "properties": {
+        "eska.explorer.backend": {
+          "type": "string",
+          "enum": [
+            "project",
+            "legacy"
+          ],
+          "enumDescriptions": [
+            "%backendProject%",
+            "%backendLegacy%"
+          ],
+          "default": "project",
+          "scope": "machine-overridable",
+          "description": "%backend%"
+        },
         "eska.explorer.executable": {
           "type": "string",
-          "default": "eska",
+          "default": "eska-project",
           "scope": "machine-overridable",
           "description": "%executable%"
         },

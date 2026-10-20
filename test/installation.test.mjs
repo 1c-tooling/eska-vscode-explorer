@@ -96,11 +96,24 @@ test("native CLI update checks validate status, method and version before displa
 });
 
 test("compatible API major still requires search and file-event support", () => {
-  const hello = { apiVersion: API_VERSION, server: { name: "eska", version: "0.11.0" },
-    capabilities: { designerXml: true, readOnly: false, propertyEditing: true, metadataRename: true, linkedPropertyEdits: true, unsignedIntegerProperties: true, multiContext: false, search: true, clientFileEvents: true },
+  const hello = { apiVersion: API_VERSION, server: { name: "eska-project", version: "0.14.3" },
+    capabilities: { analyzerConfiguration: true, designerXml: true, readOnly: false, propertyEditing: true, metadataRename: true, linkedPropertyEdits: true, unsignedIntegerProperties: true, multiContext: false, search: true, clientFileEvents: true },
     limits: { maxHeaderBytes: MAX_HEADER, maxRequestBytes: MAX_REQUEST, maxResponseBytes: MAX_RESPONSE } };
-  assert.equal(parseHandshake(hello), "0.11.0");
+  assert.equal(parseHandshake(hello), "0.14.3");
   for (const capability of ["search", "clientFileEvents"]) assert.throws(() => parseHandshake({ ...hello, capabilities: { ...hello.capabilities, [capability]: false } }), { code: "incompatible" });
+});
+
+/** A component identity is part of compatibility, independently of numeric API version. */
+test("legacy identity requires explicit selection and project requires config capabilities", () => {
+  const capabilities = { designerXml: true, readOnly: false, propertyEditing: true, metadataRename: true, linkedPropertyEdits: true,
+    unsignedIntegerProperties: true, multiContext: false, search: true, clientFileEvents: true };
+  const limits = { maxHeaderBytes: MAX_HEADER, maxRequestBytes: MAX_REQUEST, maxResponseBytes: MAX_RESPONSE };
+  const legacy = { apiVersion: { major: 1, minor: 11 }, server: { name: "eska", version: "0.14.3" }, capabilities, limits };
+  assert.equal(parseHandshake(legacy, "legacy"), "0.14.3");
+  assert.throws(() => parseHandshake(legacy), { code: "legacyBackend" });
+  const project = { ...legacy, apiVersion: API_VERSION, server: { name: "eska-project", version: "0.14.3" } };
+  assert.throws(() => parseHandshake(project), { code: "incompatible" });
+  assert.throws(() => parseHandshake({ ...project, capabilities: { ...capabilities, analyzerConfiguration: true } }, "legacy"), { code: "incompatible" });
 });
 
 /** Yanked, unpublished and future-schema entries cannot approve a Cargo installation. */

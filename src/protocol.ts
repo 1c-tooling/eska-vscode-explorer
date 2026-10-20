@@ -1,5 +1,7 @@
 /** The public IDE API is versioned independently from the eska executable. */
-export const API_VERSION = { major: 1, minor: 11 } as const;
+export const API_VERSION = { major: 1, minor: 12 } as const;
+export const LEGACY_API_VERSION = { major: 1, minor: 11 } as const;
+export type BackendKind = "project" | "legacy";
 export const MAX_HEADER = 8192;
 export const MAX_REQUEST = 1_048_576;
 export const MAX_RESPONSE = 67_108_864;
@@ -11,7 +13,7 @@ export type FailureCode =
   | "manifestInvalid" | "selectionInvalid" | "sourceInvalid" | "rootInvalid"
   | "requestFailed" | "cleanupFailed" | "unsupportedWorkspace" | "untrusted"
   | "noFolder" | "invalidExecutable" | "obsolete" | "branchInvalid" | "sourceMissing"
-  | "handlerMissing" | "unsupportedPath" | "sourceChanged" | "cancelled";
+  | "handlerMissing" | "unsupportedPath" | "sourceChanged" | "cancelled" | "legacyBackend";
 
 /** Only stable categories cross into the localized UI; raw protocol text stays private. */
 export class ExplorerError extends Error {
@@ -42,14 +44,17 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /** Reject incompatible peers before sending workspace paths. */
-export function parseHandshake(value: unknown): string {
+export function parseHandshake(value: unknown, backend: BackendKind = "project"): string {
   if (!isRecord(value) || !isRecord(value.apiVersion) || !isRecord(value.server)
     || !isRecord(value.capabilities) || !isRecord(value.limits)) {
     throw new ExplorerError("protocolInvalid");
   }
   const { apiVersion, server, capabilities, limits } = value;
-  if (apiVersion.major !== API_VERSION.major || !Number.isSafeInteger(apiVersion.minor)
-    || (apiVersion.minor as number) < API_VERSION.minor || server.name !== "eska"
+  if (backend === "project" && server.name === "eska") throw new ExplorerError("legacyBackend");
+  const expected = backend === "legacy" ? LEGACY_API_VERSION : API_VERSION;
+  if (apiVersion.major !== expected.major || !Number.isSafeInteger(apiVersion.minor)
+    || (apiVersion.minor as number) < expected.minor || server.name !== (backend === "legacy" ? "eska" : "eska-project")
+    || (backend === "project" && capabilities.analyzerConfiguration !== true)
     || capabilities.designerXml !== true || (capabilities.readOnly !== false || capabilities.propertyEditing !== true || capabilities.metadataRename !== true || capabilities.linkedPropertyEdits !== true || capabilities.unsignedIntegerProperties !== true)
     || capabilities.multiContext !== false || capabilities.search !== true || capabilities.clientFileEvents !== true) {
     throw new ExplorerError("incompatible");

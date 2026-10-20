@@ -6,6 +6,7 @@ import { Connection } from "../out/connection.js";
 import { BackendProcess } from "../out/process.js";
 
 const executable = process.env.ESKA_TEST_BINARY;
+const legacyExecutable = process.env.ESKA_LEGACY_TEST_BINARY;
 
 /** Generate minimal Designer XML solely in this test's owned playground directory. */
 async function project(root, type) {
@@ -64,6 +65,33 @@ test("real eska: four project types, two workspace members, errors and restarts"
   await writeFile(join(empty, "eska.toml"), "[project]\ntype='report'\n");
   assert.equal((await open(empty)).error.code, "rootInvalid");
   assert.equal((await open(workspace)).kind, "ready");
+  await connection.dispose();
+  for (const pid of pids) assert.throws(() => process.kill(pid, 0), { code: "ESRCH" });
+});
+
+/** A real older monolith remains an explicit choice; identity mismatch never starts a fallback. */
+test("real legacy backend requires explicit mode and can reconnect to standalone project", { skip: !executable || !legacyExecutable }, async t => {
+  const root = await mkdtemp(join(process.env.ESKA_TEST_ROOT ?? resolve("../eska-playground"), "explorer-legacy-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const path = join(root, "project"); await project(path, "configuration");
+  const starts = [], pids = [];
+  const connection = new Connection("test", () => {}, () => {}, options => {
+    starts.push(options.args);
+    const child = new BackendProcess(options); pids.push(child.pid); return child;
+  });
+  t.after(() => connection.dispose());
+  const target = { path, name: "legacy", locale: "en-US" };
+  await connection.connect({ ...target, executable: legacyExecutable, backend: "legacy" });
+  assert.equal(connection.state.kind, "ready", JSON.stringify(connection.state));
+  assert.equal(connection.state.analyzerConfiguration, false);
+  assert.deepEqual(starts[0], ["ide", "--stdio"]);
+  await connection.connect({ ...target, executable: legacyExecutable });
+  assert.equal(connection.state.kind, "error");
+  assert.equal(connection.state.error.code, "handshakeFailed");
+  assert.equal(starts.length, 2, "there is no implicit legacy retry");
+  await connection.connect({ ...target, executable });
+  assert.equal(connection.state.kind, "ready", JSON.stringify(connection.state));
+  assert.equal(connection.state.analyzerConfiguration, true);
   await connection.dispose();
   for (const pid of pids) assert.throws(() => process.kill(pid, 0), { code: "ESRCH" });
 });

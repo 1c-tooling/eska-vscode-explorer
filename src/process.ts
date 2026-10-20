@@ -44,10 +44,10 @@ export class BackendProcess {
   constructor(private readonly options: ProcessOptions) {
     if (options.signal?.aborted) throw new ExplorerError("cancelled");
     const abort = (): void => { this.fail(new ExplorerError("cancelled")); };
-    this.child = spawn(options.executable, options.args ?? ["ide", "--stdio"], {
+    this.child = spawn(options.executable, options.args ?? ["serve", "--stdio"], {
       cwd: options.cwd, shell: false, windowsHide: true, stdio: "pipe",
     });
-    this.log("process_start", { executable: options.executable, cwd: options.cwd, args: options.args ?? ["ide", "--stdio"] });
+    this.log("process_start", { executable: options.executable, cwd: options.cwd, args: options.args ?? ["serve", "--stdio"] });
     this.closed = new Promise((resolve) => {
       this.child.once("close", (code, signal) => {
         this.ended = true;

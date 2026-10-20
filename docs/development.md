@@ -27,11 +27,14 @@ node --test test/*.test.mjs
 собственный временный каталог внутри соседнего `eska-playground`:
 
 ```bash
-ESKA_TEST_BINARY="$(realpath ../eska/target/debug/eska)" \
+ESKA_TEST_BINARY="$(realpath ../eska/target/debug/eska-project)" \
 ESKA_TEST_ROOT="$(realpath ../eska-playground)" \
 node --test test/integration.test.mjs test/tree.test.mjs test/search.test.mjs
 ```
 
+Дополнительный `ESKA_LEGACY_TEST_BINARY` указывает на прежнюю полную CLI
+для проверки явного legacy и отсутствия автоматического fallback.
+Для native legacy-профиля задайте также `ESKA_TEST_BACKEND=legacy`.
 Без `ESKA_TEST_BINARY` тесты реального backend пропускаются; unit/process tests остаются
 обязательными. Сборка/выгрузка 1С не запускается. Для ручного запуска после
 компиляции: `code --extensionDevelopmentPath="$PWD" <папка-проекта>`.
@@ -42,21 +45,21 @@ playground, проверяет XML/BSL, клавиатурное сворачи�
 внешние изменения, повреждение/восстановление XML и смену manifest:
 
 ```bash
-ESKA_TEST_BINARY="$(realpath ../eska/target/debug/eska)" \
+ESKA_TEST_BINARY="$(realpath ../eska/target/debug/eska-project)" \
 VSCODE_EXECUTABLE=codium bun run test:host
 ```
 
 Отдельный нативный сценарий фильтра (без команд клавиатурного фокуса):
 
 ```bash
-ESKA_TEST_BINARY="$(realpath ../eska/target/debug/eska)" \
+ESKA_TEST_BINARY="$(realpath ../eska/target/debug/eska-project)" \
 VSCODE_EXECUTABLE=codium node test/run-host.mjs test/filter-host.cjs
 ```
 
 Сценарий иконок проверяет четыре темы, вложенные элементы и уровни масштаба:
 
 ```bash
-ESKA_TEST_BINARY="$(realpath ../eska/target/debug/eska)" \
+ESKA_TEST_BINARY="$(realpath ../eska/target/debug/eska-project)" \
 VSCODE_EXECUTABLE=codium node test/run-host.mjs test/icons-host.cjs
 ```
 
@@ -101,7 +104,7 @@ VSCodium 1.109.5 (Node 22.21.1) подтвердил активацию, под�
 в нативном Extension Host:
 
 ```sh
-ESKA_TEST_BINARY="$(realpath ../eska/target/debug/eska)" \
+ESKA_TEST_BINARY="$(realpath ../eska/target/debug/eska-project)" \
 ESKA_TEST_ROOT="$(realpath ../eska-playground)" \
 VSCODE_EXECUTABLE=codium node test/run-host.mjs test/presentation-host.cjs
 ```
@@ -113,7 +116,7 @@ VSCODE_EXECUTABLE=codium node test/run-host.mjs test/presentation-host.cjs
 Нативная проверка предопределённых данных:
 
 ```sh
-ESKA_TEST_BINARY="$(realpath ../eska/target/debug/eska)" \
+ESKA_TEST_BINARY="$(realpath ../eska/target/debug/eska-project)" \
 ESKA_TEST_ROOT="$(realpath ../eska-playground)" \
 VSCODE_EXECUTABLE=codium node test/run-host.mjs test/predefined-host.cjs
 ```
@@ -125,7 +128,7 @@ VSCODE_EXECUTABLE=codium node test/run-host.mjs test/predefined-host.cjs
 Нативный сценарий использует собственный workspace с двумя проектами:
 
 ```sh
-ESKA_TEST_BINARY="$(realpath ../eska/target/debug/eska)" \
+ESKA_TEST_BINARY="$(realpath ../eska/target/debug/eska-project)" \
 VSCODE_EXECUTABLE=codium node test/run-host.mjs test/workspace-host.cjs
 ```
 
@@ -163,11 +166,11 @@ native shutdown и освобождение объектов за 20 подкл�
 `scripts/check-vsix.py`.
 
 ```sh
-ESKA_TEST_BINARY="$(realpath ../eska/target/debug/eska)" \
+ESKA_TEST_BINARY="$(realpath ../eska/target/debug/eska-project)" \
 ESKA_TEST_ROOT="$(realpath ../eska-playground)" \
 VSCODE_EXECUTABLE=codium node test/run-host.mjs test/properties-host.cjs
 
-ESKA_TEST_BINARY="$(realpath ../eska/target/debug/eska)" \
+ESKA_TEST_BINARY="$(realpath ../eska/target/debug/eska-project)" \
 ESKA_TEST_ROOT="$(realpath ../eska-playground)" \
 VSCODE_EXECUTABLE=codium node test/run-host.mjs test/properties-layout-host.cjs
 ```

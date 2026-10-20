@@ -4,7 +4,7 @@ import { constants } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { dirname, isAbsolute, join, delimiter } from "node:path";
 import { BackendProcess } from "./process.js";
-import { API_VERSION, ExplorerError, isRecord, parseHandshake } from "./protocol.js";
+import { LEGACY_API_VERSION, ExplorerError, isRecord, parseHandshake } from "./protocol.js";
 import type { DiagnosticLog } from "./diagnostics.js";
 
 export const MIN_CLI_VERSION = "0.11.0";
@@ -49,8 +49,8 @@ export function compareVersions(left: string, right: string): number {
 }
 
 /** Resolve only absolute PATH entries, never an executable from an untrusted working directory. */
-export async function findGlobal(paths = process.env.PATH ?? "", home = homedir(), platform = process.platform): Promise<string | undefined> {
-  const name = platform === "win32" ? "eska.exe" : "eska";
+export async function findGlobal(paths = process.env.PATH ?? "", home = homedir(), platform = process.platform, component: "eska" | "eska-project" = "eska"): Promise<string | undefined> {
+  const name = platform === "win32" ? `${component}.exe` : component;
   const directories = [...paths.split(delimiter).filter(isAbsolute), join(home, ".eska", "bin")];
   for (const directory of directories) {
     const candidate = join(directory, name);
@@ -70,10 +70,10 @@ export async function inspectGlobal(log: DiagnosticLog, signal?: AbortSignal): P
   const version = stdout.trim().replace(/^eska /, "");
   const result: GlobalCli = { path, version, compatible: false, selfUpdate: false };
   if (compareVersions(version, MIN_CLI_VERSION) < 0) return result;
-  const child = new BackendProcess({ executable: path, cwd: homedir(), log, failed() {}, ...(signal ? { signal } : {}) });
+  const child = new BackendProcess({ executable: path, args: ["ide", "--stdio"], cwd: homedir(), log, failed() {}, ...(signal ? { signal } : {}) });
   try {
-    const hello = await child.request("initialize", { apiVersion: API_VERSION, client: { name: "eska-explorer", version: "probe" }, locale: "en-US", allowPropertyEdits: true }, 10_000);
-    parseHandshake(hello);
+    const hello = await child.request("initialize", { apiVersion: LEGACY_API_VERSION, client: { name: "eska-explorer", version: "probe" }, locale: "en-US", allowPropertyEdits: true }, 10_000);
+    parseHandshake(hello, "legacy");
     result.compatible = true;
     result.selfUpdate = isRecord(hello) && isRecord(hello.capabilities) && hello.capabilities.selfUpdate === true;
   } catch (error) {

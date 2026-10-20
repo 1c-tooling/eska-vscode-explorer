@@ -7,16 +7,12 @@
 
 Скачайте VSIX из Assets нужного [GitHub Release](https://github.com/1c-tooling/eska-vscode-explorer/releases).
 
-1. Нужна ESKA 0.11.0 или новее с совместимым IDE API 1.9; расширение
-   предложит установить её при необходимости. [Управление CLI](cli-management.md). Для всех иконок
-   нужен backend с `Node.metadataKind`; исходный CLI 0.10.0 без IDE недостаточен.
-   Для проверки текущей разработки подходит бинарник из ветки `feat/ide`,
-   с поддержкой IDE API 1.9.
-2. В меню Extensions выберите **Install from VSIX…**, укажите файл
-   `eska-explorer-0.0.1.vsix` и при необходимости перезагрузите окно.
-3. При отсутствии глобальной ESKA согласитесь на установку из Explorer.
-   Для разработки можно указать сборку в `eska.explorer.executable`:
-   тогда совместимость глобальной установки не влияет на подключение.
+1. Нужен `eska-project` с Metadata API 1.12. Для текущей разработки соберите
+   package в рабочей копии ESKA и задайте абсолютный путь в
+   `eska.explorer.executable`. [Выбор backend](cli-management.md).
+2. В меню Extensions выберите **Install from VSIX…** и укажите собранный пакет.
+3. Для прежней полной CLI явно задайте `eska.explorer.backend = "legacy"`;
+   пользовательский путь сохраняется, соединение помечается Legacy.
 4. Откройте доверенную папку с `eska.toml` и Designer XML; раскройте **ESKA: 1C Explorer**.
    [Настройка проекта](setup.ru.md). bsl-analyzer необязателен.
 

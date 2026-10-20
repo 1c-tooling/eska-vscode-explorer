@@ -60,7 +60,7 @@ exports.run = async function () {
   explorer.setup.ensure = ensure;
   await vscode.commands.executeCommand('eska.explorer.connect');
   await vscode.commands.executeCommand('eska.explorer.projects.focus');
-  assert.equal(explorer.status.text, `ESKA v${explorer.connection.state.version}`);
+  assert.equal(explorer.status.text, `${explorer.connection.state.target.backend === "legacy" ? "ESKA Legacy" : "ESKA Project"} v${explorer.connection.state.version}`);
   assert.ok(explorer.status.tooltip.includes(explorer.connection.state.version));
   assert.ok(explorer.status.tooltip.includes(explorer.connection.state.target.executable));
   assert.equal(explorer.status.command, 'eska.explorer.checkUpdates');
@@ -118,7 +118,8 @@ exports.run = async function () {
   const groups = await children(goods);
   const modules = named(groups, 'Модули');
   assert.equal(groups[0], modules);
-  assert.equal(explorer.getTreeItem(modules).collapsibleState, vscode.TreeItemCollapsibleState.Expanded);
+  // Module groups use the backend-provided collapsed default.
+  assert.equal(explorer.getTreeItem(modules).collapsibleState, vscode.TreeItemCollapsibleState.Collapsed);
   const scripts = await children(modules);
   assert.equal(scripts.length, 1, 'bin-only manager is hidden');
   const attributes = named(groups, 'Реквизиты');
@@ -157,9 +158,10 @@ exports.run = async function () {
   assert.equal(vscode.window.activeTextEditor.document.uri.fsPath, path.join(fixture.source, 'CommonModules', 'Обмен.xml'));
   assert.equal(vscode.window.activeTextEditor.document.getText(vscode.window.activeTextEditor.selection), '<Name>Обмен</Name>');
 
-  // A user collapse must survive a branch refresh, despite expandedByDefault on the backend.
+  // Observe a native expansion before exercising user collapse and branch refresh.
   await vscode.commands.executeCommand('eska.explorer.projects.focus');
   await explorer.view.reveal(modules, { select: true, focus: true, expand: true });
+  await until(() => explorer.getTreeItem(modules).collapsibleState === vscode.TreeItemCollapsibleState.Expanded, 'module expand event');
   await vscode.commands.executeCommand('list.collapse');
   await until(() => explorer.getTreeItem(modules).collapsibleState === vscode.TreeItemCollapsibleState.Collapsed, 'module collapse event');
   await explorer.view.reveal(customers, { select: true, focus: true, expand: true });
