@@ -352,6 +352,7 @@ CLI с поддержкой самообновления вызывается ч
 
 ## Документация и разработка
 
+- [План единой установки и встроенного LSP-клиента](docs/analyzer-integration-plan.md) — запланировано, ещё не реализовано.
 - [Подробное руководство по дереву, поиску и диагностике](https://github.com/1c-tooling/eska-vscode-explorer/blob/main/docs/usage.md)
 - [Настройка проекта](https://github.com/1c-tooling/eska-vscode-explorer/blob/main/docs/setup.ru.md)
 - [Установка, упаковка и проверка VSIX](https://github.com/1c-tooling/eska-vscode-explorer/blob/main/docs/packaging.md)
