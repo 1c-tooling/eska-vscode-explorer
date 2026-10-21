@@ -139,6 +139,20 @@ test("real project ZIP is shared with the Python CLI, preserves sibling files an
   assert.deepEqual((await readdir(empty)).filter(name => name.startsWith(".eska-component")), []);
 });
 
+test("reinstall keeps the staging working directory alive through both delayed project probes", {
+  skip: !process.env.ESKA_TEST_BINARY || process.platform === "win32", timeout: 30000,
+}, async t => {
+  const root = await fixture(t), prefix = join(root, "install"), wrapper = join(root, "delayed-project");
+  const python = (await run("python3", ["-c", "import sys; print(sys.executable)"])).stdout.trim();
+  const binary = process.env.ESKA_TEST_BINARY;
+  await writeFile(wrapper, `#!${python}\nimport os,sys,time\ntime.sleep(.1)\nos.execv(${JSON.stringify(binary)},[${JSON.stringify(binary)},*sys.argv[1:]])\n`, { mode: 0o755 });
+  const contract = JSON.parse((await runProbe(wrapper, ["__tool-contract"], root, 10000, 65536)).stdout);
+  const packed = await archive(root, wrapper, contract);
+  const first = await installProject(prefix, packed.data, packed.release, () => {});
+  assert.deepEqual(await installProject(prefix, packed.data, packed.release, () => {}), first);
+  assert.deepEqual((await readdir(prefix)).filter(name => name.startsWith(".eska-component")), []);
+});
+
 test("real upstream app installs independently and verifies all five notices without replacing project", {
   skip: !process.env.ESKA_TEST_ANALYZER_BINARY,
 }, async t => {

@@ -99,7 +99,8 @@ export async function installProject(root: string, data: Buffer, release: ToolRe
       const next = projectFiles(value), same = previous?.archive_sha256 === release.asset!.sha256;
       await preflight(root, old, next.keys(), previous?.package.version, release, same);
       const path = managedPath(root, "project", release.target);
-      if (same) return inspectProjectContract(path, stage, value.contract, log, signal);
+      // The probe uses stage as its cwd; finally must not remove it before every child exits.
+      if (same) return await inspectProjectContract(path, stage, value.contract, log, signal);
       const space = await statfs(root), required = [...value.files, ...(previous?.package.files ?? [])].reduce((sum, item) => sum + item.size, 0);
       if (space.bavail * space.bsize < required + 16 * 1024 * 1024) throw new ToolFailure("io", "space");
       const executable = value.files.find(item => item.executable)!;
@@ -160,7 +161,8 @@ export async function installAnalyzer(root: string, data: Buffer, release: ToolR
       const same = previous?.sha256 === release.asset!.sha256;
       await preflight(root, old, next.keys(), previous?.version, release, same);
       const path = join(root, name);
-      if (same) return inspectAnalyzer(path, stage, signal);
+      // Reinstall retains its working directory until both read-only probe processes finish.
+      if (same) return await inspectAnalyzer(path, stage, signal);
       await inspectAnalyzer(binary, stage, signal); assertCurrent(signal);
       const receiptName = "components/bsl-analyzer-app.json";
       await writeJson(join(stage, "receipt.json"), { schema_version: 1, method: "upstream-binary", version: release.version,
