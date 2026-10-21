@@ -1,0 +1,62 @@
+{
+  "name": "BSL",
+  "scopeName": "source.bsl",
+  "patterns": [
+    {
+      "name": "comment.line.double-slash.bsl",
+      "begin": "//",
+      "end": "$"
+    },
+    {
+      "name": "meta.preprocessor.bsl",
+      "match": "^\\s*#[^\\r\\n]*"
+    },
+    {
+      "name": "storage.modifier.annotation.bsl",
+      "match": "^\\s*&[\\p{L}_][\\p{L}0-9_]*"
+    },
+    {
+      "name": "string.quoted.double.bsl",
+      "begin": "\"",
+      "end": "\"(?!\")",
+      "patterns": [
+        {
+          "name": "constant.character.escape.bsl",
+          "match": "\"\""
+        },
+        {
+          "name": "punctuation.separator.continuation.bsl",
+          "match": "^\\s*\\|"
+        }
+      ]
+    },
+    {
+      "name": "constant.other.date.bsl",
+      "match": "'[0-9]{8,14}'"
+    },
+    {
+      "name": "constant.language.bsl",
+      "match": "(?i:\\b(?:Истина|Ложь|Неопределено|True|False|Undefined|Null)\\b)"
+    },
+    {
+      "name": "keyword.operator.logical.bsl",
+      "match": "(?i:\\b(?:И|Или|Не|And|Or|Not)\\b)"
+    },
+    {
+      "name": "keyword.control.bsl",
+      "match": "(?i:\\b(?:Процедура|КонецПроцедуры|Функция|КонецФункции|Экспорт|Знач|Если|Тогда|ИначеЕсли|Иначе|КонецЕсли|Для|Каждого|Из|По|Пока|Цикл|КонецЦикла|Возврат|Продолжить|Прервать|Перейти|Попытка|Исключение|КонецПопытки|ВызватьИсключение|Перем|Новый|Выполнить|ДобавитьОбработчик|УдалитьОбработчик|Асинх|Ждать|Procedure|EndProcedure|Function|EndFunction|Export|Val|If|Then|ElsIf|Else|EndIf|For|Each|In|To|While|Do|EndDo|Return|Continue|Break|Goto|Try|Except|EndTry|Raise|Var|New|Execute|AddHandler|RemoveHandler|Async|Await)\\b)"
+    },
+    {
+      "name": "constant.numeric.bsl",
+      "match": "\\b[0-9]+(?:\\.[0-9]+)?\\b"
+    },
+    {
+      "name": "entity.name.function.bsl",
+      "match": "[\\p{L}_][\\p{L}0-9_]*(?=\\s*\\()"
+    },
+    {
+      "name": "keyword.operator.bsl",
+      "match": "<>|<=|>=|[=<>+*/%\\-]"
+    }
+  ]
+}

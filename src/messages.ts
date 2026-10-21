@@ -1,6 +1,20 @@
 import type { FailureCode } from "./protocol.js";
 
 const en = {
+  toolPhase_starting: "starting",
+  languageNoContext: "A connected ESKA project context is required.",
+  languageDisabled: "Explorer language features are disabled.",
+  languageLegacy: "Select the standalone project backend for Explorer language features.",
+  languagePreparing: "Preparing the selected application and analyzer configuration.",
+  languageChoose: "Choose analysis application",
+  languageChooseHint: "Application name from eska.toml. Leave empty to use the backend default.",
+  languageSwitch: "Switch the generated analyzer configuration to {0}? Other windows using its previous context must stop analysis first.",
+  languageSwitchAction: "Switch application",
+  languageStopped: "Language preparation was cancelled.",
+  languageLimited: "Limited standalone context: {0}.",
+  languageFailed: "Explorer language service is unavailable ({0}). See ESKA Explorer output.",
+  languageMigrationRequired: "The analyzer configuration needs an explicit migration with preview and backup. See component setup and the project analyzer migration commands.",
+  languageManagedConflict: "The generated analyzer configuration was edited outside ESKA. Review the file before preparing it again.",
   toolChecking: "Checking {0} updates",
   toolMissingAsset: "The release has no {0} asset",
   toolSupportedAnalyzer: "The verified Analyzer version is {0}",
@@ -166,6 +180,20 @@ const en = {
 } as const;
 
 const ru: Record<keyof typeof en, string> = {
+  toolPhase_starting: "запуск",
+  languageNoContext: "Нужен контекст подключённого проекта ESKA.",
+  languageDisabled: "Языковые функции Explorer отключены.",
+  languageLegacy: "Для языковых функций Explorer выберите самостоятельный project backend.",
+  languagePreparing: "Подготовка выбранного приложения и конфигурации анализатора.",
+  languageChoose: "Выбрать приложение для анализа",
+  languageChooseHint: "Имя приложения из eska.toml. Пустое значение использует выбор backend по умолчанию.",
+  languageSwitch: "Переключить производный конфиг анализатора на {0}? В других окнах сначала остановите анализ прежнего контекста.",
+  languageSwitchAction: "Переключить приложение",
+  languageStopped: "Подготовка языкового сервиса отменена.",
+  languageLimited: "Ограниченный standalone-контекст: {0}.",
+  languageFailed: "Языковой сервис Explorer недоступен ({0}). Подробности в выводе ESKA Explorer.",
+  languageMigrationRequired: "Конфиг анализатора требует явной миграции с preview и сохранением оригинала. Используйте инструкции подготовки компонентов и команды analyzer migration проектного инструмента.",
+  languageManagedConflict: "Производный конфиг анализатора изменён вне ESKA. Проверьте файл перед повторной подготовкой.",
   toolChecking: "Проверка обновлений {0}",
   toolMissingAsset: "В выпуске нет архива {0}",
   toolSupportedAnalyzer: "Проверенная версия Analyzer — {0}",

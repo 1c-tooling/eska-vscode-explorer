@@ -6,6 +6,7 @@ import * as vscode from "vscode";
 import { BackendSetup } from "./backend-setup.js";
 import { ToolingSetup } from "./tooling/setup.js";
 import { ToolFailure } from "./tooling/contracts.js";
+import { LanguageService } from "./language/service.js";
 import { GitDecorations } from "./decorations.js";
 import { revealFile, relativeFile } from "./reveal.js";
 import { iconName } from "./icons.js";
@@ -51,6 +52,7 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
   private readonly connection: Connection;
   private readonly setup: BackendSetup;
   private readonly tooling: ToolingSetup;
+  private readonly language: LanguageService;
   private readonly legacyNotices = new Set<string>();
   private readonly view: vscode.TreeView<Element>;
   private readonly status = vscode.window.createStatusBarItem("eska.explorer.connection", vscode.StatusBarAlignment.Right, 0);
@@ -94,9 +96,11 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
     this.connection = new Connection(String(context.extension.packageJSON.version),
       (state) => this.update(state), (text, level) => this.output[level ?? "info"](text));
     this.tooling = new ToolingSetup(context, (text, level) => { if (!this.disposed) this.output[level ?? "info"](text); },
-      () => this.renderProjectStatus(), async kind => { if (kind === "project") await this.disconnect(); },
-      async kind => { if (kind === "project") await this.connect(false); });
+      () => this.renderProjectStatus(), async kind => { if (kind === "project") await this.disconnect(); else await this.language.stop(); },
+      async kind => { if (kind === "project") await this.connect(false); else await this.language.restart(false); });
     this.disposables.push(this.tooling);
+    this.language = new LanguageService(context, this.connection, this.tooling, this.output, (text, level) => this.output[level ?? "info"](text));
+    this.disposables.push(this.language);
     this.setup = new BackendSetup(context, (text, level) => { if (!this.disposed) this.output[level ?? "info"](text); },
       () => this.connection.disconnect(), () => this.connect(false));
     this.disposables.push(this.setup);
@@ -111,6 +115,8 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
       ["prepareTools", () => this.tooling.prepare(vscode.workspace.getConfiguration("eska.explorer", this.selected?.uri).get<string>("executable", "eska-project"), new AbortController().signal).catch(error => this.tooling.report(error))],
       ["recoverProjectInstallation", () => this.tooling.recover("project")],
       ["recoverAnalyzerInstallation", () => this.tooling.recover("analyzer")],
+      ["restartLanguage", () => this.language.restart()],
+      ["selectAnalysisContext", () => this.language.selectContext()],
       ["refresh", () => this.refresh()],
       ["search", () => this.search()],
       ["revealActiveFile", () => this.revealActiveFile()],
@@ -153,8 +159,9 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
     }));
     this.disposables.push(vscode.workspace.onDidChangeConfiguration((event) => {
       if (event.affectsConfiguration("eska.explorer.analyzerExecutable")) {
-        void this.tooling.ensureAnalyzer(undefined, false).catch(error => this.tooling.report(error));
+        void this.language.restart(false);
       }
+      if (event.affectsConfiguration("eska.explorer.languageFeatures")) void this.language.restart(false);
       if (event.affectsConfiguration("eska.explorer.executable", this.selected?.uri)
         || event.affectsConfiguration("eska.explorer.backend", this.selected?.uri)) {
         void this.disconnect();
@@ -590,10 +597,11 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
   }
 
   /** Invalidate preflight as well as the protocol connection so late probes cannot reconnect. */
-  private disconnect(): Promise<void> {
+  private async disconnect(): Promise<void> {
     this.connecting?.abort();
     this.selecting = false;
-    return this.connection.disconnect();
+    await this.language.stop();
+    await this.connection.disconnect();
   }
 
   /** Selection is explicit for unrelated multi-root folders; workspace members are opened by eska. */
@@ -627,6 +635,8 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
       if (!this.folders().some(value => value.uri.toString() === folder.uri.toString())) return;
       // Release the picker guard before the asynchronous handshake, allowing disconnect/restart.
       this.selecting = false;
+      await this.language.stop();
+      if (controller.signal.aborted || this.disposed) return;
       await this.connection.connect({ executable, backend, path: folder.uri.fsPath, name: folder.name,
         locale: vscode.env.language.toLowerCase().startsWith("ru") ? "ru-RU" : "en-US" });
     } catch (error) {
@@ -684,6 +694,7 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
     this.updateKeyboardContext();
     this.changed.fire(undefined);
     this.tooling.projectConnection(state);
+    this.language.connectionChanged(state);
     if (state.kind === "ready") {
       void this.setup.background(state.target.backend ?? "project");
       if (state.target.backend === "legacy" && !this.legacyNotices.has(state.target.executable)) {
@@ -734,7 +745,12 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
       for (const watcher of this.watchers) watcher.dispose();
       this.view.dispose();
       this.changed.dispose();
-      this.stopping = Promise.all([this.supportContexts.stop(), this.support.shutdown(), this.connection.dispose(), this.setup.shutdown(), this.tooling.shutdown()]).then(() => {}).finally(() => this.output.dispose());
+      const other = Promise.allSettled([this.supportContexts.stop(), this.support.shutdown(), this.setup.shutdown(), this.tooling.shutdown()]);
+      this.stopping = (async () => {
+        const language = await Promise.allSettled([this.language.shutdown()]);
+        const metadata = await Promise.allSettled([this.connection.dispose()]);
+        for (const result of [...language, ...metadata, ...await other]) if (result.status === "rejected") throw result.reason;
+      })().finally(() => this.output.dispose());
     }
     return this.stopping;
   }

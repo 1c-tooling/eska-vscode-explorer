@@ -6,8 +6,8 @@
 
 Зависимости закреплены в `bun.lock`: TypeScript 7.0.2, API VS Code 1.109.0,
 типы Node 22.20.3. Инструменты проверены 2026-09-18; Bun — 1.4.2.
-Production-код работает в Node Extension Host. `yauzl` 3.4.0 и транзитивный
-`pend` включаются в bundle через esbuild 0.28.2; npm modules из checkout
+Production-код работает в Node Extension Host. `yauzl` 3.4.0, `vscode-languageclient`
+10.1.2 и их зависимости включаются в bundle через esbuild 0.28.2; npm modules из checkout
 установленному VSIX не нужны. Bun используется для инструментов проекта.
 
 ```bash
@@ -244,3 +244,13 @@ node --test test/tool-*.test.mjs
 Для двух нативных индикаторов запустите `test/run-host.mjs test/tool-status-host.cjs`
 с теми же binary variables и `VSCODE_EXECUTABLE=codium`; `ESKA_TEST_VSIX`
 переводит проверку на код установленного пакета.
+
+## Языковой клиент T86
+
+`src/language/` владеет контекстом из Metadata API, config lease, LSP-клиентом
+и единственным дочерним процессом. Остановка и отмена проверяются настоящими
+процессами; [описание и команды](language-service.md#проверка).
+Обычные tree-профили runner отключают свой LSP. Для языковых профилей задайте
+`ESKA_TEST_LANGUAGE=1` и абсолютный `ESKA_TEST_ANALYZER_BINARY`.
+`ESKA_TEST_PYTHON` нужен только сценарию отмены с управляемым тестовым wrapper,
+он не является зависимостью расширения.

@@ -34,5 +34,8 @@
   "checkAnalyzerUpdates": "Check for BSL Analyzer updates",
   "prepareTools": "Prepare project and language components",
   "recoverProjectInstallation": "Recover project component installation",
-  "recoverAnalyzerInstallation": "Recover Analyzer installation"
+  "recoverAnalyzerInstallation": "Recover Analyzer installation",
+  "languageFeatures": "Run Explorer’s own BSL language client for the selected ESKA application. Grammar remains available when disabled.",
+  "restartLanguage": "Restart BSL language service",
+  "selectAnalysisContext": "Choose analysis application"
 }

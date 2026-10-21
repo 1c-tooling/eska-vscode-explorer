@@ -1,0 +1,260 @@
+{
+  "schema_version": 1,
+  "stage": "T86",
+  "date": "2026-10-21",
+  "status": "passed-linux",
+  "explorer_parent_revision": "dc4e5cf57585c0f949d6feb8200e85f25d723927",
+  "root_revision": "27423cc4f0293bd44a6ea2aec59ecf200a1af256",
+  "platform": "Linux x86_64 GNU",
+  "editor": "VSCodium 1.109.5",
+  "extension_host_node": "22.21.1",
+  "cli_node": "22.23.1",
+  "bun": "1.4.2",
+  "runtime_sources": {
+    "package.json": "94ac1b04f2ff6b109a983c737f70212997255fd6d5bda74788fa27cafc4fb1ae",
+    "bun.lock": "8775a019abafe363688123c762ebcb2d515b29807ce43c5dd1ea8bf916b69600",
+    "scripts/bundle.mjs": "beb356ba5b762b4c3f93386ce9d1bcc74925c2566baceac4c45cb88bbff08aaa",
+    "src/extension.ts": "ff603ebc4f9fdc43f49f9dcb6d140e554d2b6da9b3daea2814c24ffdcb7a5f59",
+    "src/connection.ts": "112d75d7878b834093381f086e8f0c202cc9626b3c26ef3004097d20f7866dcb",
+    "src/messages.ts": "87de0cf78ef79c5fb9a0ee7db55af6bc527fcac164bfd55fb94d94c2debc1262",
+    "src/tooling/setup.ts": "c9f3a67078a8f473c7b5eba705bdba5270b18257538dacd55c7e1adc60efbcf3",
+    "src/tooling/choice.ts": "449c4f281abb7f6b80e0fe21dfd61766011f315aacc6c0eb7176e6561c10c3f6",
+    "src/language/context.ts": "ee5b52e92bcc91c7750fbf17850ed5fe3a49288031e95242a1b88f7e8ac8f7ee",
+    "src/language/process.ts": "19867b7c288ef5188d6a7fc5fb91a32f2351af636a95fb65521759eb781efa0b",
+    "src/language/service.ts": "1dd9ffa9560e63840b6ed329f89b4892f5464538e23a21912b85ba35c9e464e1",
+    "resources/language/bsl-language-configuration.json": "ce8567215c4168b019580a1e25dbc0e2e63e79735db29107abf83c46939bb070",
+    "resources/language/bsl.tmLanguage.json": "d3b18452f4d49db493154497aa321c486daa20e3d8638a0d4039385553d7e828",
+    "resources/language/sdbl-language-configuration.json": "35deba2d6bb882a3d14259c09987a3e21f83801ef6d64e86d20b536fa5c4d939",
+    "resources/language/sdbl.tmLanguage.json": "317cd43fdf089c03842502fb7a2071d010a37d70b573f7543276b4c9af3d79be"
+  },
+  "upstream": {
+    "release": "0.3.2",
+    "tree": "bdb221307b73f83f9401558e8013f3a1667969b9",
+    "binary_sha256": "e5ca2b17270338c797b6d1b6a7ea564e0b9235e8a823d1b99cf1b42a36e2fd0d",
+    "source_inspection": [
+      {
+        "path": "crates/bsl-analyzer/src/lib.rs",
+        "sha256": "b38899ac2b53f3512d5149dff847e059038419ad643a073f1eee548ebd75f6e5"
+      },
+      {
+        "path": "crates/bsl-analyzer/src/server.rs",
+        "sha256": "4f7fe4359edb508b49f8cbdc32693dd02789718fc3a3052bb07ed6e02484a289"
+      },
+      {
+        "path": "crates/bsl-analyzer/src/global_state.rs",
+        "sha256": "f73446ac24ae076b718df08b4805d54ec731dc684cd3ccb4df35c4351b5d0542"
+      },
+      {
+        "path": "crates/bsl-analyzer/src/workspace.rs",
+        "sha256": "ef0f83d6d342e3e9d2ac100baaae91fcada8897f49f078292677c25464b81f23"
+      }
+    ],
+    "lsp_argv": [
+      "lsp"
+    ],
+    "transport": "stdio",
+    "config": "ordinary context-root bsl-analyzer.toml; no --config LSP flag"
+  },
+  "checks": {
+    "typecheck": "passed",
+    "compile": "passed",
+    "node": {
+      "passed": 165,
+      "failed": 0,
+      "skipped": 0
+    },
+    "bun": {
+      "passed": 165,
+      "failed": 0,
+      "skipped": 0
+    },
+    "native_installed_profiles": {
+      "language-vsix": {
+        "passed": true,
+        "suite": "own-language",
+        "vscode": "1.109.5",
+        "node": "22.21.1",
+        "capabilities": {
+          "callHierarchyProvider": true,
+          "codeActionProvider": {
+            "codeActionKinds": [
+              "quickfix",
+              "source.fixAll.bsl-analyzer"
+            ]
+          },
+          "completionProvider": {
+            "triggerCharacters": [
+              "."
+            ]
+          },
+          "definitionProvider": true,
+          "documentFormattingProvider": true,
+          "documentHighlightProvider": true,
+          "documentOnTypeFormattingProvider": {
+            "firstTriggerCharacter": ";",
+            "moreTriggerCharacter": [
+              "\n"
+            ]
+          },
+          "documentRangeFormattingProvider": true,
+          "documentSymbolProvider": true,
+          "foldingRangeProvider": true,
+          "hoverProvider": true,
+          "inlayHintProvider": true,
+          "positionEncoding": "utf-16",
+          "referencesProvider": true,
+          "renameProvider": {
+            "prepareProvider": true
+          },
+          "selectionRangeProvider": true,
+          "semanticTokensProvider": {
+            "full": true,
+            "legend": {
+              "tokenModifiers": [
+                "defaultLibrary",
+                "deprecated",
+                "async",
+                "declaration",
+                "definition",
+                "documentation"
+              ],
+              "tokenTypes": [
+                "keyword",
+                "function",
+                "parameter",
+                "variable",
+                "string",
+                "number",
+                "comment",
+                "macro",
+                "decorator",
+                "property",
+                "operator",
+                "unresolvedReference",
+                "type",
+                "enumMember",
+                "namespace",
+                "class"
+              ]
+            }
+          },
+          "signatureHelpProvider": {
+            "retriggerCharacters": [
+              ","
+            ],
+            "triggerCharacters": [
+              "(",
+              ","
+            ]
+          },
+          "textDocumentSync": 2,
+          "typeDefinitionProvider": true,
+          "workspaceSymbolProvider": true
+        },
+        "hover": 1,
+        "definitions": 1,
+        "symbols": 1,
+        "completions": 26,
+        "semantic_integers": 60,
+        "broken_syntax_errors": 2,
+        "repaired_syntax_errors": 0,
+        "disk_unchanged": true,
+        "live_on_host_shutdown": true,
+        "shutdownPids": [
+          1574171,
+          1574266,
+          1574333,
+          1574128
+        ]
+      },
+      "grammar-vsix": {
+        "passed": true,
+        "suite": "grammar",
+        "vscode": "1.109.5",
+        "textmate": "9.3.2",
+        "oniguruma": "1.7.0",
+        "scopes_checked": 9
+      },
+      "cancellation-vsix": {
+        "passed": true,
+        "suite": "language-cancellation",
+        "vscode": "1.109.5",
+        "validator_reaped": true,
+        "config_not_published_on_cancel": true,
+        "lease_handoff_released": true,
+        "metadata_preserved": true,
+        "shutdownPids": [
+          1572433
+        ]
+      },
+      "tree-vsix": {
+        "passed": true,
+        "vscode": "1.109.5",
+        "node": "22.21.1"
+      },
+      "status-vsix": {
+        "passed": true,
+        "suite": "tool-status",
+        "vscode": "1.109.5",
+        "node": "22.21.1",
+        "project": "ESKA v0.14.3",
+        "analyzer": "BSL Analyzer v0.3.2 · suspended",
+        "tooltip": "Component: bsl-analyzer-app\nSelected version: 0.3.2\nSelected path: /home/akalsin/Documents/Projects/eska-playground/t85-installation-8UwpsT/managed/analyzer/bin/bsl-analyzer-app\nState: suspended\nManaged path: /home/akalsin/.eska/analyzer/bin/bsl-analyzer-app\nAvailable release: —\nOwner: ESKA Explorer\nClick to check this component for updates\ninjected-conflict",
+        "commands": [
+          [
+            "project",
+            true
+          ],
+          [
+            "analyzer",
+            true
+          ]
+        ]
+      },
+      "legacy-vsix": {
+        "passed": true,
+        "vscode": "1.109.5",
+        "node": "22.21.1"
+      },
+      "override-vsix": {
+        "passed": true,
+        "suite": "backend-override",
+        "vscode": "1.109.5"
+      }
+    },
+    "raw_lsp_probe": {
+      "root": "/home/akalsin/Documents/Projects/eska-playground/t86-lsp-probe-Orp6O2",
+      "report": "/home/akalsin/Documents/Projects/eska-playground/t86-lsp-probe-Orp6O2/report.json",
+      "passed": true
+    }
+  },
+  "vsix": {
+    "path": "/home/akalsin/Documents/Projects/eska-playground/t86-vsix-wtOfjn/eska-explorer.vsix",
+    "receipt": "/home/akalsin/Documents/Projects/eska-playground/t86-vsix-wtOfjn/receipt.json",
+    "checksum_note": "Final VSIX SHA-256 is in the adjacent receipt to avoid a self-referential archive hash.",
+    "runtime_matches_tested_sources": true
+  },
+  "semantics": {
+    "lazy_start": "first BSL document or explicit restart; independent of tree visibility",
+    "context_authority": "Metadata API 1.12; no TypeScript manifest/XML parser",
+    "lease_order": "stop and reap owned LSP before release; release before metadata shutdown",
+    "writing_providers": "disabled until T88 source policy guard",
+    "standalone_sdbl": "basic TextMate syntax only",
+    "ready_status": "LSP connection; not completed indexing or clean analysis",
+    "native_status_conflict": "injected state only; not T87 acceptance",
+    "native_support_policy": false
+  },
+  "not_accepted": [
+    "T87 foreign-extension conflict",
+    "T88 protected URI, edits and XML/branch/context refresh",
+    "T89 buhmfo performance and final minimum-installation matrix"
+  ],
+  "unverified_environments": [
+    "Windows",
+    "macOS",
+    "VS Code",
+    "Remote"
+  ],
+  "acceptance_scope": "User selected current Linux/VSCodium; other environments remain explicitly unverified.",
+  "known_upstream_limit": "Published 0.3.2 push diagnostics omit document version; one edit/repair test does not prove every stale-diagnostic race."
+}

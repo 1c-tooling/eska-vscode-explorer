@@ -34,5 +34,8 @@
   "checkAnalyzerUpdates": "Проверить обновления BSL Analyzer",
   "prepareTools": "Подготовить проектный и языковой компоненты",
   "recoverProjectInstallation": "Восстановить установку project-компонента",
-  "recoverAnalyzerInstallation": "Восстановить установку Analyzer"
+  "recoverAnalyzerInstallation": "Восстановить установку Analyzer",
+  "languageFeatures": "Запускать собственный BSL-клиент Explorer для выбранного приложения ESKA. При отключении базовая подсветка сохраняется.",
+  "restartLanguage": "Перезапустить языковой сервис BSL",
+  "selectAnalysisContext": "Выбрать приложение для анализа"
 }

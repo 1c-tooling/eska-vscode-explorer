@@ -22,7 +22,9 @@
   "activationEvents": [
     "onFileSystem:eska-protected",
     "onView:eska.explorer.projects",
-    "workspaceContains:**/eska.toml"
+    "workspaceContains:**/eska.toml",
+    "onLanguage:bsl",
+    "onLanguage:sdbl"
   ],
   "capabilities": {
     "untrustedWorkspaces": {
@@ -171,6 +173,16 @@
       {
         "command": "eska.explorer.recoverAnalyzerInstallation",
         "title": "%recoverAnalyzerInstallation%",
+        "category": "ESKA Explorer"
+      },
+      {
+        "command": "eska.explorer.restartLanguage",
+        "title": "%restartLanguage%",
+        "category": "ESKA Explorer"
+      },
+      {
+        "command": "eska.explorer.selectAnalysisContext",
+        "title": "%selectAnalysisContext%",
         "category": "ESKA Explorer"
       }
     ],
@@ -371,6 +383,12 @@
           "default": true,
           "scope": "window",
           "description": "%checkForAnalyzerUpdates%"
+        },
+        "eska.explorer.languageFeatures": {
+          "type": "boolean",
+          "default": true,
+          "scope": "window",
+          "description": "%languageFeatures%"
         }
       }
     },
@@ -392,6 +410,43 @@
         "key": "f5",
         "when": "focusedView == eska.explorer.projects"
       }
+    ],
+    "languages": [
+      {
+        "id": "bsl",
+        "extensions": [
+          ".bsl"
+        ],
+        "aliases": [
+          "BSL",
+          "1C (BSL)",
+          "1С"
+        ],
+        "configuration": "./resources/language/bsl-language-configuration.json"
+      },
+      {
+        "id": "sdbl",
+        "extensions": [
+          ".sdbl"
+        ],
+        "aliases": [
+          "SDBL",
+          "1C Query"
+        ],
+        "configuration": "./resources/language/sdbl-language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "bsl",
+        "scopeName": "source.bsl",
+        "path": "./resources/language/bsl.tmLanguage.json"
+      },
+      {
+        "language": "sdbl",
+        "scopeName": "source.sdbl",
+        "path": "./resources/language/sdbl.tmLanguage.json"
+      }
     ]
   },
   "publisher": "1c-tooling",
@@ -409,6 +464,7 @@
   ],
   "icon": "resources/icon.png",
   "dependencies": {
-    "yauzl": "3.4.0"
+    "yauzl": "3.4.0",
+    "vscode-languageclient": "10.1.2"
   }
 }

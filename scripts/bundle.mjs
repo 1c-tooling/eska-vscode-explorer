@@ -1,6 +1,6 @@
 import { build } from "esbuild";
 import { readFile, readdir, writeFile } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 
 // The installed VSIX must never resolve runtime dependencies from the development checkout.
 const result = await build({ entryPoints: ["src/extension.ts"], outfile: "out/extension.js", bundle: true,
@@ -8,14 +8,19 @@ const result = await build({ entryPoints: ["src/extension.ts"], outfile: "out/ex
 const packages = new Map();
 for (const input of Object.keys(result.metafile.inputs).filter(path => path.includes("node_modules/"))) {
   let folder = dirname(resolve(input));
+  let found = false;
   while (folder !== dirname(folder)) {
     const metadata = await readFile(join(folder, "package.json"), "utf8").catch(() => undefined);
     if (metadata) {
       const value = JSON.parse(metadata);
-      packages.set(`${value.name}@${value.version}`, { folder, value }); break;
+      if (typeof value.name === "string" && typeof value.version === "string") {
+        packages.set(`${value.name}@${value.version}`, { folder, value }); found = true; break;
+      }
     }
+    if (basename(folder) === "node_modules") break;
     folder = dirname(folder);
   }
+  if (!found) throw new Error(`Missing bundled dependency metadata: ${input}`);
 }
 const notices = [];
 for (const [name, { folder, value }] of [...packages].sort(([a], [b]) => a.localeCompare(b, "en"))) {

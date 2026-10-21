@@ -1,0 +1,231 @@
+import * as vscode from "vscode";
+import { basename, join } from "node:path";
+import { CloseAction, ErrorAction, LanguageClient, type Middleware } from "vscode-languageclient/node";
+import type { Connection, ConnectionState } from "../connection.js";
+import { ExplorerError, isRecord } from "../protocol.js";
+import { message, type MessageKey } from "../messages.js";
+import type { DiagnosticLog } from "../diagnostics.js";
+import { ANALYZER_VERSION, ToolFailure } from "../tooling/contracts.js";
+import type { ToolingSetup } from "../tooling/setup.js";
+import { analysisContext, analyzerConfiguration, analyzerFailure, type AnalysisContext } from "./context.js";
+import { LanguageProcess } from "./process.js";
+import { readonlyPattern } from "../support-settings.js";
+import { cancellableChoice } from "../tooling/choice.js";
+
+type Ready = Extract<ConnectionState, { kind: "ready" }>;
+interface Session { context: AnalysisContext; lease: string; state: Ready; client?: LanguageClient; owner?: LanguageProcess }
+
+/** One language session owns its config lease, client, child and generation independently of TreeView visibility. */
+export class LanguageService implements vscode.Disposable {
+  private target: Ready | undefined;
+  private session: Session | undefined;
+  private queue = Promise.resolve();
+  private revision = 0;
+  private scope: AbortController | undefined;
+  private wanted = vscode.workspace.textDocuments.some(document => document.languageId === "bsl");
+  private disposed = false;
+  private readonly subscriptions: vscode.Disposable[] = [];
+
+  constructor(private readonly context: vscode.ExtensionContext, private readonly connection: Connection,
+    private readonly tooling: ToolingSetup, private readonly output: vscode.LogOutputChannel, private readonly log: DiagnosticLog) {
+    this.subscriptions.push(vscode.workspace.onDidOpenTextDocument(document => {
+      if (document.languageId === "bsl" && !this.wanted) { this.wanted = true; void this.restart(false); }
+    }));
+    this.subscriptions.push(connection.onNotification((method, params) => {
+      if (method === "analyzer/validationOutput" && isRecord(params)) {
+        for (const value of [params.stdout, params.stderr]) if (typeof value === "string" && value) this.log(value.slice(0, 16384), "warn");
+      }
+    }));
+    if (!this.enabled()) this.tooling.analyzerState("suspended", this.text("languageDisabled"));
+  }
+
+  /** Translate only presentation strings; protocol identifiers and backend error categories stay stable. */
+  private text(key: MessageKey, ...values: string[]): string { return message(vscode.env.language, key, ...values); }
+
+  /** A metadata connection supplies context authority and owns the lease; its loss invalidates language results. */
+  connectionChanged(state: ConnectionState): void {
+    this.target = state.kind === "ready" ? state : undefined;
+    if (this.target) void this.restart(false);
+    else if (this.session || this.scope) void this.stop(this.text("languageNoContext"));
+  }
+
+  /** A manual restart can start analysis before a BSL document opens; ordinary tree activation stays lazy. */
+  restart(manual = true, application?: string, switchContext = false): Promise<void> {
+    if (manual) this.wanted = true;
+    const revision = ++this.revision;
+    this.scope?.abort();
+    const controller = new AbortController(); this.scope = controller;
+    const state = this.target;
+    if (this.wanted && this.enabled()) this.tooling.analyzerState("starting", this.text("languagePreparing"));
+    this.queue = this.queue.then(async () => {
+      await this.cleanup();
+      if (!this.current(revision, controller.signal)) return;
+      if (!vscode.workspace.isTrusted || !this.enabled() || !this.wanted || !state || !state.analyzerConfiguration || state.target.backend === "legacy") {
+        await this.tooling.ensureAnalyzer(controller.signal, false);
+        if (!this.current(revision, controller.signal)) return;
+        if (!vscode.workspace.isTrusted || !this.enabled()) this.tooling.analyzerState("suspended", this.text("languageDisabled"));
+        else if (!this.wanted) this.tooling.analyzerState(this.tooling.states.analyzer.info ? "verified" : "missing");
+        else this.tooling.analyzerState("suspended", this.text(state ? "languageLegacy" : "languageNoContext"));
+        return;
+      }
+      if (state !== this.target) return;
+      await this.start(state, revision, controller.signal, application, switchContext);
+    }).catch(error => {
+      if (this.current(revision, controller.signal)) this.failure(error);
+    });
+    return this.queue;
+  }
+
+  /** Stop the child before releasing its config lease; replacing the metadata connection must await this method. */
+  stop(detail?: string): Promise<void> {
+    ++this.revision; this.scope?.abort(); this.scope = undefined;
+    if (detail) this.tooling.analyzerState("suspended", detail);
+    else if (["ready", "starting"].includes(this.tooling.states.analyzer.phase)) this.tooling.analyzerState(this.tooling.states.analyzer.info ? "verified" : "missing");
+    this.queue = this.queue.then(() => this.cleanup()).catch(error => this.failure(error));
+    return this.queue;
+  }
+
+  /** Context names are validated by the backend; choosing a name never parses or rewrites eska.toml in TypeScript. */
+  async selectContext(): Promise<void> {
+    const state = this.target;
+    if (!state || !this.enabled()) return;
+    const value = await vscode.window.showInputBox({ title: this.text("languageChoose"), prompt: this.text("languageChooseHint"),
+      value: this.context.workspaceState.get<string>(this.selectionKey(state), ""), ignoreFocusOut: true });
+    if (value === undefined || state !== this.target || this.disposed) return;
+    await this.restart(true, value.trim(), true);
+  }
+
+  /** Acquire a checked context before asking for a server or writing its derived configuration. */
+  private async start(state: Ready, revision: number, signal: AbortSignal, requested: string | undefined, switchContext: boolean): Promise<void> {
+    const selected = requested ?? this.context.workspaceState.get<string>(this.selectionKey(state));
+    let application = selected || undefined;
+    const parameters = (): Record<string, unknown> => ({ start: { value: state.target.path, encoding: "utf-8" }, ...(application ? { application } : {}) });
+    this.tooling.analyzerState("starting", this.text("languagePreparing"));
+    let resolved: unknown;
+    try { resolved = await this.connection.analyzerRequest("analyzer/context", parameters(), signal); }
+    catch (error) {
+      const data = error instanceof ExplorerError && isRecord(error.details?.data) ? error.details.data : undefined;
+      if (analyzerFailure(error) !== "context" || !Array.isArray(data?.available)
+        || !data.available.every(name => typeof name === "string" && name)) throw error;
+      const choice = await cancellableChoice(vscode.window.showQuickPick(data.available as string[], { placeHolder: this.text("languageChoose"), ignoreFocusOut: true }), signal);
+      if (!choice || !this.current(revision, signal)) { if (this.current(revision, signal)) this.tooling.analyzerState("suspended", this.text("languageStopped")); return; }
+      application = choice;
+      resolved = await this.connection.analyzerRequest("analyzer/context", parameters(), signal);
+    }
+    if (!this.current(revision, signal)) return;
+    const context = analysisContext(resolved);
+    const info = await this.tooling.ensureAnalyzer(signal, true);
+    if (!info || !this.current(revision, signal)) return;
+    this.tooling.analyzerState("starting", this.text("languagePreparing"));
+    const status = analyzerConfiguration(await this.connection.analyzerRequest("analyzer/configStatus", parameters(), signal));
+    if (!this.current(revision, signal)) return;
+    if (status.status === "migration_required" || status.status === "managed_conflict") throw new ToolFailure("incompatible", status.status);
+    if (status.status === "context_conflict" && !switchContext) {
+      const choice = await cancellableChoice(vscode.window.showWarningMessage(this.text("languageSwitch", context.name ?? basename(context.root)), this.text("languageSwitchAction")), signal);
+      if (!choice || !this.current(revision, signal)) { if (this.current(revision, signal)) this.tooling.analyzerState("suspended", this.text("languageStopped")); return; }
+      switchContext = true;
+    }
+    const prepared = analyzerConfiguration(await this.connection.analyzerRequest("analyzer/configPrepare", { ...parameters(),
+      analyzer: { value: info.path, encoding: "utf-8" }, timeoutSeconds: 60, switchContext }, signal));
+    if (!this.current(revision, signal)) return;
+    // Acquire is a side-effect boundary: receive its identity even after cancellation, then release it in cleanup.
+    const lease = analyzerConfiguration(await this.connection.analyzerRequest("analyzer/acquire", parameters()));
+    if (!lease.lease) throw new ExplorerError("protocolInvalid");
+    const session: Session = { context, lease: lease.lease, state }; this.session = session;
+    let started = false;
+    try {
+      if (!this.current(revision, signal)) return;
+      if (prepared.status !== "current" || lease.status !== "current" || prepared.path !== join(context.root, "bsl-analyzer.toml")
+        || prepared.path !== lease.path || prepared.context !== context.name || lease.context !== context.name
+        || prepared.fingerprint !== lease.fingerprint || prepared.body !== lease.body || prepared.token !== lease.token) throw new ExplorerError("obsolete");
+      const client = new LanguageClient("eska-bsl", "BSL Analyzer (ESKA Explorer)", async () => {
+        if (!this.current(revision, signal)) throw new ExplorerError("obsolete");
+        session.owner = new LanguageProcess(info.path, context.root, this.log, () => {
+          if (!this.current(revision, signal)) return;
+          this.failure(new ToolFailure("probe", "language-process-exit")); void this.stop();
+        }, signal);
+        return { reader: session.owner.child.stdout, writer: session.owner.child.stdin };
+      }, {
+        documentSelector: context.sources.map(source => ({ scheme: "file", language: "bsl", pattern: readonlyPattern(source.source).replace(/\/$/, "") + "/**/*.[bB][sS][lL]" })),
+        workspaceFolder: { uri: vscode.Uri.file(context.root), name: context.name ?? basename(context.root), index: 0 },
+        diagnosticCollectionName: "eska-bsl", outputChannel: this.output,
+        initializationFailedHandler: () => false, connectionOptions: { maxRestartCount: 0 },
+        errorHandler: { error: () => ({ action: ErrorAction.Shutdown, handled: true }), closed: () => ({ action: CloseAction.DoNotRestart, handled: true }) },
+        middleware: this.readingMiddleware(revision, signal),
+      });
+      session.client = client;
+      // Until the full source-permission guard is attached, server-initiated WorkspaceEdit fails closed.
+      client.protocol2CodeConverter.asWorkspaceEdit = async () => { throw new ExplorerError("sourceChanged"); };
+      await client.start();
+      if (!this.current(revision, signal)) return;
+      if (client.initializeResult?.serverInfo?.name !== "bsl-analyzer" || client.initializeResult.serverInfo.version !== ANALYZER_VERSION) throw new ToolFailure("incompatible", "lsp-server-info");
+      await this.context.workspaceState.update(this.selectionKey(state), context.name ?? undefined);
+      if (!this.current(revision, signal)) return;
+      started = true;
+      this.tooling.analyzerState("ready", context.limited ? this.text("languageLimited", context.name ?? basename(context.root)) : context.name ?? basename(context.root));
+      this.log(JSON.stringify({ event: "language_ready", pid: session.owner?.child.pid, root: context.root, application: context.name,
+        fingerprint: lease.fingerprint, capabilities: client.initializeResult.capabilities }));
+    } finally { if (!started) await this.cleanup(); }
+  }
+
+  /** Discard reads from replaced servers or changed/closed buffers; write providers stay closed until policy integration. */
+  private readingMiddleware(revision: number, signal: AbortSignal): Middleware {
+    const read = async <T>(document: vscode.TextDocument, token: vscode.CancellationToken, action: () => vscode.ProviderResult<T>): Promise<T | undefined> => {
+      const version = document.version;
+      if (!this.current(revision, signal) || token.isCancellationRequested) return undefined;
+      const value = await action();
+      return this.current(revision, signal) && !document.isClosed && document.version === version && !token.isCancellationRequested ? value ?? undefined : undefined;
+    };
+    return {
+      provideHover: (doc, pos, token, next) => read(doc, token, () => next(doc, pos, token)),
+      provideDefinition: (doc, pos, token, next) => read(doc, token, () => next(doc, pos, token)),
+      provideTypeDefinition: (doc, pos, token, next) => read(doc, token, () => next(doc, pos, token)),
+      provideReferences: (doc, pos, context, token, next) => read(doc, token, () => next(doc, pos, context, token)),
+      provideDocumentSymbols: (doc, token, next) => read(doc, token, () => next(doc, token)),
+      provideCompletionItem: (doc, pos, context, token, next) => read(doc, token, () => next(doc, pos, context, token)),
+      provideSignatureHelp: (doc, pos, context, token, next) => read(doc, token, () => next(doc, pos, context, token)),
+      provideDocumentSemanticTokens: (doc, token, next) => read(doc, token, () => next(doc, token)),
+      handleDiagnostics: (uri, values, next) => { if (this.current(revision, signal)) next(uri, values); },
+      provideDocumentFormattingEdits: () => undefined, provideDocumentRangeFormattingEdits: () => undefined,
+      provideOnTypeFormattingEdits: () => undefined, provideRenameEdits: () => undefined, provideCodeActions: () => [],
+    };
+  }
+
+  /** Release resources in lease order even if the protocol peer ignores its normal shutdown request. */
+  private async cleanup(): Promise<void> {
+    const session = this.session;
+    if (!session) return;
+    try { await session.client?.stop(4000); } catch { this.log("language_shutdown_failed", "warn"); }
+    await session.owner?.stop();
+    await session.client?.dispose(1000).catch(() => this.log("language_client_dispose_failed", "warn"));
+    if (this.connection.state === session.state) {
+      await this.connection.analyzerRequest("analyzer/release", { leaseId: session.lease }).catch(error => this.log(`language_lease_release_failed ${String(error)}`, "warn"));
+    }
+    if (this.session === session) this.session = undefined;
+  }
+
+  /** Settings affect only Explorer's language client, not grammar registration or foreign extensions. */
+  private enabled(): boolean { return vscode.workspace.getConfiguration("eska.explorer").get<boolean>("languageFeatures", true); }
+
+  /** The selected root and its API session are rechecked after every asynchronous boundary. */
+  private current(revision: number, signal: AbortSignal): boolean { return !this.disposed && revision === this.revision && !signal.aborted; }
+
+  /** Keep a stable per-window selection without copying manifest topology into editor settings. */
+  private selectionKey(state: Ready): string { return `analysisContext.${state.target.path}`; }
+
+  /** Failures leave metadata running and never trigger an automatic restart loop. */
+  private failure(error: unknown): void {
+    if (this.disposed) return;
+    const code = analyzerFailure(error) ?? (error instanceof ToolFailure ? error.detail || error.code : error instanceof ExplorerError ? error.code : "language");
+    this.log(JSON.stringify({ event: "language_failed", code }), "error");
+    const detail = code === "migration_required" ? this.text("languageMigrationRequired") : code === "managed_conflict" ? this.text("languageManagedConflict") : this.text("languageFailed", code);
+    this.tooling.analyzerState("error", detail);
+    void vscode.window.showErrorMessage(detail);
+  }
+
+  /** Await owned cleanup before the extension's shared output channel is disposed. */
+  async shutdown(): Promise<void> { this.dispose(); await this.stop(); }
+
+  /** The synchronous hook invalidates late work immediately; shutdown owns the awaited teardown. */
+  dispose(): void { if (!this.disposed) { this.disposed = true; ++this.revision; this.scope?.abort(); for (const value of this.subscriptions) value.dispose(); } }
+}

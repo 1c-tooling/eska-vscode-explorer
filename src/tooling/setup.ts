@@ -10,10 +10,11 @@ import { TOOL_NAMES, ToolFailure, assertCurrent, type ToolKind } from "./contrac
 import { findTool, inspectAnalyzer, type ToolInfo } from "./inspect.js";
 import { installAnalyzer, installProject, managedPath, managedVersion, recoverInstallation } from "./install.js";
 import { downloadAsset, latestToolRelease, type ToolRelease } from "./releases.js";
+import { cancellableChoice } from "./choice.js";
 
 export interface ToolState {
   info?: ToolInfo;
-  phase: "missing" | "ready" | "verified" | "checking" | "installing" | "error" | "disconnected" | "suspended";
+  phase: "missing" | "ready" | "verified" | "starting" | "checking" | "installing" | "error" | "disconnected" | "suspended";
   activity?: "checking" | "installing";
   available?: string;
   detail?: string;
@@ -89,7 +90,7 @@ export class ToolingSetup implements vscode.Disposable {
     try {
       const info = await this.track(inspectAnalyzer(path, homedir(), signal));
       assertCurrent(signal);
-      this.states.analyzer = { ...this.states.analyzer, info, phase: "verified" }; this.renderAnalyzer();
+      this.states.analyzer = { ...this.states.analyzer, info, phase: this.states.analyzer.phase === "suspended" ? "suspended" : "verified" }; this.renderAnalyzer();
       void this.background("analyzer");
       return info;
     } catch (error) {
@@ -168,8 +169,8 @@ export class ToolingSetup implements vscode.Disposable {
       return undefined;
     }
     const other = this.states[kind === "project" ? "analyzer" : "project"].info;
-    const choice = await vscode.window.showWarningMessage(this.text("toolInstallOffer", TOOL_NAMES[kind], release.version,
-      other ? `${TOOL_NAMES[other.kind]} v${other.version}` : this.text("toolMissing")), this.text("toolInstall"));
+    const choice = await cancellableChoice(vscode.window.showWarningMessage(this.text("toolInstallOffer", TOOL_NAMES[kind], release.version,
+      other ? `${TOOL_NAMES[other.kind]} v${other.version}` : this.text("toolMissing")), this.text("toolInstall")), signal);
     if (!choice || signal.aborted || this.disposed) return undefined;
     return this.perform(release, signal, false);
   }

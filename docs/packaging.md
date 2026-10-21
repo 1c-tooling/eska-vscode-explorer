@@ -33,11 +33,14 @@ python3 scripts/check-vsix.py eska-explorer-0.0.1.vsix
 
 Закреплён официальный `@vscode/vsce` 4.0.0; компилятор и упаковщик запускаются через
 Bun. `scripts/bundle.mjs` собирает production JS и runtime зависимости
-`yauzl`/`pend` в `out/extension.js` через закреплённый esbuild 0.28.2. Поэтому
-`--no-dependencies` не исключает рабочую ZIP-библиотеку из установленного VSIX.
+`yauzl`/`pend`, `vscode-languageclient` 10.1.2 и его зависимости в
+`out/extension.js` через закреплённый esbuild 0.28.2. Поэтому
+`--no-dependencies` сохраняет рабочие установщик и LSP-клиент в установленном VSIX.
 `out/THIRD-PARTY-NOTICES.txt` содержит лицензии всех модулей bundle; отсутствие
 лицензии останавливает сборку. Upstream license/NOTICE анализатора включены
-в `resources/analyzer-notices/` с source/hash provenance. `.vscodeignore` разрешает только runtime JS, NLS, документацию, LICENSE, SVG и PNG-иконку магазина.
+в `resources/analyzer-notices/` с source/hash provenance. `.vscodeignore` разрешает
+только runtime JS, BSL/SDBL-грамматики и language configuration, NLS, документацию,
+LICENSE, SVG и PNG-иконку магазина.
 В пакет не входят node_modules, TS, тесты, карты исходников, стенды и Git-файлы.
 `check-vsix.py` проверяет identity, ZIP CRC, полный список и байты ресурсов.
 
@@ -60,6 +63,8 @@ Runner создаёт свои fixture, профиль и каталог рас�
 в test mode для доступа к provider; production API не добавляется.
 Пользовательский профиль не меняется; временные данные удаляются после проверки.
 Тем же способом запускаются `test/filter-host.cjs` и `test/extension-host.cjs`.
+Для собственного LSP используются `test/language-host.cjs`, `test/grammar-host.cjs`
+и переменные из [проверки T86](language-service.md#проверка).
 Полный native-сценарий включает клавиатурное сворачивание. Для запуска в фоне
 его Quick Pick в тесте имеет `ignoreFocusOut=true`; production-поведение не меняется.
 

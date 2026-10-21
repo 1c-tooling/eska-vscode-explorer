@@ -16,7 +16,7 @@ exports.run = async function () {
   const extension = vscode.extensions.all.find(value => value.packageJSON.name === "eska-explorer");
   const explorer = await extension.activate();
   await until(() => explorer.connection.state.kind === "ready", "project connected");
-  await until(() => explorer.tooling.states.analyzer.phase === "verified", "Analyzer binary verified");
+  await until(() => !!explorer.tooling.states.analyzer.info, "Analyzer binary verified");
   const project = explorer.status, analyzer = explorer.tooling.analyzerStatus;
   assert.equal(project.text, `ESKA v${explorer.connection.state.version}`);
   assert.match(analyzer.text, /^BSL Analyzer v0\.3\.2 · /);
