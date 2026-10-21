@@ -681,8 +681,9 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
       });
       try {
         for (const project of tree.projects) this.watchers.push(new ProjectWatcher(tree, project,
-          (error) => { this.output.info(`watch_error code=${error instanceof ExplorerError ? error.code : "requestFailed"}`); }));
-        this.watchers.push(watchManifests(state.target.path, tree.projects, () => { void this.connect(false); }));
+          (error) => { this.output.info(`watch_error code=${error instanceof ExplorerError ? error.code : "requestFailed"}`); },
+          path => this.language.sourceChanged(path)));
+        this.watchers.push(watchManifests(state.target.path, tree.projects, () => { void this.connect(false); }, () => this.language.manifestChanged()));
       } catch (error) { this.showError(error instanceof ExplorerError ? error : new ExplorerError("unsupportedPath")); }
     }
     this.support.setTree(this.tree, state.kind === "ready" && state.supportPolicy, state.kind === "disconnected" || state.kind === "stopping", state.kind === "ready" && state.supportFiles);

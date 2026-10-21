@@ -40,8 +40,8 @@ export class SupportContexts {
             else await tree?.refresh(project).catch(error => this.log(String(error)));
           });
           this.trees.push(tree);
-          for (const project of tree.projects) resources.push(new ProjectWatcher(tree, project, error => this.log(String(error))));
-          resources.push(watchManifests(target.path, tree.projects, () => { void connection.connect(target); }));
+          for (const project of tree.projects) resources.push(new ProjectWatcher(tree, project, error => this.log(String(error)), () => {}));
+          resources.push(watchManifests(target.path, tree.projects, () => { void connection.connect(target); }, () => {}));
         }
         this.publish([...this.trees], [...this.pending]);
       }, text => this.log(text));

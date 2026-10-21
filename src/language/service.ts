@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import { basename, join } from "node:path";
+import { basename, isAbsolute, join, relative, sep } from "node:path";
 import { CloseAction, ErrorAction, LanguageClient, type Middleware } from "vscode-languageclient/node";
 import type { Connection, ConnectionState } from "../connection.js";
 import { ExplorerError, isRecord } from "../protocol.js";
@@ -7,15 +7,19 @@ import { message, type MessageKey } from "../messages.js";
 import type { DiagnosticLog } from "../diagnostics.js";
 import { ANALYZER_VERSION, ToolFailure } from "../tooling/contracts.js";
 import type { ToolingSetup } from "../tooling/setup.js";
-import { analysisContext, analyzerConfiguration, analyzerFailure, type AnalysisContext } from "./context.js";
+import { analysisContext, analyzerConfiguration, analyzerFailure, type AnalysisContext, type AnalyzerConfiguration } from "./context.js";
 import { LanguageProcess } from "./process.js";
 import { readonlyPattern } from "../support-settings.js";
 import { cancellableChoice } from "../tooling/choice.js";
 import type { SupportController } from "../support.js";
 import { LanguageEdits } from "./edits.js";
+import { nativePath } from "../source.js";
 
 type Ready = Extract<ConnectionState, { kind: "ready" }>;
-interface Session { context: AnalysisContext; lease: string; state: Ready; client?: LanguageClient; owner?: LanguageProcess; edits?: LanguageEdits }
+interface Session {
+  context: AnalysisContext; configuration: AnalyzerConfiguration; lease: string; state: Ready;
+  client?: LanguageClient; owner?: LanguageProcess; edits?: LanguageEdits; configurationWatcher?: vscode.FileSystemWatcher;
+}
 const CONFLICTING_EXTENSION = "elishevkirill.bsl-analyzer-lsp";
 
 /** One language session owns its config lease, client, child and generation independently of TreeView visibility. */
@@ -29,6 +33,12 @@ export class LanguageService implements vscode.Disposable {
   private disposed = false;
   private conflict = false;
   private conflictEpoch = 0;
+  private modelRevision = 0;
+  private configurationPending = false;
+  private configurationTimer: NodeJS.Timeout | undefined;
+  private configurationCheck: Promise<void> | undefined;
+  private checkRequested = false;
+  private readonly delayedDiagnostics = new Map<string, () => void>();
   private readonly subscriptions: vscode.Disposable[] = [];
 
   constructor(private readonly context: vscode.ExtensionContext, private readonly connection: Connection,
@@ -37,10 +47,17 @@ export class LanguageService implements vscode.Disposable {
     this.subscriptions.push(vscode.workspace.onDidOpenTextDocument(document => {
       if (document.languageId === "bsl" && !this.wanted) { this.wanted = true; void this.restart(false); }
     }));
+    this.subscriptions.push(vscode.workspace.onDidChangeTextDocument(event => {
+      if (event.contentChanges.length && event.document.languageId === "bsl" && event.document.uri.scheme === "file") {
+        this.sourceChanged(event.document.uri.fsPath);
+        this.session?.client?.diagnostics?.delete(event.document.uri);
+      }
+    }));
     this.subscriptions.push(connection.onNotification((method, params) => {
       if (method === "analyzer/validationOutput" && isRecord(params)) {
         for (const value of [params.stdout, params.stderr]) if (typeof value === "string" && value) this.log(value.slice(0, 16384), "warn");
       }
+      if (method === "metadata/changed" && isRecord(params)) this.metadataChanged(params);
     }));
     this.subscriptions.push(vscode.extensions.onDidChange(() => this.refreshConflict()));
     if (!this.refreshConflict(false) && !this.enabled()) this.tooling.analyzerState("suspended", this.text("languageDisabled"));
@@ -48,6 +65,101 @@ export class LanguageService implements vscode.Disposable {
 
   /** Translate only presentation strings; protocol identifiers and backend error categories stay stable. */
   private text(key: MessageKey, ...values: string[]): string { return message(vscode.env.language, key, ...values); }
+
+  /** Reuse the metadata watcher's immediate observation; the upstream server owns incremental XML/BSL indexing. */
+  sourceChanged(path: string): void {
+    const session = this.session;
+    if (!session || !session.context.sources.some(source => {
+      const local = relative(source.source, path);
+      return local === "" || (!isAbsolute(local) && local !== ".." && !local.startsWith(`..${sep}`));
+    })) return;
+    ++this.modelRevision;
+    if (session.context.sources.some(source => source.descriptor === path)) this.holdConfiguration();
+    if (!/\.bsl$/i.test(path)) this.scheduleConfigurationCheck();
+  }
+
+  /** Discovery will replace the metadata session after its debounce; invalidate language results immediately. */
+  manifestChanged(): void { ++this.modelRevision; this.holdConfiguration(); }
+
+  /** Backend mutations can precede filesystem delivery; only selected-context project identities affect this session. */
+  private metadataChanged(params: Record<string, unknown>): void {
+    const session = this.session;
+    if (!session || params.sessionId !== session.state.session.sessionId) return;
+    const project = session.state.session.projects.find(candidate => candidate.projectId === params.projectId);
+    if (!project || !session.context.sources.some(source => source.root === nativePath(project.rootPath))) return;
+    ++this.modelRevision;
+    if (params.supportUnchanged !== true) this.scheduleConfigurationCheck();
+  }
+
+  /** A changed root/config cannot publish diagnostics or edits before its authoritative fingerprint is checked. */
+  private holdConfiguration(): void {
+    if (!this.configurationPending) {
+      this.delayedDiagnostics.clear();
+      const session = this.session, revision = this.revision, signal = this.scope?.signal, collection = session?.client?.diagnostics;
+      if (signal) collection?.forEach((uri, values) => this.bufferDiagnostics(uri,
+        () => collection.set(uri, values), () => this.session === session && this.accepts(revision, signal)));
+    }
+    this.configurationPending = true;
+    this.session?.client?.diagnostics?.clear();
+  }
+
+  /** A same-fingerprint event must restore current diagnostics even when upstream correctly emits no new push. */
+  private bufferDiagnostics(uri: vscode.Uri, publish: () => void, valid: () => boolean): void {
+    const document = vscode.workspace.textDocuments.find(value => value.uri.toString() === uri.toString()), version = document?.version;
+    if (this.delayedDiagnostics.size >= 8192) this.delayedDiagnostics.delete(this.delayedDiagnostics.keys().next().value!);
+    this.delayedDiagnostics.set(uri.toString(), () => {
+      if (valid() && !document?.isClosed && document?.version === version) publish();
+    });
+  }
+
+  /** Coalesce checks of manifests and root descriptors without scanning modules or starting another index. */
+  private scheduleConfigurationCheck(): void {
+    if (this.disposed || !this.session) return;
+    this.checkRequested = true;
+    if (this.configurationTimer || this.configurationCheck) return;
+    this.configurationTimer = setTimeout(() => {
+      this.configurationTimer = undefined;
+      this.checkRequested = false;
+      const check = this.inspectConfiguration();
+      this.configurationCheck = check;
+      void check.finally(() => {
+        if (this.configurationCheck !== check) return;
+        this.configurationCheck = undefined;
+        if (this.checkRequested) this.scheduleConfigurationCheck();
+      });
+    }, 100);
+  }
+
+  /** Keep the current LSP for ordinary XML changes; regenerate only after releasing our lease on changed config inputs. */
+  private async inspectConfiguration(): Promise<void> {
+    await this.queue;
+    const session = this.session, revision = this.revision, signal = this.scope?.signal, model = this.modelRevision;
+    if (!session || !signal || !this.current(revision, signal)) return;
+    try {
+      const status = analyzerConfiguration(await this.connection.analyzerRequest("analyzer/configStatus", {
+        start: { value: session.context.root, encoding: "utf-8" },
+        ...(session.context.name ? { application: session.context.name } : {}),
+      }, signal));
+      if (this.session !== session || !this.current(revision, signal)) return;
+      if (model !== this.modelRevision) { this.checkRequested = true; return; }
+      if (status.status !== "current" || status.fingerprint !== session.configuration.fingerprint
+        || status.body !== session.configuration.body || status.context !== session.configuration.context
+        || status.path !== session.configuration.path) {
+        this.log(JSON.stringify({ event: "language_context_changed", status: status.status }));
+        await this.restart(false, session.context.name ?? undefined);
+      } else {
+        this.configurationPending = false;
+        const delayed = [...this.delayedDiagnostics.values()]; this.delayedDiagnostics.clear();
+        for (const publish of delayed) publish();
+        this.log(JSON.stringify({ event: "language_context_current", pid: session.owner?.child.pid }));
+      }
+    } catch (error) {
+      if (this.session !== session || !this.current(revision, signal)) return;
+      const stopping = this.stop(), stoppingRevision = this.revision;
+      await stopping;
+      if (!this.disposed && this.revision === stoppingRevision && this.target === session.state) this.failure(error);
+    }
+  }
 
   /** A metadata connection supplies context authority and owns the lease; its loss invalidates language results. */
   connectionChanged(state: ConnectionState): void {
@@ -62,6 +174,8 @@ export class LanguageService implements vscode.Disposable {
     if (manual) this.wanted = true;
     this.refreshConflict(false);
     const revision = ++this.revision;
+    ++this.modelRevision; this.configurationPending = false; this.delayedDiagnostics.clear();
+    clearTimeout(this.configurationTimer); this.configurationTimer = undefined; this.checkRequested = false;
     this.scope?.abort();
     const controller = new AbortController(); this.scope = controller;
     const state = this.target;
@@ -95,6 +209,8 @@ export class LanguageService implements vscode.Disposable {
   /** Stop the child before releasing its config lease; replacing the metadata connection must await this method. */
   stop(detail?: string): Promise<void> {
     ++this.revision; this.scope?.abort(); this.scope = undefined;
+    ++this.modelRevision; this.configurationPending = false; this.delayedDiagnostics.clear();
+    clearTimeout(this.configurationTimer); this.configurationTimer = undefined; this.checkRequested = false;
     if (this.refreshConflict(false)) this.showConflictState();
     else if (detail) this.tooling.analyzerState("suspended", detail);
     else if (["ready", "starting"].includes(this.tooling.states.analyzer.phase)) this.tooling.analyzerState(this.tooling.states.analyzer.info ? "verified" : "missing");
@@ -148,7 +264,7 @@ export class LanguageService implements vscode.Disposable {
     // Acquire is a side-effect boundary: receive its identity even after cancellation, then release it in cleanup.
     const lease = analyzerConfiguration(await this.connection.analyzerRequest("analyzer/acquire", parameters()));
     if (!lease.lease) throw new ExplorerError("protocolInvalid");
-    const session: Session = { context, lease: lease.lease, state }; this.session = session;
+    const session: Session = { context, configuration: lease, lease: lease.lease, state }; this.session = session;
     let started = false;
     try {
       if (!this.current(revision, signal)) return;
@@ -172,8 +288,16 @@ export class LanguageService implements vscode.Disposable {
         middleware,
       });
       session.client = client;
-      session.edits = new LanguageEdits(client, context, this.support, () => this.current(revision, signal), this.log);
+      session.edits = new LanguageEdits(client, context, this.support, () => this.accepts(revision, signal), this.log, () => this.modelRevision);
       Object.assign(middleware, session.edits.middleware());
+      const watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(vscode.Uri.file(context.root), "bsl-analyzer.toml"));
+      session.configurationWatcher = watcher;
+      /** Observe managed-config changes without replacing the metadata session or parsing TOML in the editor. */
+      const changed = (): void => {
+        if (this.session !== session || !this.current(revision, signal)) return;
+        ++this.modelRevision; this.holdConfiguration(); this.scheduleConfigurationCheck();
+      };
+      watcher.onDidCreate(changed); watcher.onDidChange(changed); watcher.onDidDelete(changed);
       await client.start();
       if (!this.current(revision, signal)) return;
       if (client.initializeResult?.serverInfo?.name !== "bsl-analyzer" || client.initializeResult.serverInfo.version !== ANALYZER_VERSION) throw new ToolFailure("incompatible", "lsp-server-info");
@@ -189,12 +313,23 @@ export class LanguageService implements vscode.Disposable {
   /** Discard reads from replaced servers or changed/closed buffers; writing routes have their own complete-edit guard. */
   private readingMiddleware(revision: number, signal: AbortSignal): Middleware {
     const read = async <T>(document: vscode.TextDocument, token: vscode.CancellationToken, action: () => vscode.ProviderResult<T>): Promise<T | undefined> => {
-      const version = document.version;
-      if (!this.current(revision, signal) || token.isCancellationRequested) return undefined;
+      const version = document.version, model = this.modelRevision;
+      if (!this.accepts(revision, signal) || token.isCancellationRequested) return undefined;
       const value = await action();
-      return this.current(revision, signal) && !document.isClosed && document.version === version && !token.isCancellationRequested ? value ?? undefined : undefined;
+      return this.accepts(revision, signal) && model === this.modelRevision && !document.isClosed && document.version === version && !token.isCancellationRequested ? value ?? undefined : undefined;
     };
     return {
+      sendRequest: async (type, params, token, next) => {
+        const model = this.modelRevision;
+        const uri = isRecord(params) && isRecord(params.textDocument) ? params.textDocument.uri : undefined;
+        const document = typeof uri === "string" ? vscode.workspace.textDocuments.find(value => value.uri.toString() === uri) : undefined;
+        const version = document?.version;
+        if (!this.accepts(revision, signal) || token?.isCancellationRequested) throw new vscode.CancellationError();
+        const value = await next(type, params, token);
+        if (!this.accepts(revision, signal) || model !== this.modelRevision || token?.isCancellationRequested
+          || document?.isClosed || document?.version !== version) throw new vscode.CancellationError();
+        return value;
+      },
       provideHover: (doc, pos, token, next) => read(doc, token, () => next(doc, pos, token)),
       provideDefinition: (doc, pos, token, next) => read(doc, token, () => next(doc, pos, token)),
       provideTypeDefinition: (doc, pos, token, next) => read(doc, token, () => next(doc, pos, token)),
@@ -203,7 +338,12 @@ export class LanguageService implements vscode.Disposable {
       provideCompletionItem: (doc, pos, context, token, next) => read(doc, token, () => next(doc, pos, context, token)),
       provideSignatureHelp: (doc, pos, context, token, next) => read(doc, token, () => next(doc, pos, context, token)),
       provideDocumentSemanticTokens: (doc, token, next) => read(doc, token, () => next(doc, token)),
-      handleDiagnostics: (uri, values, next) => { if (this.current(revision, signal)) next(uri, values); },
+      handleDiagnostics: (uri, values, next) => {
+        if (!this.current(revision, signal)) return;
+        if (this.configurationPending) {
+          this.bufferDiagnostics(uri, () => next(uri, values), () => this.accepts(revision, signal));
+        } else next(uri, values);
+      },
     };
   }
 
@@ -211,6 +351,7 @@ export class LanguageService implements vscode.Disposable {
   private async cleanup(): Promise<void> {
     const session = this.session;
     if (!session) return;
+    session.configurationWatcher?.dispose();
     await session.edits?.shutdown();
     try { await session.client?.stop(4000); } catch { this.log("language_shutdown_failed", "warn"); }
     await session.owner?.stop();
@@ -260,6 +401,9 @@ export class LanguageService implements vscode.Disposable {
     if (!this.fresh(revision, signal)) return false;
     return !this.refreshConflict() && this.fresh(revision, signal);
   }
+
+  /** Lifecycle can finish a recheck while language operations wait for the selected configuration. */
+  private accepts(revision: number, signal: AbortSignal): boolean { return !this.configurationPending && this.current(revision, signal); }
 
   /** Keep a stable per-window selection without copying manifest topology into editor settings. */
   private selectionKey(state: Ready): string { return `analysisContext.${state.target.path}`; }

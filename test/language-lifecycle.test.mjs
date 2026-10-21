@@ -24,8 +24,13 @@ test("cancelled dialogs settle shutdown while late choices and rejections stay o
 test("language context accepts only versioned DTOs and leases for the exact current configuration", () => {
   const root = resolve("../eska-playground/context-dto"), path = value => ({ value, encoding: "utf-8" });
   const context = { schema_version: 1, kind: "project-context", status: "ready", context: { root: path(root), name: null, limited_context: false,
-    sources: [{ root: path(root), source: path(join(root, "src")), member: null, role: "configuration", project_type: "configuration" }] } };
+    sources: [{ root: path(root), source: path(join(root, "src")), descriptor: path("Configuration.xml"), member: null, role: "configuration", project_type: "configuration" }] } };
   assert.equal(analysisContext(context).root, root);
+  assert.equal(analysisContext(context).sources[0].descriptor, join(root, "src", "Configuration.xml"));
+  for (const descriptor of [path("../outside.xml"), path(root), undefined]) {
+    assert.throws(() => analysisContext({ ...context, context: { ...context.context,
+      sources: [{ ...context.context.sources[0], descriptor }] } }));
+  }
   assert.throws(() => analysisContext({ ...context, schema_version: 2 }));
   assert.throws(() => analysisContext({ ...context, context: { ...context.context, root: path("relative") } }));
   const config = { schema_version: 1, kind: "analyzer-configuration", status: "current", path: path(join(root, "bsl-analyzer.toml")), preview_token: "a".repeat(64),

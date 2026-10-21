@@ -1,0 +1,83 @@
+{
+  "schema_version": 1,
+  "stage": "T88",
+  "date": "2026-10-21",
+  "status": "in-progress",
+  "completed_part": "Incremental XML/BSL updates and branch roundtrip; revalidate changed root/config inputs and metadata context; reject old model replies and delayed edits.",
+  "explorer_parent_revision": "4d3925f19797c72eefb8a217bd252c7e01677e0a",
+  "root_revision": "b32593ae1f7224ccdca0e8ec6379b8d4ed4c41a1",
+  "platform": "Linux x86_64 GNU",
+  "editor": "VSCodium 1.109.5",
+  "extension_host_node": "22.21.1",
+  "cli_node": "22.23.1",
+  "bun": "1.4.2",
+  "analyzer": {
+    "version": "0.3.2",
+    "sha256": "e5ca2b17270338c797b6d1b6a7ea564e0b9235e8a823d1b99cf1b42a36e2fd0d"
+  },
+  "runtime_sources": {
+    "src/extension.ts": "b9b8e725b15165e8e824d3ac97f78eb9c9e2f8bf8ec65d517c2f5b44c20b9888",
+    "src/language/context.ts": "2e171258e7899726b45ea6a425ab87d70a768cd39a2b03e5cd698958fe89b3c6",
+    "src/language/edits.ts": "3ebef6816f6d44feaf46a80b589fab932a66eae8f199d16a8dac42e9b458527f",
+    "src/language/service.ts": "7bf7e727a0f5cf9d3d594777b04484d8b6d335e411fba88a3cbbe6e0bb5cb136",
+    "src/watch.ts": "5bb2aeab8c41f640fa575200731ad98cbe861983c34f15e56291b264a961779a",
+    "src/support-contexts.ts": "26bef52b57ff0169fb1bf8eb2f37ede2a8dabab1b12a99ba26d456d06144e7a5",
+    "package.json": "94ac1b04f2ff6b109a983c737f70212997255fd6d5bda74788fa27cafc4fb1ae",
+    "bun.lock": "8775a019abafe363688123c762ebcb2d515b29807ce43c5dd1ea8bf916b69600",
+    "scripts/bundle.mjs": "beb356ba5b762b4c3f93386ce9d1bcc74925c2566baceac4c45cb88bbff08aaa"
+  },
+  "test_sources": {
+    "test/language-refresh-host.cjs": "2043281c01ccb488398cb3064c88defb457aa9a97df127f6eca35669cc980432",
+    "test/language-conflict.test.mjs": "e449262f522cacdf051441d00fa05ee5a873d22b74a8ded74102bbf46ca96bea",
+    "test/language-edits.test.mjs": "513d8f40f89b7e43cd14fde10b3d0262e541da2d926e878869382b32dd8e1423",
+    "test/language-lifecycle.test.mjs": "5a2a86e33269b6885ad9ad1807b64143f3d0592049c003cea866f811e3952b87",
+    "test/run-host.mjs": "8a5b7fedec8c9d3acd02ebaa8bf3500e82d6fd90dea752857bbe13016390c80e"
+  },
+  "checks": {
+    "typecheck": "passed",
+    "compile": "passed",
+    "node": {
+      "passed": 197,
+      "failed": 0,
+      "skipped": 0
+    },
+    "bun": {
+      "passed": 197,
+      "failed": 0,
+      "skipped": 0
+    },
+    "native_installed": "Exact results are stored in the external VSIX receipt."
+  },
+  "vsix": {
+    "path": "/home/akalsin/Documents/Projects/eska-playground/t88-refresh-vsix-tjsc1lv3/eska-explorer.vsix",
+    "receipt": "/home/akalsin/Documents/Projects/eska-playground/t88-refresh-vsix-tjsc1lv3/receipt.json",
+    "checksum_note": "Final hash and installed-host results are stored beside the archive to avoid a self-referential checksum."
+  },
+  "behavior": {
+    "metadata_model": "Existing ProjectWatcher observations, BSL buffer changes and selected-context metadata notifications invalidate model generations.",
+    "ordinary_xml_bsl": "Published upstream watcher owns incremental indexing. A configStatus check does not prepare/restart a current config.",
+    "config_inputs": "Root descriptors come from the existing backend DTO; exact managed-config watcher and immediate manifest invalidation. Stop owned LSP and release lease before regeneration.",
+    "same_config": "Keep PID and restore existing/latest buffered diagnostics for unchanged document instances/versions, even when upstream emits no replacement push.",
+    "late_results": "General outgoing-request middleware covers all client requests. Delayed quick fixes retain their original model generation.",
+    "manual_config": "A managed-body conflict stops only the owned LSP and preserves the edited file.",
+    "lifecycle": "Session owns config watcher; pending checks use the current abort scope and cannot resume a discarded/conflicting session."
+  },
+  "evidence_scope": {
+    "unit": "Production controller, DTO and edit guard; mocked process/protocol/editor boundaries. Coalescing, old replies, diagnostics, stale config, user conflict and late conflict check.",
+    "native_refresh": "Real project, published 0.3.2 and native providers; small owned Designer XML fixture and two owned Git branches. Support policy explicitly disabled for this refresh profile.",
+    "native_xml": "Changing CommonModule Global false/true changes actual unqualified BSL definition resolution; PID remains unchanged.",
+    "native_branch": "Switch A to B and back changes open clean BSL buffers and actual definition targets; PID remains unchanged.",
+    "native_rapid": "30 rapid buffer replacements between broken/repaired text end with zero ParseError diagnostics and a correct definition. Not a proof about every possible unversioned push race.",
+    "native_inputs": "Changed root descriptor creates new fingerprint/LSP while Metadata PID remains. Manifest change replaces both services. Same config bytes preserve PID; manual config bytes survive conflict. Same-byte config write preserves existing ParseError diagnostics; a later repair clears them."
+  },
+  "remaining": [
+    "Own LSP protected-language bridge, selected application change and two simultaneous windows/config leases.",
+    "T89 final minimal-installation and package matrix and fair buhmfo baseline comparison."
+  ],
+  "unverified_environments": [
+    "Windows",
+    "macOS",
+    "VS Code",
+    "Remote"
+  ]
+}

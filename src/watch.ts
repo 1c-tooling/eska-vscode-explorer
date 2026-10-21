@@ -15,7 +15,7 @@ export class ProjectWatcher implements vscode.Disposable {
   private readonly source: string;
 
   constructor(private readonly tree: MetadataTree, readonly project: ProjectTree,
-    private readonly failed: (error: unknown) => void) {
+    private readonly failed: (error: unknown) => void, private readonly observed: (path: string) => void) {
     this.source = nativePath(project.info.sourcePath);
     this.watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(vscode.Uri.file(this.source), "**/*"));
     this.watcher.onDidCreate((uri) => this.add(uri));
@@ -28,6 +28,7 @@ export class ProjectWatcher implements vscode.Disposable {
     const path = relative(this.source, uri.fsPath);
     const components = path.split(sep);
     if (!path || isAbsolute(path) || components.includes("..") || components.includes(".git") || components.includes(".eska")) return;
+    this.observed(uri.fsPath);
     if (!this.full) this.paths.add(path);
     if (this.paths.size > 4096) { this.paths.clear(); this.full = true; }
     this.schedule();
@@ -85,7 +86,7 @@ export class ProjectWatcher implements vscode.Disposable {
 }
 
 /** Watch exact manifests along discovery ancestry without parsing TOML or traversing directories. */
-export function watchManifests(start: string, projects: readonly ProjectTree[], changed: () => void): vscode.Disposable {
+export function watchManifests(start: string, projects: readonly ProjectTree[], changed: () => void, observed: () => void): vscode.Disposable {
   const folders = new Set(projects.map((project) => nativePath(project.info.rootPath)));
   let folder = start;
   while (!folders.has(folder)) {
@@ -103,7 +104,7 @@ export function watchManifests(start: string, projects: readonly ProjectTree[], 
   const watchers = [...folders].map((path) => {
     const watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(vscode.Uri.file(path), "eska.toml"));
     /** Replace the discovery session once after a burst of manifest changes. */
-    const update = (): void => { clearTimeout(timer); timer = setTimeout(changed, 150); };
+    const update = (): void => { observed(); clearTimeout(timer); timer = setTimeout(changed, 150); };
     watcher.onDidCreate(update); watcher.onDidChange(update); watcher.onDidDelete(update);
     return watcher;
   });

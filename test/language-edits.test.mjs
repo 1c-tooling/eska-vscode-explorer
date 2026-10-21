@@ -32,7 +32,7 @@ async function fixture(t) {
   const files = [join(source, "a.bsl"), join(source, "b.bsl")], text = "Переменная = 1;\n";
   await Promise.all(files.map(file => writeFile(file, text)));
   const docs = new Map(), commands = new Map(), applications = [], warnings = [], policy = new Set(), readonly = new Set();
-  let active = true, authorize = async () => {}, convert = async () => {}, apply = async () => true;
+  let active = true, model = 0, authorize = async () => {}, convert = async () => {}, apply = async () => true;
   const timers = new Set();
   const document = async uri => {
     const key = uri.toString(); if (docs.has(key)) return docs.get(key);
@@ -43,7 +43,7 @@ async function fixture(t) {
     docs.set(key, value); return value;
   };
   const opened = await Promise.all(files.map(file => document(Uri.file(file))));
-  const vscode = { Uri, Position, RelativePattern: class { constructor(_base, pattern) { this.pattern = pattern; } },
+  const vscode = { Uri, Position, CancellationError: class extends Error {}, RelativePattern: class { constructor(_base, pattern) { this.pattern = pattern; } },
     env: { language: "en-US" },
     workspace: { get textDocuments() { return [...docs.values()]; }, fs: { isWritableFileSystem: () => true }, openTextDocument: document,
       getWorkspaceFolder: () => ({ uri: Uri.file(root) }),
@@ -64,7 +64,7 @@ async function fixture(t) {
     process, structuredClone, setTimeout(callback) { timers.add(callback); return callback; }, clearTimeout(callback) { timers.delete(callback); },
   })(
     name => name === "vscode" ? vscode : require(name), adapter, adapter.exports);
-  const edits = new adapter.exports.LanguageEdits(client, { sources: [{ source }] }, support, () => active, () => {});
+  const edits = new adapter.exports.LanguageEdits(client, { sources: [{ source }] }, support, () => active, () => {}, () => model);
   t.after(() => edits.shutdown());
   const change = (index, version = opened[index].version) => ({ textDocument: { uri: opened[index].uri.toString(), version },
     edits: [{ range: { start: { line: 0, character: 0 }, end: { line: 0, character: 10 } }, newText: "Значение" }] });
@@ -73,7 +73,9 @@ async function fixture(t) {
     closeDocument(index) { opened[index].isClosed = true; docs.delete(opened[index].uri.toString()); },
     /** Advance the guard's only timer deterministically; protocol and I/O boundaries use explicit barriers. */
     expireTimers() { for (const callback of [...timers]) callback(); },
-    setActive(value) { active = value; }, setAuthorize(value) { authorize = value; }, setConvert(value) { convert = value; }, setApply(value) { apply = value; } };
+    setActive(value) { active = value; }, setAuthorize(value) { authorize = value; }, setConvert(value) { convert = value; }, setApply(value) { apply = value; },
+    /** A dependency change supersedes pending actions even when target text versions stay equal. */
+    advanceModel() { model++; } };
 }
 
 test("one blocked target rejects the whole WorkspaceEdit; an allowed multi-file edit reaches one native transaction", async t => {
@@ -180,4 +182,13 @@ test("an unresponsive native edit cannot indefinitely retain shutdown or pending
   assert.equal(f.commands.size, 0);
   assert.equal((await f.middleware.workspace.handleApplyEdit({ edit: { documentChanges: [f.change(0)] } })).applied, false);
   held.release(true); assert.equal((await applying).applied, true);
+});
+
+test("a quick fix from an older metadata model cannot write an unchanged target buffer", async t => {
+  const f = await fixture(t), token = { isCancellationRequested: false };
+  f.reply.actions = [{ title: "Fix", edit: { documentChanges: [f.change(0)] } }];
+  const [action] = await f.middleware.provideCodeActions(f.opened[0], {}, { diagnostics: [] }, token);
+  f.advanceModel();
+  assert.equal(await f.commands.get(action.command.command)(action.command.arguments[0]), false);
+  assert.equal(f.applications.length, 0);
 });

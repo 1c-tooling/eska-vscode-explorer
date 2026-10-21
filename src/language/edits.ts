@@ -10,7 +10,7 @@ import { isRecord } from "../protocol.js";
 import type { AnalysisContext } from "./context.js";
 
 type Reason = "readonly" | "stale" | "resource" | "invalid" | "command";
-interface Origin { documents: Map<string, { document: vscode.TextDocument; version: number }>; token?: vscode.CancellationToken }
+interface Origin { documents: Map<string, { document: vscode.TextDocument; version: number }>; model: number; token?: vscode.CancellationToken }
 interface Target { document: vscode.TextDocument; version: number; path: string; stamp: string }
 interface Prepared { edit: ProtocolEdit; targets: Target[]; valid: () => boolean }
 interface PendingAction { edit: ProtocolEdit; origin: Origin; prepared: Prepared }
@@ -26,7 +26,8 @@ export class LanguageEdits implements vscode.Disposable {
 
   /** Each language session owns its action handles and advertises only resource operations it can commit atomically. */
   constructor(private readonly client: LanguageClient, private readonly context: AnalysisContext,
-    private readonly support: SupportController, private readonly current: () => boolean, private readonly log: (value: string) => void) {
+    private readonly support: SupportController, private readonly current: () => boolean, private readonly log: (value: string) => void,
+    private readonly model: () => number) {
     this.command = vscode.commands.registerCommand(APPLY_ACTION, async (id: unknown) => {
       const pending = typeof id === "string" ? this.actions.get(id) : undefined;
       if (typeof id === "string") this.actions.delete(id);
@@ -118,12 +119,12 @@ export class LanguageEdits implements vscode.Disposable {
   /** Versions of already open buffers belong to the request, not to the later response or action invocation. */
   private origin(token?: vscode.CancellationToken): Origin {
     return { documents: new Map(vscode.workspace.textDocuments.filter(document => document.uri.scheme === "file" && this.inside(document.uri.fsPath))
-      .map(document => [document.uri.toString(), { document, version: document.version }])), ...(token ? { token } : {}) };
+      .map(document => [document.uri.toString(), { document, version: document.version }])), model: this.model(), ...(token ? { token } : {}) };
   }
 
   /** Late requests cannot write after a context replacement, closed buffer or unsaved change. */
   private assertOrigin(origin: Origin): void {
-    if (this.disposed || !this.current() || origin.token?.isCancellationRequested
+    if (this.disposed || !this.current() || origin.model !== this.model() || origin.token?.isCancellationRequested
       || [...origin.documents.values()].some(({ document, version }) => document.isClosed || document.version !== version)) throw new Rejected("stale");
   }
 
@@ -269,6 +270,8 @@ export class LanguageEdits implements vscode.Disposable {
 
   /** Manual write operations get one actionable explanation; server requests also receive failureReason. */
   private explain(error: unknown): string {
+    // Normal LSP cancellation/content-modification must not turn typing or context replacement into warning popups.
+    if (error instanceof vscode.CancellationError || (isRecord(error) && [-32800, -32801, -32802].includes(error.code as number))) return this.reasonText("stale");
     const reason = error instanceof Rejected ? error.reason : "invalid", text = this.reasonText(reason);
     this.log(JSON.stringify({ event: "language_edit_rejected", reason }));
     if (!this.disposed) void vscode.window.showWarningMessage(text);

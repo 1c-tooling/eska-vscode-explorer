@@ -19,6 +19,7 @@ try {
   // Reload tests need a stable root descriptor before workspaceContains can activate the extension.
   if (process.env.ESKA_HOST_CONFLICT_RELOAD) await (await import("./language-fixture.mjs")).createLanguageSource(fixture);
   if (process.env.ESKA_HOST_LANGUAGE_EDITS) await (await import("./language-fixture.mjs")).createLanguageSupportSource(fixture);
+  if (process.env.ESKA_HOST_LANGUAGE_REFRESH) await (await import("./language-fixture.mjs")).createLanguageSource(fixture);
   const bin = join(root, "bin");
   await mkdir(bin);
   const component = backend === "legacy" ? "eska" : "eska-project";
