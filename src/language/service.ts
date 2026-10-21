@@ -14,6 +14,7 @@ import { cancellableChoice } from "../tooling/choice.js";
 
 type Ready = Extract<ConnectionState, { kind: "ready" }>;
 interface Session { context: AnalysisContext; lease: string; state: Ready; client?: LanguageClient; owner?: LanguageProcess }
+const CONFLICTING_EXTENSION = "elishevkirill.bsl-analyzer-lsp";
 
 /** One language session owns its config lease, client, child and generation independently of TreeView visibility. */
 export class LanguageService implements vscode.Disposable {
@@ -24,6 +25,8 @@ export class LanguageService implements vscode.Disposable {
   private scope: AbortController | undefined;
   private wanted = vscode.workspace.textDocuments.some(document => document.languageId === "bsl");
   private disposed = false;
+  private conflict = false;
+  private conflictEpoch = 0;
   private readonly subscriptions: vscode.Disposable[] = [];
 
   constructor(private readonly context: vscode.ExtensionContext, private readonly connection: Connection,
@@ -36,7 +39,8 @@ export class LanguageService implements vscode.Disposable {
         for (const value of [params.stdout, params.stderr]) if (typeof value === "string" && value) this.log(value.slice(0, 16384), "warn");
       }
     }));
-    if (!this.enabled()) this.tooling.analyzerState("suspended", this.text("languageDisabled"));
+    this.subscriptions.push(vscode.extensions.onDidChange(() => this.refreshConflict()));
+    if (!this.refreshConflict(false) && !this.enabled()) this.tooling.analyzerState("suspended", this.text("languageDisabled"));
   }
 
   /** Translate only presentation strings; protocol identifiers and backend error categories stay stable. */
@@ -51,14 +55,23 @@ export class LanguageService implements vscode.Disposable {
 
   /** A manual restart can start analysis before a BSL document opens; ordinary tree activation stays lazy. */
   restart(manual = true, application?: string, switchContext = false): Promise<void> {
+    if (this.disposed) return this.queue;
     if (manual) this.wanted = true;
+    this.refreshConflict(false);
     const revision = ++this.revision;
     this.scope?.abort();
     const controller = new AbortController(); this.scope = controller;
     const state = this.target;
-    if (this.wanted && this.enabled()) this.tooling.analyzerState("starting", this.text("languagePreparing"));
+    if (!this.conflict && this.wanted && this.enabled()) this.tooling.analyzerState("starting", this.text("languagePreparing"));
     this.queue = this.queue.then(async () => {
       await this.cleanup();
+      if (!this.fresh(revision, controller.signal)) return;
+      if (this.refreshConflict()) {
+        // A read-only binary probe keeps the installed version visible without preparing a config or offering installation.
+        await this.tooling.ensureAnalyzer(controller.signal, false);
+        this.refreshConflict();
+        return;
+      }
       if (!this.current(revision, controller.signal)) return;
       if (!vscode.workspace.isTrusted || !this.enabled() || !this.wanted || !state || !state.analyzerConfiguration || state.target.backend === "legacy") {
         await this.tooling.ensureAnalyzer(controller.signal, false);
@@ -79,7 +92,8 @@ export class LanguageService implements vscode.Disposable {
   /** Stop the child before releasing its config lease; replacing the metadata connection must await this method. */
   stop(detail?: string): Promise<void> {
     ++this.revision; this.scope?.abort(); this.scope = undefined;
-    if (detail) this.tooling.analyzerState("suspended", detail);
+    if (this.refreshConflict(false)) this.showConflictState();
+    else if (detail) this.tooling.analyzerState("suspended", detail);
     else if (["ready", "starting"].includes(this.tooling.states.analyzer.phase)) this.tooling.analyzerState(this.tooling.states.analyzer.info ? "verified" : "missing");
     this.queue = this.queue.then(() => this.cleanup()).catch(error => this.failure(error));
     return this.queue;
@@ -88,7 +102,7 @@ export class LanguageService implements vscode.Disposable {
   /** Context names are validated by the backend; choosing a name never parses or rewrites eska.toml in TypeScript. */
   async selectContext(): Promise<void> {
     const state = this.target;
-    if (!state || !this.enabled()) return;
+    if (!state || !this.enabled() || this.refreshConflict()) return;
     const value = await vscode.window.showInputBox({ title: this.text("languageChoose"), prompt: this.text("languageChooseHint"),
       value: this.context.workspaceState.get<string>(this.selectionKey(state), ""), ignoreFocusOut: true });
     if (value === undefined || state !== this.target || this.disposed) return;
@@ -207,8 +221,42 @@ export class LanguageService implements vscode.Disposable {
   /** Settings affect only Explorer's language client, not grammar registration or foreign extensions. */
   private enabled(): boolean { return vscode.workspace.getConfiguration("eska.explorer").get<boolean>("languageFeatures", true); }
 
+  /** Public getExtension is limited to this host and includes enabled extensions which have not activated yet. */
+  private refreshConflict(resume = true): boolean {
+    if (this.disposed) return this.conflict;
+    const conflict = vscode.extensions.getExtension(CONFLICTING_EXTENSION) !== undefined;
+    if (conflict !== this.conflict) {
+      this.conflict = conflict;
+      const epoch = ++this.conflictEpoch;
+      if (conflict) {
+        this.showConflictState();
+        this.log(JSON.stringify({ event: "language_conflict", extension: CONFLICTING_EXTENSION }));
+        void Promise.resolve(vscode.window.showWarningMessage(this.text("languageConflictWarning", CONFLICTING_EXTENSION),
+          this.text("languageManageExtension"), this.text("languageUseExternal"))).then(async choice => {
+          if (choice === this.text("languageManageExtension") && !this.disposed && epoch === this.conflictEpoch && this.conflict) {
+            await vscode.commands.executeCommand("workbench.extensions.search", `@id:${CONFLICTING_EXTENSION}`);
+          }
+        }).catch(() => this.log("language_conflict_notification_failed", "warn"));
+      }
+      if (resume) void this.restart(false);
+    }
+    if (conflict && this.tooling.states.analyzer.phase !== "suspended-conflict") this.showConflictState();
+    return conflict;
+  }
+
+  /** A persistent reason survives dismissed warnings, binary probes and independent component updates. */
+  private showConflictState(): void {
+    this.tooling.analyzerState("suspended-conflict", this.text("languageConflictDetail", CONFLICTING_EXTENSION));
+  }
+
+  /** A blocked client still permits an independent read-only binary probe in its current generation. */
+  private fresh(revision: number, signal: AbortSignal): boolean { return !this.disposed && revision === this.revision && !signal.aborted; }
+
   /** The selected root and its API session are rechecked after every asynchronous boundary. */
-  private current(revision: number, signal: AbortSignal): boolean { return !this.disposed && revision === this.revision && !signal.aborted; }
+  private current(revision: number, signal: AbortSignal): boolean {
+    if (!this.fresh(revision, signal)) return false;
+    return !this.refreshConflict() && this.fresh(revision, signal);
+  }
 
   /** Keep a stable per-window selection without copying manifest topology into editor settings. */
   private selectionKey(state: Ready): string { return `analysisContext.${state.target.path}`; }
@@ -218,6 +266,7 @@ export class LanguageService implements vscode.Disposable {
     if (this.disposed) return;
     const code = analyzerFailure(error) ?? (error instanceof ToolFailure ? error.detail || error.code : error instanceof ExplorerError ? error.code : "language");
     this.log(JSON.stringify({ event: "language_failed", code }), "error");
+    if (this.refreshConflict()) { this.showConflictState(); return; }
     const detail = code === "migration_required" ? this.text("languageMigrationRequired") : code === "managed_conflict" ? this.text("languageManagedConflict") : this.text("languageFailed", code);
     this.tooling.analyzerState("error", detail);
     void vscode.window.showErrorMessage(detail);

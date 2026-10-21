@@ -254,3 +254,29 @@ node --test test/tool-*.test.mjs
 `ESKA_TEST_LANGUAGE=1` и абсолютный `ESKA_TEST_ANALYZER_BINARY`.
 `ESKA_TEST_PYTHON` нужен только сценарию отмены с управляемым тестовым wrapper,
 он не является зависимостью расширения.
+
+## Конфликт расширений T87
+
+С binary variables из T86, `ESKA_TEST_LANGUAGE=1`, `ESKA_HOST_SUPPORT_DISABLED=1`
+и `VSCODE_EXECUTABLE=codium`:
+
+```sh
+ESKA_HOST_ENABLE_EXTENSIONS=1 ESKA_HOST_CONFLICT_FIXTURE=initial \
+  node test/run-host.mjs test/language-conflict-host.cjs
+ESKA_HOST_ENABLE_EXTENSIONS=1 ESKA_HOST_CONFLICT_FIXTURE=initial \
+  ESKA_HOST_CONFLICT_RELOAD=1 \
+  node test/run-host.mjs test/language-conflict-reload-host.cjs
+ESKA_BSL_EXTENSION=/absolute/path/to/bsl-analyzer-extension \
+  ESKA_BSL_BINARY="$ESKA_TEST_ANALYZER_BINARY" \
+  node test/run-host.mjs test/language-foreign-host.cjs
+```
+
+Первому сценарию нужен также `ESKA_TEST_PYTHON`: он задерживает настоящий config
+validator тестовым wrapper. `conflict-fixture.mjs` создаёт и локально упаковывает
+собственное неактивное расширение с известным ID в каталоге runner. Fixture
+проверяет публичные install/uninstall и реестр, не содержит чужого движка.
+Три запуска reload-профиля используют один extensions-dir и startup-флаг
+`--disable-extension` только во втором запуске. Внутренние disable-команды
+и хранилище редактора не используются. Последний профиль отдельно проверяет
+реальное стороннее расширение и его процесс; учёт PID использует Linux `/proc`.
+`ESKA_TEST_VSIX` включает проверку установленного пакета.

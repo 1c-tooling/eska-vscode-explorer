@@ -1,6 +1,11 @@
 import type { FailureCode } from "./protocol.js";
 
 const en = {
+  "toolPhase_suspended-conflict": "suspended: extension conflict",
+  languageConflictWarning: "Explorer paused its BSL client because {0} is available in this workspace. Manage that extension or continue with its external client.",
+  languageConflictDetail: "ESKA Explorer owns this paused client. Conflicting extension: {0}. Disable or uninstall it to use Explorer language features; reload extensions if the editor requests it.",
+  languageManageExtension: "Manage extension",
+  languageUseExternal: "Use external client",
   toolPhase_starting: "starting",
   languageNoContext: "A connected ESKA project context is required.",
   languageDisabled: "Explorer language features are disabled.",
@@ -180,6 +185,11 @@ const en = {
 } as const;
 
 const ru: Record<keyof typeof en, string> = {
+  "toolPhase_suspended-conflict": "приостановлен: конфликт расширений",
+  languageConflictWarning: "BSL-клиент Explorer приостановлен: в этом workspace доступно {0}. Откройте управление расширением или продолжите с его внешним клиентом.",
+  languageConflictDetail: "Приостановленный клиент принадлежит ESKA Explorer. Конфликтует расширение: {0}. Для языка Explorer отключите или удалите его; перезапустите расширения, если редактор этого требует.",
+  languageManageExtension: "Управление расширением",
+  languageUseExternal: "Использовать внешний клиент",
   toolPhase_starting: "запуск",
   languageNoContext: "Нужен контекст подключённого проекта ESKA.",
   languageDisabled: "Языковые функции Explorer отключены.",

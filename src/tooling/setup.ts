@@ -14,7 +14,7 @@ import { cancellableChoice } from "./choice.js";
 
 export interface ToolState {
   info?: ToolInfo;
-  phase: "missing" | "ready" | "verified" | "starting" | "checking" | "installing" | "error" | "disconnected" | "suspended";
+  phase: "missing" | "ready" | "verified" | "starting" | "checking" | "installing" | "error" | "disconnected" | "suspended" | "suspended-conflict";
   activity?: "checking" | "installing";
   available?: string;
   detail?: string;
@@ -82,7 +82,9 @@ export class ToolingSetup implements vscode.Disposable {
     const path = await this.track(findTool(configured, TOOL_NAMES.analyzer, dirname(managedPath(this.root, "analyzer"))));
     assertCurrent(signal);
     if (!path) {
-      this.states.analyzer = { phase: "missing" }; this.renderAnalyzer();
+      delete this.states.analyzer.info;
+      if (!this.states.analyzer.phase.startsWith("suspended")) this.states.analyzer = { phase: "missing" };
+      this.renderAnalyzer();
       if (offer && configured === TOOL_NAMES.analyzer) return this.offerInstall("analyzer", signal);
       if (offer) throw new ExplorerError("executableMissing");
       return undefined;
@@ -90,11 +92,15 @@ export class ToolingSetup implements vscode.Disposable {
     try {
       const info = await this.track(inspectAnalyzer(path, homedir(), signal));
       assertCurrent(signal);
-      this.states.analyzer = { ...this.states.analyzer, info, phase: this.states.analyzer.phase === "suspended" ? "suspended" : "verified" }; this.renderAnalyzer();
+      this.states.analyzer = { ...this.states.analyzer, info, phase: this.states.analyzer.phase.startsWith("suspended") ? this.states.analyzer.phase : "verified" }; this.renderAnalyzer();
       void this.background("analyzer");
       return info;
     } catch (error) {
-      if (!signal.aborted && !this.disposed) { this.states.analyzer = { phase: "error" }; this.renderAnalyzer(); }
+      if (!signal.aborted && !this.disposed) {
+        delete this.states.analyzer.info;
+        if (!this.states.analyzer.phase.startsWith("suspended")) this.states.analyzer = { phase: "error" };
+        this.renderAnalyzer();
+      }
       throw error;
     }
   }
@@ -199,7 +205,9 @@ export class ToolingSetup implements vscode.Disposable {
             : await installAnalyzer(this.root, data, release, join(this.context.extensionPath, "resources", "analyzer-notices"), combined);
           assertCurrent(combined);
           if (used) {
-            this.states[kind] = { info, phase: kind === "project" ? "disconnected" : prior === "suspended" ? "suspended" : "verified" };
+            const current = this.states[kind];
+            this.states[kind] = { info, phase: kind === "project" ? "disconnected" : current.phase.startsWith("suspended") ? current.phase : prior === "suspended" ? "suspended" : "verified",
+              ...(kind === "analyzer" && current.phase.startsWith("suspended") && current.detail ? { detail: current.detail } : {}) };
             if (reconnect) await this.restart(kind);
           }
           void vscode.window.showInformationMessage(this.text("toolInstalled", TOOL_NAMES[kind], info.version));

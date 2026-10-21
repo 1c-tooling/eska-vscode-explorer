@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 import { readFileSync } from "node:fs";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { runInNewContext } from "node:vm";
 
@@ -133,4 +133,43 @@ test("analyzer update and cancellation preserve a suspended client's ownership a
   await setup.check("analyzer");
   assert.deepEqual(actions, []); assert.equal(setup.states.analyzer.info.version, "0.3.2");
   assert.equal(setup.states.analyzer.phase, "suspended");
+});
+
+test("a conflict arriving during an independent update retains its current reason and state", async t => {
+  const { setup } = await fixture(t), target = releases.hostTarget();
+  replace(t, installation, "managedVersion", async () => undefined);
+  replace(t, releases, "latestToolRelease", async kind => ({ kind, version: "0.3.2", target, asset: { name: "analyzer", sha256: "b".repeat(64), size: 1, url: "https://example.invalid/analyzer" } }));
+  replace(t, releases, "downloadAsset", async () => { setup.analyzerState("suspended-conflict", "enabled inactive foreign client"); return Buffer.from("candidate"); });
+  replace(t, installation, "installAnalyzer", async root => ({ kind: "analyzer", version: "0.3.2", path: installation.managedPath(root, "analyzer") }));
+  setup.states.analyzer.info = { kind: "analyzer", version: "0.3.2", path: installation.managedPath(setup.root, "analyzer") };
+  setup.analyzerState("ready"); ui.approved = true;
+  await setup.check("analyzer");
+  assert.equal(setup.states.analyzer.phase, "suspended-conflict"); assert.equal(setup.states.analyzer.detail, "enabled inactive foreign client");
+  assert.match(setup.analyzerStatus.tooltip, /enabled inactive foreign client/);
+});
+
+test("a missing selected analyzer clears its previous version without hiding an extension conflict", async t => {
+  const { setup } = await fixture(t);
+  setup.states.analyzer.info = { kind: "analyzer", version: "0.3.2", path: join(setup.root, "old-analyzer") };
+  setup.analyzerState("suspended-conflict", "foreign extension");
+  ui.settings.analyzerExecutable = join(setup.root, "missing-analyzer");
+  assert.equal(await setup.ensureAnalyzer(undefined, false), undefined);
+  assert.equal(setup.states.analyzer.info, undefined);
+  assert.equal(setup.states.analyzer.phase, "suspended-conflict");
+  assert.ok(!setup.analyzerStatus.text.includes("v0.3.2"));
+  assert.match(setup.analyzerStatus.tooltip, /foreign extension/);
+});
+
+test("a failed binary probe updates the visible version while keeping the conflict reason", { skip: process.platform === "win32" }, async t => {
+  const { setup } = await fixture(t), invalid = join(setup.root, "invalid-analyzer");
+  await mkdir(setup.root);
+  await writeFile(invalid, "#!/bin/sh\nexit 1\n", { mode: 0o755 });
+  setup.states.analyzer.info = { kind: "analyzer", version: "0.3.2", path: join(setup.root, "old-analyzer") };
+  setup.analyzerState("suspended-conflict", "foreign extension");
+  ui.settings.analyzerExecutable = invalid;
+  await assert.rejects(setup.ensureAnalyzer(undefined, false));
+  assert.equal(setup.states.analyzer.info, undefined);
+  assert.equal(setup.states.analyzer.phase, "suspended-conflict");
+  assert.ok(!setup.analyzerStatus.text.includes("v0.3.2"));
+  assert.match(setup.analyzerStatus.tooltip, /foreign extension/);
 });

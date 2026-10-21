@@ -16,6 +16,8 @@ if (!isAbsolute(playground)) throw new Error("ESKA_TEST_ROOT must be absolute.")
 const root = await mkdtemp(join(playground, "explorer-host-"));
 try {
   const fixture = await createTreeProject(join(root, "project"), process.env.ESKA_HOST_PROJECT_TYPE ?? "configuration");
+  // Reload tests need a stable root descriptor before workspaceContains can activate the extension.
+  if (process.env.ESKA_HOST_CONFLICT_RELOAD) await (await import("./language-fixture.mjs")).createLanguageSource(fixture);
   const bin = join(root, "bin");
   await mkdir(bin);
   const component = backend === "legacy" ? "eska" : "eska-project";
@@ -28,6 +30,10 @@ try {
     ...(process.env.ESKA_HOST_SUPPORT_DISABLED ? { "eska.explorer.supportPolicy": false } : {}) }));
   const executable = process.env.VSCODE_EXECUTABLE ?? "code";
   let extensionPath = repository;
+  const conflictFixture = process.env.ESKA_HOST_CONFLICT_FIXTURE ? await (await import("./conflict-fixture.mjs")).createConflictFixture(root) : undefined;
+  if (conflictFixture && process.env.ESKA_HOST_CONFLICT_FIXTURE === "initial") {
+    await cp(conflictFixture.folder, join(root, "extensions", "elishevkirill.bsl-analyzer-lsp-0.0.1"), { recursive: true });
+  }
   if (process.env.ESKA_BSL_EXTENSION) {
     if (!isAbsolute(process.env.ESKA_BSL_EXTENSION) || !isAbsolute(process.env.ESKA_BSL_BINARY ?? "")) {
       throw new Error("ESKA_BSL_EXTENSION and ESKA_BSL_BINARY must be absolute.");
@@ -38,9 +44,10 @@ try {
     await writeFile(join(fixture.root, ".vscode", "settings.json"), JSON.stringify({
       "eska.explorer.checkForUpdates": false, "eska.explorer.checkForAnalyzerUpdates": false, "eska.explorer.languageFeatures": process.env.ESKA_TEST_LANGUAGE === "1", "eska.explorer.analyzerExecutable": process.env.ESKA_TEST_ANALYZER_BINARY ?? join(root, "missing-analyzer"), "eska.explorer.backend": backend,
       "bsl-analyzer-lsp.server.path": process.env.ESKA_BSL_BINARY,
-      "[bsl]": { "editor.defaultFormatter": `${analyzer.publisher}.${analyzer.name}` }
+      "[bsl]": { "editor.defaultFormatter": `${analyzer.publisher}.${analyzer.name}` },
+      ...(process.env.ESKA_HOST_SUPPORT_DISABLED ? { "eska.explorer.supportPolicy": false } : {})
     }));
-    await writeFile(join(fixture.root, "bsl-analyzer.toml"), '[source]\nroot = "src"\n');
+    if (!process.env.ESKA_BSL_DISABLED) await writeFile(join(fixture.root, "bsl-analyzer.toml"), '[source]\nroot = "src"\n');
   }
   if (process.env.ESKA_TEST_VSIX) {
     if (!isAbsolute(process.env.ESKA_TEST_VSIX)) throw new Error("ESKA_TEST_VSIX must be absolute.");
@@ -88,13 +95,17 @@ exports.activate = async function () {
 };\n`);
     hostArguments.splice(0, 1, `--extensionDevelopmentPath=${probe}`);
   }
-  for (let run = 0; run < (process.env.ESKA_HOST_RESTART ? 2 : 1); run++) {
+  const runs = process.env.ESKA_HOST_CONFLICT_RELOAD ? 3 : process.env.ESKA_HOST_RESTART ? 2 : 1;
+  for (let run = 0; run < runs; run++) {
     await rm(join(fixture.root, "host-result.json"), { force: true });
     const child = spawn(executable, ["--verbose", "--wait", ...(process.env.ESKA_HOST_DEBUG_PORT ? [`--remote-debugging-port=${process.env.ESKA_HOST_DEBUG_PORT}`] : []),
       `--extensionDevelopmentPath=${extensionPath}`, ...hostArguments,
       `--user-data-dir=${join(root, "profile")}`, `--extensions-dir=${join(root, "extensions")}`,
-      "--disable-workspace-trust", ...(process.env.ESKA_BSL_EXTENSION ? [] : ["--disable-extensions"]), "--disable-gpu", "--new-window", workspace],
-    { env: { ...process.env, PATH: bin + (process.platform === "win32" ? ";" : ":") + (process.env.PATH ?? ""), ESKA_HOST_RUN: String(run), ESKA_HOST_FIXTURE: JSON.stringify(fixture), ESKA_HOST_SECOND_FIXTURE: JSON.stringify(secondFixture) }, stdio: ["ignore", "pipe", "pipe"] });
+      "--disable-workspace-trust", ...(process.env.ESKA_BSL_EXTENSION || process.env.ESKA_HOST_ENABLE_EXTENSIONS ? [] : ["--disable-extensions"]),
+      ...(process.env.ESKA_BSL_DISABLED || process.env.ESKA_HOST_CONFLICT_RELOAD && run === 1 ? ["--disable-extension=elishevkirill.bsl-analyzer-lsp"] : []), "--disable-gpu", "--new-window", workspace],
+    { env: { ...process.env, PATH: bin + (process.platform === "win32" ? ";" : ":") + (process.env.PATH ?? ""), ESKA_HOST_RUN: String(run),
+      ...(conflictFixture ? { ESKA_HOST_CONFLICT_VSIX: conflictFixture.vsix } : {}),
+      ESKA_HOST_FIXTURE: JSON.stringify(fixture), ESKA_HOST_SECOND_FIXTURE: JSON.stringify(secondFixture) }, stdio: ["ignore", "pipe", "pipe"] });
     let output = "";
     /** Retain bounded diagnostic output; host startup can be verbose. */
     const capture = (data) => { output = (output + data.toString()).slice(-32000); };

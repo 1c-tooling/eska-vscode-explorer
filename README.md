@@ -91,8 +91,12 @@ Explorer содержит собственную подсветку BSL/SDBL и 
 проверяется по `eska.toml`; пустое поле использует выбор backend по умолчанию.
 Существующий чужой `bsl-analyzer.toml` требует явной миграции средствами ESKA.
 
-T86 проверена в Linux/VSCodium с одним Explorer. Обработка конфликтующего
-расширения относится к T87. Форматирование, rename, code actions и серверные
+T86–T87 проверены в Linux/VSCodium. Если в текущем host доступно расширение
+`elishevkirill.bsl-analyzer-lsp`, собственный клиент Explorer приостанавливается;
+дерево и базовая подсветка остаются доступны. Предупреждение появляется один раз
+за период конфликта. После отключения или удаления расширения клиент повторно
+проверяет контекст и возобновляется, если языковые функции разрешены.
+Форматирование, rename, code actions и серверные
 WorkspaceEdit пока отключены до проверки защиты исходников в T88.
 [Поведение, ограничения и проверка языкового клиента](docs/language-service.md).
 
@@ -370,7 +374,7 @@ Cargo или официальный установщик: [управление 
 
 ## Документация и разработка
 
-- [План модульных backend и встроенного LSP-клиента](docs/analyzer-integration-plan.md) — T85–T86 реализованы; T87–T89 ещё не завершены.
+- [План модульных backend и встроенного LSP-клиента](docs/analyzer-integration-plan.md) — T85–T87 реализованы; T88–T89 ещё не завершены.
 - [Подробное руководство по дереву, поиску и диагностике](https://github.com/1c-tooling/eska-vscode-explorer/blob/main/docs/usage.md)
 - [Настройка проекта](https://github.com/1c-tooling/eska-vscode-explorer/blob/main/docs/setup.ru.md)
 - [Установка, упаковка и проверка VSIX](https://github.com/1c-tooling/eska-vscode-explorer/blob/main/docs/packaging.md)
