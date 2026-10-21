@@ -9,6 +9,7 @@ import { ANALYZER_VERSION, ToolFailure } from "../tooling/contracts.js";
 import type { ToolingSetup } from "../tooling/setup.js";
 import { analysisContext, analyzerConfiguration, analyzerFailure, type AnalysisContext, type AnalyzerConfiguration } from "./context.js";
 import { LanguageProcess } from "./process.js";
+import { LanguageProgress } from "./progress.js";
 import { readonlyPattern } from "../support-settings.js";
 import { cancellableChoice } from "../tooling/choice.js";
 import type { SupportController } from "../support.js";
@@ -19,10 +20,14 @@ import { watchSourceFiles } from "../watch.js";
 type Ready = Extract<ConnectionState, { kind: "ready" }>;
 interface Session {
   context: AnalysisContext; configuration: AnalyzerConfiguration; lease: string; state: Ready;
-  client?: LanguageClient; owner?: LanguageProcess; edits?: LanguageEdits; configurationWatcher?: vscode.FileSystemWatcher;
+  client?: LanguageClient; owner?: LanguageProcess; edits?: LanguageEdits; progress?: LanguageProgress; configurationWatcher?: vscode.FileSystemWatcher;
   observers: vscode.Disposable[];
 }
 const CONFLICTING_EXTENSION = "elishevkirill.bsl-analyzer-lsp";
+const BACKGROUND_READS = new Set([
+  "textDocument/documentSymbol", "textDocument/foldingRange", "textDocument/inlayHint",
+  "textDocument/semanticTokens/full", "textDocument/semanticTokens/full/delta", "textDocument/semanticTokens/range", "textDocument/codeLens",
+]);
 
 /** One language session owns its config lease, client, child and generation independently of TreeView visibility. */
 export class LanguageService implements vscode.Disposable {
@@ -36,6 +41,7 @@ export class LanguageService implements vscode.Disposable {
   private conflict = false;
   private conflictEpoch = 0;
   private modelRevision = 0;
+  private readonly reading = new Set<vscode.CancellationTokenSource>();
   private configurationPending = false;
   private configurationTimer: NodeJS.Timeout | undefined;
   private configurationCheck: Promise<void> | undefined;
@@ -76,13 +82,13 @@ export class LanguageService implements vscode.Disposable {
       const local = relative(source.source, path);
       return local === "" || (!isAbsolute(local) && local !== ".." && !local.startsWith(`..${sep}`));
     })) return;
-    ++this.modelRevision;
+    this.invalidateModel();
     if (session.context.sources.some(source => source.descriptor === path)) this.holdConfiguration();
     if (!/\.bsl$/i.test(path)) this.scheduleConfigurationCheck();
   }
 
   /** Discovery will replace the metadata session after its debounce; invalidate language results immediately. */
-  manifestChanged(): void { ++this.modelRevision; this.holdConfiguration(); }
+  manifestChanged(): void { this.invalidateModel(); this.holdConfiguration(); }
 
   /** Backend mutations can precede filesystem delivery; only selected-context project identities affect this session. */
   private metadataChanged(params: Record<string, unknown>): void {
@@ -90,7 +96,7 @@ export class LanguageService implements vscode.Disposable {
     if (!session || params.sessionId !== session.state.session.sessionId) return;
     const project = session.state.session.projects.find(candidate => candidate.projectId === params.projectId);
     if (!project || !session.context.sources.some(source => source.root === nativePath(project.rootPath))) return;
-    ++this.modelRevision;
+    this.invalidateModel();
     if (params.supportUnchanged !== true) this.scheduleConfigurationCheck();
   }
 
@@ -177,7 +183,7 @@ export class LanguageService implements vscode.Disposable {
     if (manual) this.wanted = true;
     this.refreshConflict(false);
     const revision = ++this.revision;
-    ++this.modelRevision; this.configurationPending = false; this.delayedDiagnostics.clear();
+    this.invalidateModel(); this.configurationPending = false; this.delayedDiagnostics.clear();
     clearTimeout(this.configurationTimer); this.configurationTimer = undefined; this.checkRequested = false;
     this.scope?.abort();
     const controller = new AbortController(); this.scope = controller;
@@ -212,7 +218,7 @@ export class LanguageService implements vscode.Disposable {
   /** Stop the child before releasing its config lease; replacing the metadata connection must await this method. */
   stop(detail?: string): Promise<void> {
     ++this.revision; this.scope?.abort(); this.scope = undefined;
-    ++this.modelRevision; this.configurationPending = false; this.delayedDiagnostics.clear();
+    this.invalidateModel(); this.configurationPending = false; this.delayedDiagnostics.clear();
     clearTimeout(this.configurationTimer); this.configurationTimer = undefined; this.checkRequested = false;
     if (this.refreshConflict(false)) this.showConflictState();
     else if (detail) this.tooling.analyzerState("suspended", detail);
@@ -250,11 +256,19 @@ export class LanguageService implements vscode.Disposable {
     }
     if (!this.current(revision, signal)) return;
     const context = analysisContext(resolved);
-    const info = await this.tooling.ensureAnalyzer(signal, true);
-    if (!info || !this.current(revision, signal)) return;
-    this.tooling.analyzerState("starting", this.text("languagePreparing"));
-    const status = analyzerConfiguration(await this.connection.analyzerRequest("analyzer/configStatus", parameters(), signal));
+    // These read-only checks share no mutable state. Await both even on failure so
+    // an interrupted startup cannot abandon its binary probe or pending RPC.
+    const [binary, configuration] = await Promise.allSettled([
+      this.tooling.ensureAnalyzer(signal, true),
+      this.connection.analyzerRequest("analyzer/configStatus", parameters(), signal),
+    ]);
     if (!this.current(revision, signal)) return;
+    if (binary.status === "rejected") throw binary.reason;
+    const info = binary.value;
+    if (!info) return;
+    this.tooling.analyzerState("starting", this.text("languagePreparing"));
+    if (configuration.status === "rejected") throw configuration.reason;
+    const status = analyzerConfiguration(configuration.value);
     if (status.status === "migration_required" || status.status === "managed_conflict") throw new ToolFailure("incompatible", status.status);
     if (status.status === "context_conflict" && !switchContext) {
       const choice = await cancellableChoice(vscode.window.showWarningMessage(this.text("languageSwitch", context.name ?? basename(context.root)), this.text("languageSwitchAction")), signal);
@@ -278,6 +292,8 @@ export class LanguageService implements vscode.Disposable {
         || prepared.path !== lease.path || prepared.context !== context.name || lease.context !== context.name
         || prepared.fingerprint !== lease.fingerprint || prepared.body !== lease.body || prepared.token !== lease.token) throw new ExplorerError("obsolete");
       const middleware = this.readingMiddleware(revision, signal);
+      session.progress = new LanguageProgress(() => this.current(revision, signal));
+      middleware.handleWorkDoneProgress = session.progress.handle;
       const client = new LanguageClient("eska-bsl", "BSL Analyzer (ESKA Explorer)", async () => {
         if (!this.current(revision, signal)) throw new ExplorerError("obsolete");
         session.owner = new LanguageProcess(info.path, context.root, this.log, () => {
@@ -301,7 +317,7 @@ export class LanguageService implements vscode.Disposable {
       /** Observe managed-config changes without replacing the metadata session or parsing TOML in the editor. */
       const changed = (): void => {
         if (this.session !== session || !this.current(revision, signal)) return;
-        ++this.modelRevision; this.holdConfiguration(); this.scheduleConfigurationCheck();
+        this.invalidateModel(); this.holdConfiguration(); this.scheduleConfigurationCheck();
       };
       watcher.onDidCreate(changed); watcher.onDidChange(changed); watcher.onDidDelete(changed);
       for (const source of context.sources) {
@@ -330,6 +346,7 @@ export class LanguageService implements vscode.Disposable {
 
   /** Discard reads from replaced servers or changed/closed buffers; writing routes have their own complete-edit guard. */
   private readingMiddleware(revision: number, signal: AbortSignal): Middleware {
+    let backgroundRead = Promise.resolve();
     const read = async <T>(document: vscode.TextDocument, token: vscode.CancellationToken, action: () => vscode.ProviderResult<T>): Promise<T | undefined> => {
       const version = document.version, model = this.modelRevision;
       if (!this.accepts(revision, signal) || token.isCancellationRequested) return undefined;
@@ -343,10 +360,30 @@ export class LanguageService implements vscode.Disposable {
         const document = typeof uri === "string" ? vscode.workspace.textDocuments.find(value => value.uri.toString() === uri) : undefined;
         const version = document?.version;
         if (!this.accepts(revision, signal) || token?.isCancellationRequested) throw new vscode.CancellationError();
-        const value = await next(type, params, token);
-        if (!this.accepts(revision, signal) || model !== this.modelRevision || token?.isCancellationRequested
-          || document?.isClosed || document?.version !== version) throw new vscode.CancellationError();
-        return value;
+        const cancellation = new vscode.CancellationTokenSource();
+        const subscription = token?.onCancellationRequested(() => cancellation.cancel());
+        this.reading.add(cancellation);
+        try {
+          /** Queued work must recheck its snapshot before sending anything to the server. */
+          const send = () => {
+            if (cancellation.token.isCancellationRequested || !this.accepts(revision, signal)
+              || model !== this.modelRevision || document?.isClosed || document?.version !== version) throw new vscode.CancellationError();
+            return next(type, params, cancellation.token);
+          };
+          const method = typeof type === "string" ? type : type.method;
+          const background = BACKGROUND_READS.has(method) || method === "textDocument/codeAction"
+            && isRecord(params) && isRecord(params.context) && params.context.triggerKind === 2;
+          // Each upstream read freezes the workspace paths. Bound background concurrency
+          // without a timer, disabling providers, or delaying interactive requests.
+          const reply = background ? backgroundRead.then(send) : send();
+          if (background) backgroundRead = reply.then(() => undefined, () => undefined);
+          const value = await reply;
+          if (!this.accepts(revision, signal) || model !== this.modelRevision || token?.isCancellationRequested
+            || document?.isClosed || document?.version !== version) throw new vscode.CancellationError();
+          return value;
+        } finally {
+          this.reading.delete(cancellation); subscription?.dispose(); cancellation.dispose();
+        }
       },
       provideHover: (doc, pos, token, next) => read(doc, token, () => next(doc, pos, token)),
       provideDefinition: (doc, pos, token, next) => read(doc, token, () => next(doc, pos, token)),
@@ -365,11 +402,18 @@ export class LanguageService implements vscode.Disposable {
     };
   }
 
+  /** Stop obsolete upstream work immediately instead of waiting for its result merely to discard it. */
+  private invalidateModel(): void {
+    ++this.modelRevision;
+    for (const request of this.reading) request.cancel();
+  }
+
   /** Release resources in lease order even if the protocol peer ignores its normal shutdown request. */
   private async cleanup(): Promise<void> {
     const session = this.session;
     if (!session) return;
     session.configurationWatcher?.dispose();
+    session.progress?.dispose();
     for (const observer of session.observers) observer.dispose();
     await session.edits?.shutdown();
     try { await session.client?.stop(4000); } catch { this.log("language_shutdown_failed", "warn"); }

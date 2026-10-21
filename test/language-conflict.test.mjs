@@ -36,6 +36,19 @@ function fixture({ available = false, enabled = true, hold, outside = false, sta
     async ensureAnalyzer(_signal, offer) { await checkpoint(offer ? "ensureAnalyzer" : "inspect-only"); return { path: join(root, "analyzer"), version: "0.3.2" }; } };
   const vscode = {
     env: { language: "en-US" }, CancellationError: class extends Error {}, RelativePattern: class {},
+    CancellationTokenSource: class {
+      controller = new AbortController();
+      /** Model the public editor cancellation boundary, including listener disposal. */
+      get token() {
+        const signal = this.controller.signal;
+        return { get isCancellationRequested() { return signal.aborted; },
+          onCancellationRequested(listener) { signal.addEventListener("abort", listener); return { dispose() { signal.removeEventListener("abort", listener); } }; } };
+      }
+      /** Cancellation is synchronous even while the upstream reply is held. */
+      cancel() { this.controller.abort(); }
+      /** No native resource belongs to this test token. */
+      dispose() {}
+    },
     workspace: { isTrusted: true, textDocuments: [{ languageId: "bsl", uri: { toString: () => "file:///same.bsl" }, version: 1, isClosed: false }], getConfiguration() { return { get() { return feature; } }; },
       onDidOpenTextDocument(callback) { documents.add(callback); return { dispose() { documents.delete(callback); } }; },
       onDidChangeTextDocument(callback) { changed = callback; return { dispose() { changed = undefined; } }; },
@@ -177,14 +190,52 @@ test("buffer edits reject old reads without publishing an artificial empty diagn
   const client = f.clients[0], held = barrier(), uri = { toString: () => "file:///same.bsl" };
   const middleware = client.clientOptions.middleware;
   middleware.handleDiagnostics(uri, ["original"], (uri, values) => client.diagnostics.set(uri, values));
-  const reply = middleware.sendRequest("textDocument/definition", { textDocument: { uri: uri.toString() } }, undefined, () => held.promise);
-  f.changeDocument(); held.release("old definition");
+  let requestToken;
+  const reply = middleware.sendRequest("textDocument/definition", { textDocument: { uri: uri.toString() } }, undefined,
+    (_type, _params, token) => { requestToken = token; return held.promise; });
+  assert.equal(requestToken.isCancellationRequested, false);
+  f.changeDocument();
+  assert.equal(requestToken.isCancellationRequested, true, "obsolete work is cancelled before the upstream response");
+  held.release("old definition");
   await assert.rejects(reply);
   assert.deepEqual(client.diagnostics.get(uri), ["original"]);
   middleware.handleDiagnostics(uri, ["fresh"], (uri, values) => client.diagnostics.set(uri, values));
   assert.deepEqual(client.diagnostics.get(uri), ["fresh"]);
   f.service.manifestChanged();
   assert.equal(client.diagnostics.get(uri), undefined, "changing context must still clear previous diagnostics");
+});
+
+test("background VFS snapshots are serialized while interactive reads bypass the queue", async t => {
+  const f = fixture(); t.after(() => f.service.shutdown()); f.connect(); await settled(f.service);
+  const middleware = f.clients[0].clientOptions.middleware, held = barrier(), entered = barrier(), order = [];
+  const params = { textDocument: { uri: "file:///same.bsl" } };
+  const symbols = middleware.sendRequest("textDocument/documentSymbol", params, undefined, () => {
+    order.push("symbols"); entered.release(); return held.promise;
+  });
+  await entered.promise;
+  const hints = middleware.sendRequest("textDocument/inlayHint", params, undefined, async () => { order.push("hints"); return ["hint"]; });
+  const automatic = middleware.sendRequest("textDocument/codeAction", { ...params, context: { triggerKind: 2 } }, undefined,
+    async () => { order.push("automatic"); return ["fix"]; });
+  for (const method of ["hover", "completion", "definition", "codeAction"]) {
+    assert.equal(await middleware.sendRequest(`textDocument/${method}`, params, undefined, async () => { order.push(method); return method; }), method);
+  }
+  assert.deepEqual(order, ["symbols", "hover", "completion", "definition", "codeAction"]);
+  held.release(["symbol"]);
+  assert.deepEqual(await symbols, ["symbol"]); assert.deepEqual(await hints, ["hint"]);
+  assert.deepEqual(await automatic, ["fix"]);
+  assert.deepEqual(order, ["symbols", "hover", "completion", "definition", "codeAction", "hints", "automatic"]);
+});
+
+test("a buffer edit cancels queued background work before forwarding and does not poison later requests", async t => {
+  const f = fixture(); t.after(() => f.service.shutdown()); f.connect(); await settled(f.service);
+  const middleware = f.clients[0].clientOptions.middleware, held = barrier(), entered = barrier();
+  const params = { textDocument: { uri: "file:///same.bsl" } };
+  const symbols = middleware.sendRequest("textDocument/documentSymbol", params, undefined, () => { entered.release(); return held.promise; });
+  await entered.promise;
+  const hints = middleware.sendRequest("textDocument/inlayHint", params, undefined, () => assert.fail("stale queued request reached the server"));
+  const cancelled = Promise.all([assert.rejects(symbols), assert.rejects(hints)]);
+  f.changeDocument(); held.release(["old symbol"]); await cancelled;
+  assert.deepEqual(await middleware.sendRequest("textDocument/documentSymbol", params, undefined, async () => ["fresh symbol"]), ["fresh symbol"]);
 });
 
 test("root-descriptor changes replace the old client only after releasing its lease and drop its diagnostics", async t => {
