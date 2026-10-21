@@ -22,9 +22,10 @@ exports.run = async function () {
   const wrapper = path.join(fixture.root, "controlled-analyzer"), marker = path.join(fixture.root, "validator-pid");
   await fs.writeFile(wrapper, `#!${python}\nimport os,sys,time\nfrom pathlib import Path\nif len(sys.argv)>1 and sys.argv[1]=='check-config':\n Path(${JSON.stringify(marker)}).write_text(str(os.getpid()))\n while True: time.sleep(.1)\nos.execv(${JSON.stringify(process.env.ESKA_TEST_ANALYZER_BINARY)},[${JSON.stringify(process.env.ESKA_TEST_ANALYZER_BINARY)},*sys.argv[1:]])\n`, { mode: 0o755 });
   const config = vscode.workspace.getConfiguration("eska.explorer");
-  await config.update("analyzerExecutable", wrapper, vscode.ConfigurationTarget.Workspace);
   const extension = vscode.extensions.all.find(value => value.packageJSON.name === "eska-explorer"), explorer = await extension.activate();
   await until(() => explorer.connection.state.kind === "ready", "metadata ready");
+  // The controlled cancellation begins after metadata startup, independent of initial configuration delivery.
+  await config.update("analyzerExecutable", wrapper, vscode.ConfigurationTarget.Workspace);
   const document = await vscode.workspace.openTextDocument(vscode.Uri.file(source.file));
   await vscode.window.showTextDocument(document);
   await until(() => fs.access(marker).then(() => true, () => false), "real project validator started");
