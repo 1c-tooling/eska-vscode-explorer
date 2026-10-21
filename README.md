@@ -103,8 +103,9 @@ T86–T87 проверены в Linux/VSCodium. Если в текущем host 
 корневые входы переподготавливают свой LSP. Проверены выбор приложения, два окна
 с общим конфигом, protected bridge своего клиента и sources вне открытого member.
 Для таких sources права проверяются отдельным backend scope; при отключённой
-policy дополнительный Metadata-процесс не запускается. Полная приёмка T89
-с измерениями на `buhmfo` остаётся следующей задачей.
+policy дополнительный Metadata-процесс не запускается. Приёмка T89 завершена
+на Linux/VSCodium; измеренные превышения скорости дерева, старта языка
+и definition по решению пользователя отложены в задачу оптимизации T106.
 [Поведение, ограничения и проверка языкового клиента](docs/language-service.md).
 
 ## Рабочая область
@@ -382,7 +383,7 @@ Explorer регистрирует BSL/SDBL и использует внешни�
 
 ## Документация и разработка
 
-- [План модульных backend и встроенного LSP-клиента](docs/analyzer-integration-plan.md) — T85–T88 реализованы; окончательная приёмка T89 остаётся.
+- [План модульных backend и встроенного LSP-клиента](docs/analyzer-integration-plan.md) — T85–T89 завершены на Linux/VSCodium с отложенной оптимизацией T106.
 - [Подробное руководство по дереву, поиску и диагностике](https://github.com/1c-tooling/eska-vscode-explorer/blob/main/docs/usage.md)
 - [Настройка проекта](https://github.com/1c-tooling/eska-vscode-explorer/blob/main/docs/setup.ru.md)
 - [Установка, упаковка и проверка VSIX](https://github.com/1c-tooling/eska-vscode-explorer/blob/main/docs/packaging.md)

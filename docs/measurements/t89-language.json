@@ -45,6 +45,41 @@
       "excluded_extension_diagnostics_cleared": true,
       "evidence": "/home/akalsin/Documents/Projects/eska-playground/t89-buhmfo-lifecycle-o7u5kx1s/report-final.json",
       "sha256": "70d808e7b8feab729e9ef45da75b978d0a43d77df7054871e51c4e454aa522d5"
+    },
+    "large_cli_lsp": {
+      "passed": true,
+      "files": 23162,
+      "complete": true,
+      "all_published_diagnostics_equal": true,
+      "total_diagnostics": 1362653,
+      "selected_native_lsp": [
+        {
+          "file": "/home/akalsin/Documents/Projects/eska-playground/t89-buhmfo-lifecycle-o7u5kx1s/project/src/ExternalSystems/src/WebServices/es_GetData/Ext/Module.bsl",
+          "diagnostics": 5,
+          "equal": true
+        },
+        {
+          "file": "/home/akalsin/Documents/Projects/eska-playground/t89-buhmfo-lifecycle-o7u5kx1s/project/src/buhmfo/src/Catalogs/Номенклатура/Ext/ObjectModule.bsl",
+          "diagnostics": 3,
+          "equal": true
+        },
+        {
+          "file": "/home/akalsin/Documents/Projects/eska-playground/t89-buhmfo-lifecycle-o7u5kx1s/project/src/buhmfo/src/CommonModules/GoogleПереводчик/Ext/Module.bsl",
+          "diagnostics": 4,
+          "equal": true
+        }
+      ],
+      "lsp_comparison_fields": [
+        "code",
+        "severity",
+        "start_line",
+        "start_column",
+        "end_line",
+        "end_column",
+        "message without upstream standard suffix"
+      ],
+      "native_lsp_tags": "Not captured by the native fixture; public CLI tags were compared against all upstream JSONL diagnostics",
+      "root_functional_receipt": "eska/docs/measurements/t89-functional.json"
     }
   },
   "performance": {
@@ -55,7 +90,10 @@
     "fresh_semantic_repair_required": true,
     "idle_seconds": 5,
     "additional_steady_hover_repeats": 30,
-    "acceptance": "failed; tree/language startup and interleaved definition exceed the original tolerance. See root ESKA t89-corrected.json."
+    "acceptance": "failed; tree/language startup and interleaved definition exceed the original tolerance. See root ESKA t89-corrected.json.",
+    "follow_up_task": "T106",
+    "follow_up_status": "PLANNED",
+    "fixed_t90_tolerances_changed": false
   },
   "native_source_watch_note": "The large native editor test waits for an observed external BSL roundtrip before switching branches. No additional watcher or manual reload is injected in the final run.",
   "environments_unverified": [
@@ -63,5 +101,20 @@
     "macOS",
     "VS Code",
     "Remote"
-  ]
+  ],
+  "date": "2026-10-22",
+  "status": "done_with_deferred_performance",
+  "functional_status": "passed",
+  "test_revision": "7d326c1",
+  "acceptance_decision": {
+    "date": "2026-10-22",
+    "source": "Direct human reply in this chat",
+    "user_quote": "Добавить как задачу оптимизации. Прогодим более сильной моделью",
+    "t89_acceptance": "accepted_with_documented_performance_deferral",
+    "performance_gates": "failed; original numeric results and tolerances preserved",
+    "follow_up_task": "T106",
+    "follow_up_status": "PLANNED",
+    "follow_up_execution": "Later with a stronger model; not started",
+    "scope": "Current Linux/VSCodium; other environments unverified by prior user decision"
+  }
 }
