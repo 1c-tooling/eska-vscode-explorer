@@ -34,3 +34,13 @@ export async function createLanguageMutationSource(fixture) {
   await writeFile(caller, "Процедура Использовать()\n    Значение = Обмен.Проверка(1);\nКонецПроцедуры\n");
   return { ...source, caller };
 }
+
+/** Give every owned BSL file a unique diagnostic so a cleared editor collection cannot impersonate a completed analysis. */
+export async function createLanguageParitySource(fixture) {
+  const source = await createLanguageSupportSource(fixture);
+  for (const [index, file] of [source.file, fixture.module].entries()) {
+    const text = await readFile(file, "utf8");
+    await writeFile(file, text + `\nПроцедура ESKAParity${index}() Экспорт\n    ESKAParitySentinel${index} = 1;\nКонецПроцедуры\n`);
+  }
+  return source;
+}

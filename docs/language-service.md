@@ -249,3 +249,52 @@ ESKA_HOST_MEMBER_CONTEXT=1 node test/two-language-windows.mjs
 её для проверки leases; профиль member затем включает её и проверяет
 разрешённый rename. Два окна сохраняют координацию и отчёт в собственном
 каталоге playground; временные профили редактора runner удаляет.
+
+## T89: сверка результатов и большой контекст
+
+На Linux/VSCodium 1.109.5 установленный VSIX сверяет реальный `eska-check`
+с собственным LSP: весь небольшой контекст из двух BSL-файлов, девять диагностик,
+два языка CLI, коды, уровни и диапазоны. Policy включена; исходники и leased
+конфиг сохраняются побайтово. Exit 1 означает достигнутый порог диагностик при
+`complete: true`. LSP добавляет к некоторым сообщениям ссылки на стандарты:
+тест снимает только этот суффикс, сохраняя исходные сообщения в raw-отчёте.
+
+С теми же переменными бинарников и VSIX, что выше, дополнительно задаётся
+абсолютный путь `ESKA_TEST_CHECK_BINARY`:
+
+```sh
+ESKA_HOST_LANGUAGE_PARITY=1 node test/run-host.mjs test/language-parity-host.cjs
+```
+
+`test/language-buhmfo-host.cjs` использует подготовленную собственную копию
+`buhmfo` внутри `ESKA_TEST_ROOT`: `ESKA_HOST_LARGE_INPUT` указывает JSON с путями
+`root`, `common`, `commonXml`, `caller`, `extension`, `descriptor` и `owner.json`
+рядом с проектом. В fixture должны быть приложения `buhmfo` и `base-only`,
+ветки `develop` и `task/t89-branch`, уникальные диагностические markers.
+`ESKA_TEST_VCS_BINARY` задаёт standalone VCS; `ESKA_HOST_LARGE_REPORT` — отчёт.
+Подготовка и точные входы сохранены в стенде из машинного отчёта ниже.
+
+```sh
+ESKA_HOST_SUPPORT_DISABLED=1 ESKA_PERF_PROJECT="$large_project" \
+  node test/run-host.mjs test/language-buhmfo-host.cjs
+```
+
+Проверены XML `Global`, переключение ветки через `eska-vcs switch`, новый
+fingerprint корневого XML и возврат состава приложения `6 → 1 → 6`.
+Обычный XML сохраняет LSP PID; новый корневой fingerprint заменяет LSP,
+сохраняя Metadata PID. Исключённое расширение теряет diagnostics, после возврата
+сервера публикуют свежие markers. Перед внешними изменениями тест ждёт
+наблюдаемого файлового события самого VSCodium; дополнительный watcher и
+ручная перезагрузка документов в итоговом прогоне не используются.
+
+Benchmark `test/language-performance-host.cjs` проверяет конкретные ответы
+hover/completion/definition и завершает восстановление буфера только после
+уникальной семантической диагностики текущей версии. Пустая коллекция может
+означать очистку редактором. По 30 операций дополнены пятью секундами покоя
+и 30 отдельными hover после паузы. Runner сохраняет полный native-log при
+заданном `ESKA_HOST_FULL_LOG`; stdout ошибки остаётся ограниченным.
+
+[Машинный отчёт T89](measurements/t89-language.json) фиксирует hashes тестов,
+стендов и результатов. Все 20 запусков прошли функциональные assertions;
+производительность старта дерева/языка и definition превышает исходный допуск.
+T89 остаётся `IN-PROGRESS`; другие ОС, VS Code и Remote не проверены.

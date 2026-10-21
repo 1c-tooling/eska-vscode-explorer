@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { createWriteStream } from "node:fs";
 import { mkdtemp, rm, readFile, writeFile, cp, mkdir, symlink } from "node:fs/promises";
 import { resolve, join, isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -18,7 +19,8 @@ try {
   const fixture = await createTreeProject(join(root, "project"), process.env.ESKA_HOST_PROJECT_TYPE ?? "configuration");
   // Reload tests need a stable root descriptor before workspaceContains can activate the extension.
   if (process.env.ESKA_HOST_CONFLICT_RELOAD) await (await import("./language-fixture.mjs")).createLanguageSource(fixture);
-  if (process.env.ESKA_HOST_LANGUAGE_MUTATION) await (await import("./language-fixture.mjs")).createLanguageMutationSource(fixture);
+  if (process.env.ESKA_HOST_LANGUAGE_PARITY) await (await import("./language-fixture.mjs")).createLanguageParitySource(fixture);
+  else if (process.env.ESKA_HOST_LANGUAGE_MUTATION) await (await import("./language-fixture.mjs")).createLanguageMutationSource(fixture);
   else if (process.env.ESKA_HOST_LANGUAGE_EDITS) await (await import("./language-fixture.mjs")).createLanguageSupportSource(fixture);
   if (process.env.ESKA_HOST_LANGUAGE_REFRESH) await (await import("./language-fixture.mjs")).createLanguageSource(fixture);
   const bin = join(root, "bin");
@@ -111,11 +113,13 @@ exports.activate = async function () {
       ...(conflictFixture ? { ESKA_HOST_CONFLICT_VSIX: conflictFixture.vsix } : {}),
       ESKA_HOST_FIXTURE: JSON.stringify(fixture), ESKA_HOST_SECOND_FIXTURE: JSON.stringify(secondFixture) }, stdio: ["ignore", "pipe", "pipe"] });
     let output = "";
+    const fullLog = process.env.ESKA_HOST_FULL_LOG ? createWriteStream(process.env.ESKA_HOST_FULL_LOG) : undefined;
     /** Retain bounded diagnostic output; host startup can be verbose. */
-    const capture = (data) => { output = (output + data.toString()).slice(-32000); };
+    const capture = (data) => { fullLog?.write(data); output = (output + data.toString()).slice(-32000); };
     child.stdout.on("data", capture);
     child.stderr.on("data", capture);
     const code = await new Promise((resolve, reject) => { child.once("error", reject); child.once("close", resolve); });
+    if (fullLog) await new Promise(resolve => fullLog.end(resolve));
     if (process.env.ESKA_HOST_LOG) await writeFile(process.env.ESKA_HOST_LOG, output);
     if (code !== 0) throw new Error(`Extension host exited ${code}\n${output}`);
     try {
