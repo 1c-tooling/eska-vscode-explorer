@@ -7,7 +7,7 @@ const vscode = require("vscode");
 async function until(action, label) {
   const deadline = Date.now() + 15000;
   while (Date.now() < deadline) { if (await action()) return; await new Promise(resolve => setTimeout(resolve, 30)); }
-  throw new Error(label);
+  throw new Error(typeof label === "function" ? label() : label);
 }
 
 /** Only recorded owned process identities are inspected, without terminating an unrelated process. */
@@ -17,13 +17,15 @@ function exited(pid) { try { process.kill(pid, 0); return false; } catch (error)
 exports.run = async function () {
   const fixture = JSON.parse(process.env.ESKA_HOST_FIXTURE), python = process.env.ESKA_TEST_PYTHON;
   assert.ok(python && path.isAbsolute(python), "Set ESKA_TEST_PYTHON for this executable fixture");
-  const { createLanguageSource } = await import("./language-fixture.mjs");
-  const source = await createLanguageSource(fixture);
+  assert.ok(fixture.languageSource, "prepare the complete source before launching the editor");
+  const source = fixture.languageSource;
   const wrapper = path.join(fixture.root, "controlled-analyzer"), marker = path.join(fixture.root, "validator-pid");
   await fs.writeFile(wrapper, `#!${python}\nimport os,sys,time\nfrom pathlib import Path\nif len(sys.argv)>1 and sys.argv[1]=='check-config':\n Path(${JSON.stringify(marker)}).write_text(str(os.getpid()))\n while True: time.sleep(.1)\nos.execv(${JSON.stringify(process.env.ESKA_TEST_ANALYZER_BINARY)},[${JSON.stringify(process.env.ESKA_TEST_ANALYZER_BINARY)},*sys.argv[1:]])\n`, { mode: 0o755 });
   const config = vscode.workspace.getConfiguration("eska.explorer");
   const extension = vscode.extensions.all.find(value => value.packageJSON.name === "eska-explorer"), explorer = await extension.activate();
-  await until(() => explorer.connection.state.kind === "ready", "metadata ready");
+  await until(() => explorer.connection.state.kind === "ready", () => `metadata ready: ${JSON.stringify({
+    state: explorer.connection.state, selected: explorer.selected?.uri.toString(), tooling: explorer.tooling.states,
+  })}`);
   // The controlled cancellation begins after metadata startup, independent of initial configuration delivery.
   await config.update("analyzerExecutable", wrapper, vscode.ConfigurationTarget.Workspace);
   const document = await vscode.workspace.openTextDocument(vscode.Uri.file(source.file));

@@ -30,8 +30,8 @@ function exited(pid) {
 exports.run = async function () {
   const fixture = JSON.parse(process.env.ESKA_HOST_FIXTURE);
   assert.equal(process.env.ESKA_TEST_LANGUAGE, "1");
-  const { createLanguageSource } = await import("./language-fixture.mjs");
-  const { file, text } = await createLanguageSource(fixture);
+  assert.ok(fixture.languageSource, "prepare the complete source before launching the editor");
+  const { file, text } = fixture.languageSource;
   const extension = vscode.extensions.all.find(value => value.packageJSON.name === "eska-explorer");
   const explorer = await extension.activate();
   await until(() => explorer.connection.state.kind === "ready", "metadata ready");

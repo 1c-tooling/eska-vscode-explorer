@@ -1,11 +1,12 @@
 import { spawn } from "node:child_process";
 import { createWriteStream } from "node:fs";
 import { mkdtemp, rm, readFile, writeFile, cp, mkdir, symlink } from "node:fs/promises";
-import { resolve, join, isAbsolute } from "node:path";
+import { resolve, join, isAbsolute, basename } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createTreeProject } from "./fixture.mjs";
 
 const repository = fileURLToPath(new URL("../", import.meta.url));
+const suite = resolve(repository, process.argv[2] ?? "test/extension-host.cjs");
 const binary = process.env.ESKA_TEST_BINARY;
 if (!binary || !isAbsolute(binary)) throw new Error("Set ESKA_TEST_BINARY to an absolute path to an IDE-enabled backend.");
 const globalBinary = process.env.ESKA_HOST_GLOBAL_BINARY ?? binary;
@@ -17,6 +18,10 @@ if (!isAbsolute(playground)) throw new Error("ESKA_TEST_ROOT must be absolute.")
 const root = await mkdtemp(join(playground, "explorer-host-"));
 try {
   const fixture = await createTreeProject(join(root, "project"), process.env.ESKA_HOST_PROJECT_TYPE ?? "configuration");
+  // These scenarios exercise language lifecycle, not concurrent mutation of XML during workspace/open.
+  if (["language-host.cjs", "language-cancellation-host.cjs"].includes(basename(suite))) {
+    fixture.languageSource = await (await import("./language-fixture.mjs")).createLanguageSource(fixture);
+  }
   // Reload tests need a stable root descriptor before workspaceContains can activate the extension.
   if (process.env.ESKA_HOST_CONFLICT_RELOAD) await (await import("./language-fixture.mjs")).createLanguageSource(fixture);
   if (process.env.ESKA_HOST_LANGUAGE_PARITY) await (await import("./language-fixture.mjs")).createLanguageParitySource(fixture);
@@ -81,7 +86,6 @@ try {
       ...(process.env.ESKA_HOST_SUPPORT_DISABLED ? { "eska.explorer.supportPolicy": false } : {}) } }));
   }
   // A second process reuses the same profile and workspace to test restored editors.
-  const suite = resolve(repository, process.argv[2] ?? "test/extension-host.cjs");
   const hostArguments = [`--extensionTestsPath=${suite}`];
   if (process.env.ESKA_HOST_RESTART) {
     // VS Code deliberately skips editor restoration in extension-test mode. Run the
