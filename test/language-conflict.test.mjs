@@ -11,16 +11,17 @@ const ID = "elishevkirill.bsl-analyzer-lsp";
 function barrier() { let release; const promise = new Promise(done => { release = done; }); return { promise, release }; }
 
 /** Only protocol/UI/process boundaries are mocked; production LanguageService owns all conflict and lease decisions. */
-function fixture({ available = false, enabled = true, hold } = {}) {
+function fixture({ available = false, enabled = true, hold, outside = false } = {}) {
   const root = resolve(process.env.ESKA_TEST_ROOT ?? "../eska-playground", "conflict-dto"), wire = value => ({ value, encoding: "utf-8" });
   const calls = [], warnings = [], commands = [], owners = [], clients = [], watchers = [], listeners = new Set(), documents = new Set(), notifications = new Set();
   let conflict = available, feature = enabled, reached, held = false, leased = false;
   const waiting = barrier(), pause = barrier();
   const checkpoint = async name => { calls.push(name); if (hold === name && !held) { held = true; reached = name; waiting.release(); await pause.promise; } };
   const ready = { kind: "ready", analyzerConfiguration: true, target: { path: root, backend: "project" },
-    session: { sessionId: "session", projects: [{ projectId: "project", rootPath: wire(root) }] } };
+    session: { sessionId: "session", projects: [{ projectId: "project", rootPath: wire(root), sourcePath: wire(join(root, "src")) }] } };
+  const sourceRoot = outside ? join(root, "other") : root;
   const dto = { schema_version: 1, kind: "analyzer-configuration", status: "current", path: wire(join(root, "bsl-analyzer.toml")),
-    preview_token: "a".repeat(64), ownership: { schema_version: 1, generator_version: 1, analyzer_version: "0.3.2", context: null,
+    preview_token: "a".repeat(64), ownership: { schema_version: 1, generator_version: 1, analyzer_version: "0.3.2", context: outside ? "two" : null,
       input_fingerprint: "b".repeat(64), body_sha256: "c".repeat(64) } };
   const connection = { state: ready, onNotification(listener) { notifications.add(listener); return { dispose() { notifications.delete(listener); } }; }, async analyzerRequest(method, _params, signal) {
     if (method === "analyzer/acquire") { assert.equal(signal, undefined); leased = true; }
@@ -28,7 +29,7 @@ function fixture({ available = false, enabled = true, hold } = {}) {
     await checkpoint(method);
     if (method === "analyzer/configPrepare" && dto.status === "stale") dto.status = "current";
     if (method === "analyzer/context") return { schema_version: 1, kind: "project-context", status: "ready", context: {
-      root: wire(root), name: null, limited_context: false, sources: [{ root: wire(root), source: wire(join(root, "src")), descriptor: wire("Configuration.xml"), member: null, role: "configuration", project_type: "configuration" }] } };
+      root: wire(root), name: outside ? "two" : null, limited_context: false, sources: [{ root: wire(sourceRoot), source: wire(join(sourceRoot, "src")), descriptor: wire("Configuration.xml"), member: outside ? "other" : null, role: "configuration", project_type: "configuration" }] } };
     return method === "analyzer/acquire" ? { ...dto, leaseId: "d".repeat(64) } : dto;
   } };
   const tooling = { states: { analyzer: { phase: "missing" } }, analyzerState(phase, detail) { this.states.analyzer.phase = phase; this.states.analyzer.detail = detail; },
@@ -40,7 +41,7 @@ function fixture({ available = false, enabled = true, hold } = {}) {
       onDidChangeTextDocument() { return { dispose() {} }; },
       createFileSystemWatcher() { const callbacks = new Set(), watcher = {
         onDidCreate(callback) { callbacks.add(callback); }, onDidChange(callback) { callbacks.add(callback); }, onDidDelete(callback) { callbacks.add(callback); },
-        fire() { for (const callback of callbacks) callback(); }, dispose() { callbacks.clear(); this.disposed = true; } };
+        fire(uri) { for (const callback of callbacks) callback(uri); }, dispose() { callbacks.clear(); this.disposed = true; } };
         watchers.push(watcher); return watcher;
       } },
     extensions: { getExtension(id) { assert.equal(id, ID); return conflict ? { id, isActive: false, activate() { assert.fail("foreign activation"); } } : undefined; },
@@ -60,13 +61,18 @@ function fixture({ available = false, enabled = true, hold } = {}) {
   }
   class FakeOwner { constructor() { this.child = { pid: 100 + owners.length, stdout: {}, stdin: {} }; owners.push(this); } async stop() { this.stopped = true; } }
   const adapter = { exports: {} }, require = createRequire(new URL("../out/language/service.js", import.meta.url));
+  const watching = { exports: {} }, watchRequire = createRequire(new URL("../out/watch.js", import.meta.url));
+  runInNewContext(`(function(require,module,exports){${readFileSync(new URL("../out/watch.js", import.meta.url), "utf8")}\n})`, { process, setTimeout, clearTimeout })(
+    name => name === "vscode" ? vscode : watchRequire(name), watching, watching.exports);
   runInNewContext(`(function(require,module,exports){${readFileSync(new URL("../out/language/service.js", import.meta.url), "utf8")}\n})`, { AbortController, AbortSignal, process, setTimeout, clearTimeout })(
     name => name === "vscode" ? vscode : name === "vscode-languageclient/node" ? { LanguageClient: FakeClient, CloseAction: {}, ErrorAction: {} }
       : name === "./process.js" ? { LanguageProcess: FakeOwner }
-        : name === "./edits.js" ? { LanguageEdits: class { middleware() { return {}; } async shutdown() {} } } : require(name), adapter, adapter.exports);
+        : name === "./edits.js" ? { LanguageEdits: class { middleware() { return {}; } async shutdown() {} } }
+          : name === "../watch.js" ? watching.exports : require(name), adapter, adapter.exports);
   const context = { workspaceState: { get() {}, async update() { await checkpoint("selection.update"); } } };
-  const service = new adapter.exports.LanguageService(context, connection, tooling, {}, () => {});
-  return { root, service, tooling, calls, warnings, commands, owners, clients, watchers, dto, pause, waiting, get reached() { return reached; }, get leased() { return leased; },
+  const policyRoots = [];
+  const service = new adapter.exports.LanguageService(context, connection, tooling, {}, () => {}, undefined, roots => policyRoots.push([...roots]));
+  return { root, sourceRoot, service, tooling, calls, warnings, commands, owners, clients, watchers, policyRoots, dto, pause, waiting, get reached() { return reached; }, get leased() { return leased; },
     /** Exercise the actual metadata subscription without a second project parser. */
     metadata(params = {}) { for (const listener of notifications) listener("metadata/changed", { sessionId: "session", projectId: "project", ...params }); },
     /** Pause a later request after initial startup has completed. */
@@ -213,4 +219,22 @@ test("a context-check reply arriving after a conflict cannot restart its discard
   f.pause.release(); await configurationSettled(f.service);
   assert.equal(f.owners.length, 1); assert.equal(f.owners[0].stopped, true);
   assert.equal(f.tooling.states.analyzer.phase, "suspended-conflict"); assert.equal(f.leased, false);
+});
+
+test("application sources outside metadata selection receive scoped observers without another metadata session", async t => {
+  const f = fixture({ outside: true }); t.after(() => f.service.shutdown()); f.connect(); await settled(f.service);
+  assert.equal(f.watchers.length, 3, "config, uncovered source and its member manifest");
+  assert.deepEqual(f.policyRoots[0], [f.sourceRoot], "only uncovered backend roots need a separate permission scope");
+  const model = f.service.modelRevision;
+  for (const path of [join(f.sourceRoot, 'src', '.eska', 'cache'), join(f.sourceRoot, 'src', '.git', 'index'), join(f.root, 'elsewhere.xml')]) {
+    f.watchers[1].fire({ fsPath: path });
+  }
+  assert.equal(f.service.modelRevision, model);
+  f.watchers[1].fire({ fsPath: join(f.sourceRoot, 'src', 'Catalogs', 'Item.xml') });
+  assert.equal(f.service.modelRevision, model + 1); await configurationSettled(f.service);
+  assert.equal(f.owners.length, 1);
+  f.dto.status = 'stale'; f.dto.ownership.input_fingerprint = 'e'.repeat(64);
+  f.watchers[2].fire(); await configurationSettled(f.service);
+  assert.equal(f.owners.length, 2); assert.equal(f.owners[0].stopped, true);
+  assert.ok(f.watchers.slice(0, 3).every(watcher => watcher.disposed), "old session observers are all released");
 });

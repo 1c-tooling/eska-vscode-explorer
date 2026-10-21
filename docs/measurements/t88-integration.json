@@ -1,0 +1,89 @@
+{
+  "schema_version": 1,
+  "stage": "T88",
+  "date": "2026-10-21",
+  "status": "done",
+  "scope": "Linux/VSCodium. Final integration of application sources, policy scopes, protected bridge, metadata mutations and simultaneous config leases; T89 acceptance is still pending.",
+  "explorer_parent_revision": "2a7e973d3041412c9bae721bd23bb995f0212513",
+  "root_revision": "99c2a01b10f9c7de16687a63b88a6555755dcda0",
+  "platform": "Linux x86_64 GNU",
+  "editor": "VSCodium 1.109.5",
+  "extension_host_node": "22.21.1",
+  "cli_node": "22.23.1",
+  "bun": "1.4.2",
+  "analyzer": {
+    "version": "0.3.2",
+    "sha256": "e5ca2b17270338c797b6d1b6a7ea564e0b9235e8a823d1b99cf1b42a36e2fd0d"
+  },
+  "runtime_sources": {
+    "src/extension.ts": "db1f817d1a989799d339c646b41518ea06fd39b45539e18bb6ef6dd9165e14f6",
+    "src/language/service.ts": "19776ded3d3b72d157cd47ddb28763aa131d5e9610ad7fe22989c7b759a5ba1a",
+    "src/language/edits.ts": "3ebef6816f6d44feaf46a80b589fab932a66eae8f199d16a8dac42e9b458527f",
+    "src/language/context.ts": "2e171258e7899726b45ea6a425ab87d70a768cd39a2b03e5cd698958fe89b3c6",
+    "src/watch.ts": "f2491bbe7dd53435207f06a02a2d01b7b9709e6defb3c7afdf3a1500a4215f7c",
+    "src/support-contexts.ts": "a10085fce9a8fea76291e853a7da8451677500dca996fd684f55acec14e80ea4",
+    "src/support.ts": "3dcff1e2e4b06af47cdacfbd1b2692e666a39a786d3a5548c996cf3d055584ac",
+    "src/protected-language.ts": "2d66c5e312eac85b4d2c098da91bbe43d6ea25088a89305a21a462804af5605a",
+    "package.json": "94ac1b04f2ff6b109a983c737f70212997255fd6d5bda74788fa27cafc4fb1ae",
+    "bun.lock": "8775a019abafe363688123c762ebcb2d515b29807ce43c5dd1ea8bf916b69600",
+    "scripts/bundle.mjs": "beb356ba5b762b4c3f93386ce9d1bcc74925c2566baceac4c45cb88bbff08aaa"
+  },
+  "test_sources": {
+    "test/language-conflict.test.mjs": "2806ec06144674def27905c050b27ce7f4ed1ca804bc33e85778b3d6fa72dc57",
+    "test/language-fixture.mjs": "3d5afe353372705c593ea593209b74f9eaefa732bbd662afefc3247a5a3eea38",
+    "test/run-host.mjs": "64a84adcefd416e3019758cb297568bc56df40011e69c5919ed43a2b0ede3c7c",
+    "test/protected-language-host.cjs": "e2cced8752aa6bcbd517fe9f15ebc39b9e051a7025d1f8fef38b1a6efd432df2",
+    "test/protected-language-guards-host.cjs": "e97da17164434759aebb9baca9e8b4d721f24048d6a613f9c29de1ffc3c61c7a",
+    "test/two-language-windows.mjs": "b36c8e19803714c0a5e97ad2870e2bd1bab9c6b4ab8e0da52078af4d697e0130",
+    "test/language-context-window-host.cjs": "48ddba56f839483323833314ce69e3d2e6a94db6dc0ee7980d4aabc3bc034620",
+    "test/language-member-context-host.cjs": "25875e7d9d0e164dae3065e34c2b53fbe604a61201678a76021e9a40e43984b4",
+    "test/language-metadata-mutation-host.cjs": "2a95bc4af60a490d8a4b0d41086274759c0edd592713cff923f6d61f8714ef7a",
+    "test/language-refresh-host.cjs": "2043281c01ccb488398cb3064c88defb457aa9a97df127f6eca35669cc980432",
+    "test/language-edits-host.cjs": "342f691acd59170c5fbf495ac6a667076bd33202a3fb8578fe5dd3cc6583a1ff"
+  },
+  "checks": {
+    "typecheck": "passed",
+    "compile": "passed",
+    "node": {
+      "passed": 198,
+      "failed": 0,
+      "skipped": 0
+    },
+    "bun": {
+      "passed": 198,
+      "failed": 0,
+      "skipped": 0
+    },
+    "native_installed": "Exact final installed-profile results and archive hash are in the external receipt."
+  },
+  "vsix": {
+    "path": "/home/akalsin/Documents/Projects/eska-playground/t88-integration-vsix-scqld5gq/eska-explorer.vsix",
+    "receipt": "/home/akalsin/Documents/Projects/eska-playground/t88-integration-vsix-scqld5gq/receipt.json",
+    "checksum_note": "Receipt stays outside the archive to avoid a self-referential checksum."
+  },
+  "behavior": {
+    "source_observation": "Reuse the ProjectWatcher source filter for AnalysisContext sources outside the selected metadata session; dispose source/manifest observers with the language session.",
+    "permission_scopes": "Existing SupportContexts cover backend-resolved application roots. Reuse an already opened project scope. Disabled policy creates no extra Metadata index; enabled policy fails closed until the target scope is ready. LSP startup does not await it.",
+    "selected_application": "Direct production controller selection replaces the owned LSP and diagnostics and is remembered on manual restart. Quick Pick keyboard UI is not automated.",
+    "two_windows": "Both hold the same real managed config; incompatible replacement is refused until the other owner releases it. Metadata trees, other client and config bytes are preserved.",
+    "protected_bridge": "Actual own LSP read providers, readonly view and native alias denial; delay a real upstream hover reply, change its source and reject the late result; restart restores providers.",
+    "metadata_mutation": "Actual metadata/propertyEditing and metadata/updateProperty with policy enabled. Dispose only the ESKA ProjectWatcher to isolate the metadata/changed path; Global toggles real BSL definition resolution with preserved LSP/Metadata PIDs and byte-identical XML restoration."
+  },
+  "evidence_scope": {
+    "native": "Real editor, project and published analyzer; own unique small Designer XML fixtures. Runner checks every recorded PID after shutdown.",
+    "guards": "Separate native dirty-buffer and late-provider checks use controlled fake public providers; they do not claim upstream computation.",
+    "server_apply": "Injected payloads through public workspace middleware with real editor transactions, as in the previous edits report.",
+    "diagnostics": "Specific rapid-edit/context scenarios pass; published 0.3.2 omits push diagnostic versions, so this is not a proof of every possible race.",
+    "performance": "No buhmfo timing, memory or overhead claim is made by T88."
+  },
+  "remaining": [
+    "T89 final matrix of minimal CI/IDE installations, component packages and direct/wrapper equivalence.",
+    "Fair buhmfo comparison with frozen baseline: at least five cold and five repeat openings, 30 correct operations, median/p95, RSS/PSS, CPU/disk/cache and installed size."
+  ],
+  "unverified_environments": [
+    "Windows",
+    "macOS",
+    "VS Code",
+    "Remote"
+  ]
+}

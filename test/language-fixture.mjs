@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { addCommonModules } from "./fixture.mjs";
 
@@ -22,4 +22,15 @@ export async function createLanguageSupportSource(fixture) {
   await writeFile(join(fixture.source, "Ext", "ParentConfigurations.bin"),
     `{6,0,1,${owner},0,${owner},"1","Vendor","Fixture",2,1,0,${owner},${owner},0,0,${attribute},${attribute},0,0,0,1,0,0,0,1,0,1,0,1,1,1,1}`);
   return source;
+}
+
+/** Prepare both editable common modules before workspaceContains can activate policy and language observers. */
+export async function createLanguageMutationSource(fixture) {
+  const source = await createLanguageSupportSource(fixture);
+  const original = await readFile(join(fixture.source, "CommonModules", "Обмен.xml"), "utf8");
+  await writeFile(join(fixture.source, "CommonModules", "Защищенный.xml"), original.replace("<Name>Обмен</Name>", "<Name>Защищенный</Name>"));
+  const caller = join(fixture.source, "CommonModules", "Защищенный", "Ext", "Module.bsl");
+  await rm(join(fixture.source, "CommonModules", "Защищенный", "Ext", "Module.bin"));
+  await writeFile(caller, "Процедура Использовать()\n    Значение = Обмен.Проверка(1);\nКонецПроцедуры\n");
+  return { ...source, caller };
 }

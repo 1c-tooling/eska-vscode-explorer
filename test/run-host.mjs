@@ -18,7 +18,8 @@ try {
   const fixture = await createTreeProject(join(root, "project"), process.env.ESKA_HOST_PROJECT_TYPE ?? "configuration");
   // Reload tests need a stable root descriptor before workspaceContains can activate the extension.
   if (process.env.ESKA_HOST_CONFLICT_RELOAD) await (await import("./language-fixture.mjs")).createLanguageSource(fixture);
-  if (process.env.ESKA_HOST_LANGUAGE_EDITS) await (await import("./language-fixture.mjs")).createLanguageSupportSource(fixture);
+  if (process.env.ESKA_HOST_LANGUAGE_MUTATION) await (await import("./language-fixture.mjs")).createLanguageMutationSource(fixture);
+  else if (process.env.ESKA_HOST_LANGUAGE_EDITS) await (await import("./language-fixture.mjs")).createLanguageSupportSource(fixture);
   if (process.env.ESKA_HOST_LANGUAGE_REFRESH) await (await import("./language-fixture.mjs")).createLanguageSource(fixture);
   const bin = join(root, "bin");
   await mkdir(bin);
@@ -74,7 +75,8 @@ try {
   if (process.env.ESKA_PERF_PROJECT) {
     if (!isAbsolute(process.env.ESKA_PERF_PROJECT)) throw new Error("ESKA_PERF_PROJECT must be absolute.");
     workspace = join(root, "performance.code-workspace");
-    await writeFile(workspace, JSON.stringify({ folders: [{ path: process.env.ESKA_PERF_PROJECT }], settings: { "eska.explorer.checkForUpdates": false, "eska.explorer.checkForAnalyzerUpdates": false, "eska.explorer.languageFeatures": process.env.ESKA_TEST_LANGUAGE === "1", "eska.explorer.analyzerExecutable": process.env.ESKA_TEST_ANALYZER_BINARY ?? join(root, "missing-analyzer"), "eska.explorer.backend": backend } }));
+    await writeFile(workspace, JSON.stringify({ folders: [{ path: process.env.ESKA_PERF_PROJECT }], settings: { "eska.explorer.checkForUpdates": false, "eska.explorer.checkForAnalyzerUpdates": false, "eska.explorer.languageFeatures": process.env.ESKA_TEST_LANGUAGE === "1", "eska.explorer.analyzerExecutable": process.env.ESKA_TEST_ANALYZER_BINARY ?? join(root, "missing-analyzer"), "eska.explorer.backend": backend,
+      ...(process.env.ESKA_HOST_SUPPORT_DISABLED ? { "eska.explorer.supportPolicy": false } : {}) } }));
   }
   // A second process reuses the same profile and workspace to test restored editors.
   const suite = resolve(repository, process.argv[2] ?? "test/extension-host.cjs");

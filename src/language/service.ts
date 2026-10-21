@@ -14,11 +14,13 @@ import { cancellableChoice } from "../tooling/choice.js";
 import type { SupportController } from "../support.js";
 import { LanguageEdits } from "./edits.js";
 import { nativePath } from "../source.js";
+import { watchSourceFiles } from "../watch.js";
 
 type Ready = Extract<ConnectionState, { kind: "ready" }>;
 interface Session {
   context: AnalysisContext; configuration: AnalyzerConfiguration; lease: string; state: Ready;
   client?: LanguageClient; owner?: LanguageProcess; edits?: LanguageEdits; configurationWatcher?: vscode.FileSystemWatcher;
+  observers: vscode.Disposable[];
 }
 const CONFLICTING_EXTENSION = "elishevkirill.bsl-analyzer-lsp";
 
@@ -43,7 +45,7 @@ export class LanguageService implements vscode.Disposable {
 
   constructor(private readonly context: vscode.ExtensionContext, private readonly connection: Connection,
     private readonly tooling: ToolingSetup, private readonly output: vscode.LogOutputChannel, private readonly log: DiagnosticLog,
-    private readonly support: SupportController) {
+    private readonly support: SupportController, private readonly protectSources: (roots: readonly string[]) => void) {
     this.subscriptions.push(vscode.workspace.onDidOpenTextDocument(document => {
       if (document.languageId === "bsl" && !this.wanted) { this.wanted = true; void this.restart(false); }
     }));
@@ -264,7 +266,7 @@ export class LanguageService implements vscode.Disposable {
     // Acquire is a side-effect boundary: receive its identity even after cancellation, then release it in cleanup.
     const lease = analyzerConfiguration(await this.connection.analyzerRequest("analyzer/acquire", parameters()));
     if (!lease.lease) throw new ExplorerError("protocolInvalid");
-    const session: Session = { context, configuration: lease, lease: lease.lease, state }; this.session = session;
+    const session: Session = { context, configuration: lease, lease: lease.lease, state, observers: [] }; this.session = session;
     let started = false;
     try {
       if (!this.current(revision, signal)) return;
@@ -298,6 +300,18 @@ export class LanguageService implements vscode.Disposable {
         ++this.modelRevision; this.holdConfiguration(); this.scheduleConfigurationCheck();
       };
       watcher.onDidCreate(changed); watcher.onDidChange(changed); watcher.onDidDelete(changed);
+      for (const source of context.sources) {
+        if (state.session.projects.some(project => nativePath(project.sourcePath) === source.source)) continue;
+        session.observers.push(watchSourceFiles(source.source, path => {
+          if (this.session === session && this.current(revision, signal)) this.sourceChanged(path);
+        }));
+        const manifest = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(vscode.Uri.file(source.root), "eska.toml"));
+        session.observers.push(manifest);
+        manifest.onDidCreate(changed); manifest.onDidChange(changed); manifest.onDidDelete(changed);
+      }
+      this.protectSources(context.sources.filter(source => !state.session.projects.some(project => nativePath(project.rootPath) === source.root))
+        .map(source => source.root));
+      if (!this.current(revision, signal)) return;
       await client.start();
       if (!this.current(revision, signal)) return;
       if (client.initializeResult?.serverInfo?.name !== "bsl-analyzer" || client.initializeResult.serverInfo.version !== ANALYZER_VERSION) throw new ToolFailure("incompatible", "lsp-server-info");
@@ -352,6 +366,7 @@ export class LanguageService implements vscode.Disposable {
     const session = this.session;
     if (!session) return;
     session.configurationWatcher?.dispose();
+    for (const observer of session.observers) observer.dispose();
     await session.edits?.shutdown();
     try { await session.client?.stop(4000); } catch { this.log("language_shutdown_failed", "warn"); }
     await session.owner?.stop();
