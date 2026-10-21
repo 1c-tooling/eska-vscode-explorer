@@ -226,6 +226,23 @@ test("background VFS snapshots are serialized while interactive reads bypass the
   assert.deepEqual(order, ["symbols", "hover", "completion", "definition", "codeAction", "hints", "automatic"]);
 });
 
+test("queued background snapshots wait for all running interactive replies, including a failed request", async t => {
+  const f = fixture(); t.after(() => f.service.shutdown()); f.connect(); await settled(f.service);
+  const middleware = f.clients[0].clientOptions.middleware, symbolsHeld = barrier(), symbolsEntered = barrier(), hoverHeld = barrier(), definitionHeld = barrier();
+  const params = { textDocument: { uri: "file:///same.bsl" } }, order = [];
+  const symbols = middleware.sendRequest("textDocument/documentSymbol", params, undefined, () => { symbolsEntered.release(); return symbolsHeld.promise; });
+  await symbolsEntered.promise;
+  const hover = middleware.sendRequest("textDocument/hover", params, undefined, () => hoverHeld.promise);
+  const definition = middleware.sendRequest("textDocument/definition", params, undefined, async () => { await definitionHeld.promise; throw new Error("request failed"); });
+  const rejected = assert.rejects(definition);
+  const hints = middleware.sendRequest("textDocument/inlayHint", params, undefined, async () => { order.push("hints"); return ["hint"]; });
+  symbolsHeld.release(["symbol"]); await symbols;
+  assert.deepEqual(order, []);
+  hoverHeld.release("hover"); assert.equal(await hover, "hover"); assert.deepEqual(order, []);
+  definitionHeld.release(); await rejected;
+  assert.deepEqual(await hints, ["hint"]); assert.deepEqual(order, ["hints"]);
+});
+
 test("a buffer edit cancels queued background work before forwarding and does not poison later requests", async t => {
   const f = fixture(); t.after(() => f.service.shutdown()); f.connect(); await settled(f.service);
   const middleware = f.clients[0].clientOptions.middleware, held = barrier(), entered = barrier();

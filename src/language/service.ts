@@ -347,6 +347,8 @@ export class LanguageService implements vscode.Disposable {
   /** Discard reads from replaced servers or changed/closed buffers; writing routes have their own complete-edit guard. */
   private readingMiddleware(revision: number, signal: AbortSignal): Middleware {
     let backgroundRead = Promise.resolve();
+    let interactiveReads = 0, releaseInteractive = () => {};
+    let interactiveDone = Promise.resolve();
     const read = async <T>(document: vscode.TextDocument, token: vscode.CancellationToken, action: () => vscode.ProviderResult<T>): Promise<T | undefined> => {
       const version = document.version, model = this.modelRevision;
       if (!this.accepts(revision, signal) || token.isCancellationRequested) return undefined;
@@ -363,6 +365,10 @@ export class LanguageService implements vscode.Disposable {
         const cancellation = new vscode.CancellationTokenSource();
         const subscription = token?.onCancellationRequested(() => cancellation.cancel());
         this.reading.add(cancellation);
+        const method = typeof type === "string" ? type : type.method;
+        const background = BACKGROUND_READS.has(method) || method === "textDocument/codeAction"
+          && isRecord(params) && isRecord(params.context) && params.context.triggerKind === 2;
+        if (!background && ++interactiveReads === 1) interactiveDone = new Promise(resolve => { releaseInteractive = resolve; });
         try {
           /** Queued work must recheck its snapshot before sending anything to the server. */
           const send = () => {
@@ -370,18 +376,21 @@ export class LanguageService implements vscode.Disposable {
               || model !== this.modelRevision || document?.isClosed || document?.version !== version) throw new vscode.CancellationError();
             return next(type, params, cancellation.token);
           };
-          const method = typeof type === "string" ? type : type.method;
-          const background = BACKGROUND_READS.has(method) || method === "textDocument/codeAction"
-            && isRecord(params) && isRecord(params.context) && params.context.triggerKind === 2;
+          /** An already running interactive read takes priority over the next background snapshot. */
+          const sendBackground = async () => {
+            while (interactiveReads) await interactiveDone;
+            return send();
+          };
           // Each upstream read freezes the workspace paths. Bound background concurrency
           // without a timer, disabling providers, or delaying interactive requests.
-          const reply = background ? backgroundRead.then(send) : send();
+          const reply = background ? backgroundRead.then(sendBackground) : send();
           if (background) backgroundRead = reply.then(() => undefined, () => undefined);
           const value = await reply;
           if (!this.accepts(revision, signal) || model !== this.modelRevision || token?.isCancellationRequested
             || document?.isClosed || document?.version !== version) throw new vscode.CancellationError();
           return value;
         } finally {
+          if (!background && --interactiveReads === 0) releaseInteractive();
           this.reading.delete(cancellation); subscription?.dispose(); cancellation.dispose();
         }
       },
