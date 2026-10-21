@@ -76,6 +76,12 @@ try {
   assert.ok(locations.length);
   assert.equal(fileURLToPath(locations[0].uri ?? locations[0].targetUri), file);
   assert.equal((locations[0].range ?? locations[0].targetSelectionRange).start.line, 1);
+  const rename = await request("textDocument/rename", { textDocument: { uri }, position: { line: 5, character: 15 }, newName: "НоваяПроверка" });
+  assert.ok(rename.documentChanges?.length, "published server returns documentChanges when the client supports them");
+  assert.ok(rename.documentChanges.every(change => change.textDocument.uri === uri && change.textDocument.version === 1));
+  assert.ok(rename.documentChanges.flatMap(change => change.edits).length >= 2, "rename includes declaration and use");
+  const formatting = await request("textDocument/formatting", { textDocument: { uri }, options: { tabSize: 4, insertSpaces: true } });
+  assert.ok(formatting === null || Array.isArray(formatting));
   await protocol.sendNotification("textDocument/didChange", { textDocument: { uri, version: 2 }, contentChanges: [{ text: text + "Функция Сломано(\n" }] });
   const syntaxLine = text.split("\n").length - 1;
   const syntaxError = value => value.code === "ParseError" && value.range.start.line >= syntaxLine;
@@ -83,7 +89,7 @@ try {
   const broken = diagnostics.get(uri);
   await protocol.sendNotification("textDocument/didChange", { textDocument: { uri, version: 3 }, contentChanges: [{ text }] });
   await until(() => diagnostics.has(uri) && !(diagnostics.get(uri).diagnostics ?? []).some(syntaxError), "repaired diagnostics");
-  const report = { passed: true, root, context, status, prepared, lease, hello, symbols, hover, definition, broken_diagnostics: broken,
+  const report = { passed: true, root, context, status, prepared, lease, hello, symbols, hover, definition, edit_contract: { rename, formatting }, broken_diagnostics: broken,
     repaired_diagnostics: diagnostics.get(uri), source_unchanged: await readFile(file, "utf8") === text, pid: owner.child.pid };
   await request("shutdown", null); await protocol.sendNotification("exit");
   await owner.stop();

@@ -99,7 +99,7 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
       () => this.renderProjectStatus(), async kind => { if (kind === "project") await this.disconnect(); else await this.language.stop(); },
       async kind => { if (kind === "project") await this.connect(false); else await this.language.restart(false); });
     this.disposables.push(this.tooling);
-    this.language = new LanguageService(context, this.connection, this.tooling, this.output, (text, level) => this.output[level ?? "info"](text));
+    this.language = new LanguageService(context, this.connection, this.tooling, this.output, (text, level) => this.output[level ?? "info"](text), this.support);
     this.disposables.push(this.language);
     this.setup = new BackendSetup(context, (text, level) => { if (!this.disposed) this.output[level ?? "info"](text); },
       () => this.connection.disconnect(), () => this.connect(false));

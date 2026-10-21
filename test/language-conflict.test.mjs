@@ -50,7 +50,8 @@ function fixture({ available = false, enabled = true, hold } = {}) {
   const adapter = { exports: {} }, require = createRequire(new URL("../out/language/service.js", import.meta.url));
   runInNewContext(`(function(require,module,exports){${readFileSync(new URL("../out/language/service.js", import.meta.url), "utf8")}\n})`, { AbortController, AbortSignal, process })(
     name => name === "vscode" ? vscode : name === "vscode-languageclient/node" ? { LanguageClient: FakeClient, CloseAction: {}, ErrorAction: {} }
-      : name === "./process.js" ? { LanguageProcess: FakeOwner } : require(name), adapter, adapter.exports);
+      : name === "./process.js" ? { LanguageProcess: FakeOwner }
+        : name === "./edits.js" ? { LanguageEdits: class { middleware() { return {}; } async shutdown() {} } } : require(name), adapter, adapter.exports);
   const context = { workspaceState: { get() {}, async update() { await checkpoint("selection.update"); } } };
   const service = new adapter.exports.LanguageService(context, connection, tooling, {}, () => {});
   return { service, tooling, calls, warnings, commands, owners, clients, pause, waiting, get reached() { return reached; }, get leased() { return leased; },

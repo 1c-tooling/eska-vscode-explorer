@@ -11,9 +11,11 @@ import { analysisContext, analyzerConfiguration, analyzerFailure, type AnalysisC
 import { LanguageProcess } from "./process.js";
 import { readonlyPattern } from "../support-settings.js";
 import { cancellableChoice } from "../tooling/choice.js";
+import type { SupportController } from "../support.js";
+import { LanguageEdits } from "./edits.js";
 
 type Ready = Extract<ConnectionState, { kind: "ready" }>;
-interface Session { context: AnalysisContext; lease: string; state: Ready; client?: LanguageClient; owner?: LanguageProcess }
+interface Session { context: AnalysisContext; lease: string; state: Ready; client?: LanguageClient; owner?: LanguageProcess; edits?: LanguageEdits }
 const CONFLICTING_EXTENSION = "elishevkirill.bsl-analyzer-lsp";
 
 /** One language session owns its config lease, client, child and generation independently of TreeView visibility. */
@@ -30,7 +32,8 @@ export class LanguageService implements vscode.Disposable {
   private readonly subscriptions: vscode.Disposable[] = [];
 
   constructor(private readonly context: vscode.ExtensionContext, private readonly connection: Connection,
-    private readonly tooling: ToolingSetup, private readonly output: vscode.LogOutputChannel, private readonly log: DiagnosticLog) {
+    private readonly tooling: ToolingSetup, private readonly output: vscode.LogOutputChannel, private readonly log: DiagnosticLog,
+    private readonly support: SupportController) {
     this.subscriptions.push(vscode.workspace.onDidOpenTextDocument(document => {
       if (document.languageId === "bsl" && !this.wanted) { this.wanted = true; void this.restart(false); }
     }));
@@ -152,6 +155,7 @@ export class LanguageService implements vscode.Disposable {
       if (prepared.status !== "current" || lease.status !== "current" || prepared.path !== join(context.root, "bsl-analyzer.toml")
         || prepared.path !== lease.path || prepared.context !== context.name || lease.context !== context.name
         || prepared.fingerprint !== lease.fingerprint || prepared.body !== lease.body || prepared.token !== lease.token) throw new ExplorerError("obsolete");
+      const middleware = this.readingMiddleware(revision, signal);
       const client = new LanguageClient("eska-bsl", "BSL Analyzer (ESKA Explorer)", async () => {
         if (!this.current(revision, signal)) throw new ExplorerError("obsolete");
         session.owner = new LanguageProcess(info.path, context.root, this.log, () => {
@@ -165,11 +169,11 @@ export class LanguageService implements vscode.Disposable {
         diagnosticCollectionName: "eska-bsl", outputChannel: this.output,
         initializationFailedHandler: () => false, connectionOptions: { maxRestartCount: 0 },
         errorHandler: { error: () => ({ action: ErrorAction.Shutdown, handled: true }), closed: () => ({ action: CloseAction.DoNotRestart, handled: true }) },
-        middleware: this.readingMiddleware(revision, signal),
+        middleware,
       });
       session.client = client;
-      // Until the full source-permission guard is attached, server-initiated WorkspaceEdit fails closed.
-      client.protocol2CodeConverter.asWorkspaceEdit = async () => { throw new ExplorerError("sourceChanged"); };
+      session.edits = new LanguageEdits(client, context, this.support, () => this.current(revision, signal), this.log);
+      Object.assign(middleware, session.edits.middleware());
       await client.start();
       if (!this.current(revision, signal)) return;
       if (client.initializeResult?.serverInfo?.name !== "bsl-analyzer" || client.initializeResult.serverInfo.version !== ANALYZER_VERSION) throw new ToolFailure("incompatible", "lsp-server-info");
@@ -182,7 +186,7 @@ export class LanguageService implements vscode.Disposable {
     } finally { if (!started) await this.cleanup(); }
   }
 
-  /** Discard reads from replaced servers or changed/closed buffers; write providers stay closed until policy integration. */
+  /** Discard reads from replaced servers or changed/closed buffers; writing routes have their own complete-edit guard. */
   private readingMiddleware(revision: number, signal: AbortSignal): Middleware {
     const read = async <T>(document: vscode.TextDocument, token: vscode.CancellationToken, action: () => vscode.ProviderResult<T>): Promise<T | undefined> => {
       const version = document.version;
@@ -200,8 +204,6 @@ export class LanguageService implements vscode.Disposable {
       provideSignatureHelp: (doc, pos, context, token, next) => read(doc, token, () => next(doc, pos, context, token)),
       provideDocumentSemanticTokens: (doc, token, next) => read(doc, token, () => next(doc, token)),
       handleDiagnostics: (uri, values, next) => { if (this.current(revision, signal)) next(uri, values); },
-      provideDocumentFormattingEdits: () => undefined, provideDocumentRangeFormattingEdits: () => undefined,
-      provideOnTypeFormattingEdits: () => undefined, provideRenameEdits: () => undefined, provideCodeActions: () => [],
     };
   }
 
@@ -209,6 +211,7 @@ export class LanguageService implements vscode.Disposable {
   private async cleanup(): Promise<void> {
     const session = this.session;
     if (!session) return;
+    await session.edits?.shutdown();
     try { await session.client?.stop(4000); } catch { this.log("language_shutdown_failed", "warn"); }
     await session.owner?.stop();
     await session.client?.dispose(1000).catch(() => this.log("language_client_dispose_failed", "warn"));

@@ -1,0 +1,87 @@
+{
+  "schema_version": 1,
+  "stage": "T88",
+  "date": "2026-10-21",
+  "status": "in-progress",
+  "completed_part": "Guarded text-only language edits; full context freshness is not accepted.",
+  "explorer_parent_revision": "065f06be8f7561f5747b714399e3397528affcc5",
+  "root_revision": "25fd141b730d4f0b0f0699c703a7d27404a33cfe",
+  "platform": "Linux x86_64 GNU",
+  "editor": "VSCodium 1.109.5",
+  "extension_host_node": "22.21.1",
+  "cli_node": "22.23.1",
+  "bun": "1.4.2",
+  "analyzer": {
+    "version": "0.3.2",
+    "sha256": "e5ca2b17270338c797b6d1b6a7ea564e0b9235e8a823d1b99cf1b42a36e2fd0d"
+  },
+  "runtime_sources": {
+    "src/extension.ts": "5840cd151fbdaed842f500c476c29e39f72d7872d915eaa8d042129df7e1e1f3",
+    "src/language/service.ts": "2603aaa26e14a55595caa55e486b343477ed8da7b05bbe817edf71c8859e0f8e",
+    "src/language/edits.ts": "7531ec85b4125f6630ff42cd23036d3e0033ea47272f811005f9f22c33312f4b",
+    "src/support.ts": "3dcff1e2e4b06af47cdacfbd1b2692e666a39a786d3a5548c996cf3d055584ac",
+    "src/messages.ts": "ad50465c2270fc71ec2fc3cbb0cb42fa65837be3dfe5db5089f8570aa104d506",
+    "package.json": "94ac1b04f2ff6b109a983c737f70212997255fd6d5bda74788fa27cafc4fb1ae",
+    "bun.lock": "8775a019abafe363688123c762ebcb2d515b29807ce43c5dd1ea8bf916b69600",
+    "scripts/bundle.mjs": "beb356ba5b762b4c3f93386ce9d1bcc74925c2566baceac4c45cb88bbff08aaa"
+  },
+  "test_sources": {
+    "test/language-edits.test.mjs": "e76a710ab81ddb2210da89be1a661e15deae8bdaf5c16e5efad4d34735c6c359",
+    "test/language-edits-host.cjs": "342f691acd59170c5fbf495ac6a667076bd33202a3fb8578fe5dd3cc6583a1ff",
+    "test/language-fixture.mjs": "ccec4cf9db762df14c5d13e5339f0efaa5d0177755139486af416e64496a07b0",
+    "test/native-language-probe.mjs": "da9f3874795cfa48ec7fcb9d0c490d295cf88670ea8bfa9b6088f0df5c49f250",
+    "test/run-host.mjs": "70560954956dbc17ff99c35c494f362f92c8405b39c1000413f58f6b420d6b87"
+  },
+  "checks": {
+    "typecheck": "passed",
+    "compile": "passed",
+    "node": {
+      "passed": 188,
+      "failed": 0,
+      "skipped": 0
+    },
+    "bun": {
+      "passed": 188,
+      "failed": 0,
+      "skipped": 0
+    },
+    "raw_lsp_probe": {
+      "root": "/home/akalsin/Documents/Projects/eska-playground/t86-lsp-probe-InlOiQ",
+      "report": "/home/akalsin/Documents/Projects/eska-playground/t86-lsp-probe-InlOiQ/report.json",
+      "passed": true
+    },
+    "native_installed": "Final installed-host results are in the external VSIX receipt."
+  },
+  "vsix": {
+    "path": "/home/akalsin/Documents/Projects/eska-playground/t88-edits-vsix-yw67hl5l/eska-explorer.vsix",
+    "receipt": "/home/akalsin/Documents/Projects/eska-playground/t88-edits-vsix-yw67hl5l/receipt.json",
+    "checksum_note": "Final archive checksum and installed-host results are stored beside the archive to avoid a self-referential hash."
+  },
+  "evidence_scope": {
+    "native_providers": "Real published 0.3.2 rename, formatting and quick fix with real project supportFiles policy and native editor transactions.",
+    "policy_fixture": "Synthetic ParentConfigurations.bin with editable BSL owner and locked attribute in mixed XML; not a live 1C supplier-support acceptance.",
+    "server_apply": "Injected standard payloads through public middleware.workspace.handleApplyEdit; not emitted by the upstream server. Real native editor applies accepted text edit.",
+    "unit_races": "Production guard, mocked editor/protocol/policy, real native filesystem/stat/realpath/symlinks. Versions, disk snapshots, policy/session changes and unopened unversioned targets.",
+    "disk_integrity": "Byte comparisons preserve XML BOM and CRLF; editor document text deliberately omits the BOM."
+  },
+  "limits": [
+    "Only canonical regular file: targets inside the selected context. Symlink aliases and protected/query/fragment URI spellings are rejected.",
+    "Text-only transaction. Create/delete/rename resource operations are unadvertised and rejected as a whole.",
+    "Unknown server commands are not executed.",
+    "Unversioned quick fixes require targets already open at request time. Rename can discover unopened targets and recompute once for explicit versions.",
+    "Unsolicited server edits require explicit versions for already open targets.",
+    "User read-only include/exclude rules are preserved. Disabling ESKA support policy is respected.",
+    "Shutdown drains dispatched native text transactions for up to four seconds; public editor API cannot revoke a transaction already handed off."
+  ],
+  "remaining": [
+    "XML/BSL refresh and branch/context changes without duplicate indexing; invalidate old results.",
+    "Own LSP with protected language bridge; rapid diagnostic updates; two windows and config leases.",
+    "T89 final minimal-installation and installed-package matrix, fair buhmfo baseline comparison: at least five cold/repeat launches and 30 operations, median/p95, RSS/PSS, CPU/disk/cache and installed size."
+  ],
+  "unverified_environments": [
+    "Windows",
+    "macOS",
+    "VS Code",
+    "Remote"
+  ]
+}

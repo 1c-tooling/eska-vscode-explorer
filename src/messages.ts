@@ -1,6 +1,10 @@
 import type { FailureCode } from "./protocol.js";
 
 const en = {
+  languageEditReadonly: "The language edit was rejected: a target file is read-only or its project permission could not be confirmed.",
+  languageEditResource: "The language edit was rejected: file creation, deletion and renaming require project operations.",
+  languageEditInvalid: "The language edit was rejected because its ranges or target files are invalid. Request the operation again.",
+  languageEditCommand: "This server action cannot be applied with verified source permissions.",
   "toolPhase_suspended-conflict": "suspended: extension conflict",
   languageConflictWarning: "Explorer paused its BSL client because {0} is available in this workspace. Manage that extension or continue with its external client.",
   languageConflictDetail: "ESKA Explorer owns this paused client. Conflicting extension: {0}. Disable or uninstall it to use Explorer language features; reload extensions if the editor requests it.",
@@ -185,6 +189,10 @@ const en = {
 } as const;
 
 const ru: Record<keyof typeof en, string> = {
+  languageEditReadonly: "Языковая правка отклонена: целевой файл защищён или разрешение проекта не удалось подтвердить.",
+  languageEditResource: "Языковая правка отклонена: создание, удаление и переименование файлов выполняются средствами проекта.",
+  languageEditInvalid: "Языковая правка отклонена из-за неверных диапазонов или целевых файлов. Запросите операцию заново.",
+  languageEditCommand: "Действие сервера нельзя применить с подтверждёнными разрешениями исходников.",
   "toolPhase_suspended-conflict": "приостановлен: конфликт расширений",
   languageConflictWarning: "BSL-клиент Explorer приостановлен: в этом workspace доступно {0}. Откройте управление расширением или продолжите с его внешним клиентом.",
   languageConflictDetail: "Приостановленный клиент принадлежит ESKA Explorer. Конфликтует расширение: {0}. Для языка Explorer отключите или удалите его; перезапустите расширения, если редактор этого требует.",
