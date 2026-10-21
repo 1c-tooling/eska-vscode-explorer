@@ -52,7 +52,8 @@ export class LanguageService implements vscode.Disposable {
     this.subscriptions.push(vscode.workspace.onDidChangeTextDocument(event => {
       if (event.contentChanges.length && event.document.languageId === "bsl" && event.document.uri.scheme === "file") {
         this.sourceChanged(event.document.uri.fsPath);
-        this.session?.client?.diagnostics?.delete(event.document.uri);
+        // Upstream replaces buffer diagnostics after didChange. Clearing them here triggers
+        // extra editor requests before that replacement and stalls navigation on large contexts.
       }
     }));
     this.subscriptions.push(connection.onNotification((method, params) => {
@@ -260,8 +261,11 @@ export class LanguageService implements vscode.Disposable {
       if (!choice || !this.current(revision, signal)) { if (this.current(revision, signal)) this.tooling.analyzerState("suspended", this.text("languageStopped")); return; }
       switchContext = true;
     }
-    const prepared = analyzerConfiguration(await this.connection.analyzerRequest("analyzer/configPrepare", { ...parameters(),
-      analyzer: { value: info.path, encoding: "utf-8" }, timeoutSeconds: 60, switchContext }, signal));
+    // A current owned config was validated before publication. Acquire rechecks its inputs
+    // under the lease; only changed/missing configurations need another upstream check-config.
+    const prepared = status.status === "current" ? status
+      : analyzerConfiguration(await this.connection.analyzerRequest("analyzer/configPrepare", { ...parameters(),
+        analyzer: { value: info.path, encoding: "utf-8" }, timeoutSeconds: 60, switchContext }, signal));
     if (!this.current(revision, signal)) return;
     // Acquire is a side-effect boundary: receive its identity even after cancellation, then release it in cleanup.
     const lease = analyzerConfiguration(await this.connection.analyzerRequest("analyzer/acquire", parameters()));

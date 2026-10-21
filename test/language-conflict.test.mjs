@@ -11,26 +11,26 @@ const ID = "elishevkirill.bsl-analyzer-lsp";
 function barrier() { let release; const promise = new Promise(done => { release = done; }); return { promise, release }; }
 
 /** Only protocol/UI/process boundaries are mocked; production LanguageService owns all conflict and lease decisions. */
-function fixture({ available = false, enabled = true, hold, outside = false } = {}) {
+function fixture({ available = false, enabled = true, hold, outside = false, status, changedLease = false } = {}) {
   const root = resolve(process.env.ESKA_TEST_ROOT ?? "../eska-playground", "conflict-dto"), wire = value => ({ value, encoding: "utf-8" });
   const calls = [], warnings = [], commands = [], owners = [], clients = [], watchers = [], listeners = new Set(), documents = new Set(), notifications = new Set();
-  let conflict = available, feature = enabled, reached, held = false, leased = false;
+  let conflict = available, feature = enabled, reached, held = false, leased = false, changed;
   const waiting = barrier(), pause = barrier();
   const checkpoint = async name => { calls.push(name); if (hold === name && !held) { held = true; reached = name; waiting.release(); await pause.promise; } };
   const ready = { kind: "ready", analyzerConfiguration: true, target: { path: root, backend: "project" },
     session: { sessionId: "session", projects: [{ projectId: "project", rootPath: wire(root), sourcePath: wire(join(root, "src")) }] } };
   const sourceRoot = outside ? join(root, "other") : root;
-  const dto = { schema_version: 1, kind: "analyzer-configuration", status: "current", path: wire(join(root, "bsl-analyzer.toml")),
+  const dto = { schema_version: 1, kind: "analyzer-configuration", status: status ?? (hold === "analyzer/configPrepare" ? "missing" : "current"), path: wire(join(root, "bsl-analyzer.toml")),
     preview_token: "a".repeat(64), ownership: { schema_version: 1, generator_version: 1, analyzer_version: "0.3.2", context: outside ? "two" : null,
       input_fingerprint: "b".repeat(64), body_sha256: "c".repeat(64) } };
   const connection = { state: ready, onNotification(listener) { notifications.add(listener); return { dispose() { notifications.delete(listener); } }; }, async analyzerRequest(method, _params, signal) {
     if (method === "analyzer/acquire") { assert.equal(signal, undefined); leased = true; }
     if (method === "analyzer/release") leased = false;
     await checkpoint(method);
-    if (method === "analyzer/configPrepare" && dto.status === "stale") dto.status = "current";
+    if (method === "analyzer/configPrepare") dto.status = "current";
     if (method === "analyzer/context") return { schema_version: 1, kind: "project-context", status: "ready", context: {
       root: wire(root), name: outside ? "two" : null, limited_context: false, sources: [{ root: wire(sourceRoot), source: wire(join(sourceRoot, "src")), descriptor: wire("Configuration.xml"), member: outside ? "other" : null, role: "configuration", project_type: "configuration" }] } };
-    return method === "analyzer/acquire" ? { ...dto, leaseId: "d".repeat(64) } : dto;
+    return method === "analyzer/acquire" ? { ...dto, leaseId: "d".repeat(64), ...(changedLease ? { preview_token: "e".repeat(64) } : {}) } : dto;
   } };
   const tooling = { states: { analyzer: { phase: "missing" } }, analyzerState(phase, detail) { this.states.analyzer.phase = phase; this.states.analyzer.detail = detail; },
     async ensureAnalyzer(_signal, offer) { await checkpoint(offer ? "ensureAnalyzer" : "inspect-only"); return { path: join(root, "analyzer"), version: "0.3.2" }; } };
@@ -38,7 +38,7 @@ function fixture({ available = false, enabled = true, hold, outside = false } = 
     env: { language: "en-US" }, CancellationError: class extends Error {}, RelativePattern: class {},
     workspace: { isTrusted: true, textDocuments: [{ languageId: "bsl", uri: { toString: () => "file:///same.bsl" }, version: 1, isClosed: false }], getConfiguration() { return { get() { return feature; } }; },
       onDidOpenTextDocument(callback) { documents.add(callback); return { dispose() { documents.delete(callback); } }; },
-      onDidChangeTextDocument() { return { dispose() {} }; },
+      onDidChangeTextDocument(callback) { changed = callback; return { dispose() { changed = undefined; } }; },
       createFileSystemWatcher() { const callbacks = new Set(), watcher = {
         onDidCreate(callback) { callbacks.add(callback); }, onDidChange(callback) { callbacks.add(callback); }, onDidDelete(callback) { callbacks.add(callback); },
         fire(uri) { for (const callback of callbacks) callback(uri); }, dispose() { callbacks.clear(); this.disposed = true; } };
@@ -79,6 +79,13 @@ function fixture({ available = false, enabled = true, hold, outside = false } = 
     holdAt(name) { hold = name; held = false; },
     /** Model the editor changing an open buffer while a config check is pending. */
     advanceDocument() { vscode.workspace.textDocuments[0].version++; },
+    /** Deliver a real content change, keeping the mock document inside the selected context. */
+    changeDocument() {
+      const document = vscode.workspace.textDocuments[0];
+      document.uri = { scheme: "file", fsPath: join(root, "src", "Module.bsl"), toString: () => "file:///same.bsl" };
+      document.version++;
+      changed({ document, contentChanges: [{ text: "edited" }] });
+    },
     connect() { service.connectionChanged(ready); }, setAvailable(value, notify = true) { conflict = value; if (notify) for (const listener of listeners) listener(); },
     setEnabled(value) { feature = value; }, listeners, documents };
 }
@@ -143,7 +150,41 @@ test("an XML burst rechecks one context without a new index and cancels replies 
   await configurationSettled(f.service);
   assert.equal(f.owners.length, 1); assert.equal(f.owners[0].stopped, undefined);
   assert.equal(f.calls.filter(value => value === "analyzer/configStatus").length, 2);
-  assert.equal(f.calls.filter(value => value === "analyzer/configPrepare").length, 1);
+  assert.equal(f.calls.filter(value => value === "analyzer/configPrepare").length, 0);
+});
+
+for (const status of ["current", "missing", "stale"]) {
+  test(`startup preserves validation and leases for a ${status} configuration`, async t => {
+    const f = fixture({ status }); t.after(() => f.service.shutdown()); f.connect(); await settled(f.service);
+    assert.equal(f.tooling.states.analyzer.phase, "ready");
+    assert.equal(f.calls.filter(value => value === "ensureAnalyzer").length, 1, "the binary is always checked");
+    assert.equal(f.calls.filter(value => value === "analyzer/configPrepare").length, status === "current" ? 0 : 1);
+    assert.equal(f.calls.filter(value => value === "analyzer/acquire").length, 1);
+    assert.equal(f.leased, true);
+  });
+}
+
+test("a current config changed before lease acquisition cannot launch an unchecked server", async t => {
+  const f = fixture({ changedLease: true }); t.after(() => f.service.shutdown()); f.connect(); await settled(f.service);
+  assert.equal(f.tooling.states.analyzer.phase, "error");
+  assert.equal(f.owners.length, 0);
+  assert.equal(f.leased, false);
+  assert.equal(f.calls.filter(value => value === "analyzer/release").length, 1);
+});
+
+test("buffer edits reject old reads without publishing an artificial empty diagnostic collection", async t => {
+  const f = fixture(); t.after(() => f.service.shutdown()); f.connect(); await settled(f.service);
+  const client = f.clients[0], held = barrier(), uri = { toString: () => "file:///same.bsl" };
+  const middleware = client.clientOptions.middleware;
+  middleware.handleDiagnostics(uri, ["original"], (uri, values) => client.diagnostics.set(uri, values));
+  const reply = middleware.sendRequest("textDocument/definition", { textDocument: { uri: uri.toString() } }, undefined, () => held.promise);
+  f.changeDocument(); held.release("old definition");
+  await assert.rejects(reply);
+  assert.deepEqual(client.diagnostics.get(uri), ["original"]);
+  middleware.handleDiagnostics(uri, ["fresh"], (uri, values) => client.diagnostics.set(uri, values));
+  assert.deepEqual(client.diagnostics.get(uri), ["fresh"]);
+  f.service.manifestChanged();
+  assert.equal(client.diagnostics.get(uri), undefined, "changing context must still clear previous diagnostics");
 });
 
 test("root-descriptor changes replace the old client only after releasing its lease and drop its diagnostics", async t => {
@@ -209,7 +250,7 @@ test("a user-modified managed config stops the owned LSP without preparing or ov
   const f = fixture(); t.after(() => f.service.shutdown()); f.connect(); await settled(f.service);
   f.dto.status = "managed_conflict"; f.watchers[0].fire(); await configurationSettled(f.service);
   assert.equal(f.owners.length, 1); assert.equal(f.owners[0].stopped, true); assert.equal(f.leased, false);
-  assert.equal(f.tooling.states.analyzer.phase, "error"); assert.equal(f.calls.filter(value => value === "analyzer/configPrepare").length, 1);
+  assert.equal(f.tooling.states.analyzer.phase, "error"); assert.equal(f.calls.filter(value => value === "analyzer/configPrepare").length, 0);
 });
 
 test("a context-check reply arriving after a conflict cannot restart its discarded client", async t => {
