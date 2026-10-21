@@ -409,7 +409,7 @@ export class LanguageService implements vscode.Disposable {
       provideDocumentSymbols: (doc, token, next) => read(doc, token, () => next(doc, token), false),
       provideCompletionItem: (doc, pos, context, token, next) => read(doc, token, () => next(doc, pos, context, token)),
       provideSignatureHelp: (doc, pos, context, token, next) => read(doc, token, () => next(doc, pos, context, token)),
-      provideDocumentSemanticTokens: (doc, token, next) => read(doc, token, () => next(doc, token)),
+      provideDocumentSemanticTokens: (doc, token, next) => read(doc, token, () => next(doc, token), false),
       handleDiagnostics: (uri, values, next) => {
         if (!this.current(revision, signal)) return;
         if (this.configurationPending) {

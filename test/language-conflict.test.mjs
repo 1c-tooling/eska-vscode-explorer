@@ -261,6 +261,8 @@ test("interactive provider preparation and conversion retain priority over backg
   conversion.release(); assert.equal(await hover, "hover"); assert.deepEqual(await hints, ["hint"]);
   assert.deepEqual(await middleware.provideDocumentSymbols(document, token,
     () => middleware.sendRequest("textDocument/documentSymbol", params, undefined, async () => ["symbol"])), ["symbol"]);
+  assert.deepEqual(await middleware.provideDocumentSemanticTokens(document, token,
+    () => middleware.sendRequest("textDocument/semanticTokens/full", params, undefined, async () => [0, 0, 5, 0, 0])), [0, 0, 5, 0, 0]);
 });
 
 test("a buffer edit cancels queued background work before forwarding and does not poison later requests", async t => {

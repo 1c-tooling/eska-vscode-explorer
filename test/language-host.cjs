@@ -7,7 +7,14 @@ const vscode = require("vscode");
 async function until(action, label) {
   const deadline = Date.now() + 30000;
   while (Date.now() < deadline) {
-    try { const value = await action(); if (value) return value; } catch { /* A starting LSP can return ContentModified. */ }
+    let timer;
+    try {
+      const value = await Promise.race([action(), new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error("provider deadline")), Math.max(1, deadline - Date.now()));
+      })]);
+      if (value) return value;
+    } catch { /* A starting LSP can return ContentModified; a hung provider still consumes the same deadline. */ }
+    finally { clearTimeout(timer); }
     await new Promise(resolve => setTimeout(resolve, 50));
   }
   throw new Error(typeof label === "function" ? label() : label);
