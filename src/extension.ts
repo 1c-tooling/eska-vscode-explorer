@@ -78,6 +78,7 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
   private attempted = false;
   private selecting = false;
   private connecting: AbortController | undefined;
+  private connectionAttempt: Promise<void> = Promise.resolve();
   private disposed = false;
   private stopping: Promise<void> | undefined;
   private supportSelection: { tree: MetadataTree; entry: TreeEntry } | undefined;
@@ -610,8 +611,18 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
     await this.connection.disconnect();
   }
 
+  /** Connect reuses a single-folder session or its handshake; restart explicitly replaces it. */
+  private connect(choose: boolean): Promise<void> {
+    if (this.selecting || (choose && ["connecting", "ready"].includes(this.connection.state.kind)
+      && this.folders().length === 1 && this.selected?.uri.toString() === this.folders()[0]?.uri.toString())) {
+      return this.connectionAttempt;
+    }
+    this.connectionAttempt = this.openConnection(choose);
+    return this.connectionAttempt;
+  }
+
   /** Selection is explicit for unrelated multi-root folders; workspace members are opened by eska. */
-  private async connect(choose: boolean): Promise<void> {
+  private async openConnection(choose: boolean): Promise<void> {
     if (this.disposed || this.selecting) return;
     this.connecting?.abort();
     const controller = new AbortController();
