@@ -3,9 +3,10 @@
 The default backend is `eska-project serve --stdio`, Metadata API 1.12.
 Build `cargo build -p eska-project` in an ESKA checkout containing that package,
 then set `eska.explorer.executable` to its absolute binary path on the workspace
-host. An installed `eska-project` is found through absolute PATH directories and
-`~/.eska/bin`. The metadata tree works without the full CLI, Git, a 1C platform
+host. Default discovery checks `~/.eska/bin` first, then absolute PATH directories. The metadata tree works without the full CLI, Git, a 1C platform
 or an analyzer. [Backend selection](cli-management.md).
+
+Use **Prepare project and language components** for component setup. The current public ESKA release has no project ZIP; configure a local binary or install a local T97 package. Analyzer 0.3.2 can be installed independently. See [component setup](component-setup.md).
 
 For the documented older `eska ide`, explicitly choose
 `eska.explorer.backend = "legacy"` and your `eska` executable. Its path is kept;

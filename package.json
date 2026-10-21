@@ -35,7 +35,7 @@
     }
   },
   "scripts": {
-    "compile": "node scripts/support-icons.mjs && tsc -p .",
+    "compile": "node scripts/support-icons.mjs && tsc -p . && node scripts/bundle.mjs",
     "check": "tsc -p . --noEmit",
     "test": "bun run --bun compile && bun test",
     "test:node": "npm run compile && node --test test/*.test.mjs",
@@ -48,7 +48,9 @@
     "@types/vscode": "1.109.0",
     "@vscode/vsce": "4.0.0",
     "ovsx": "1.2.0",
-    "typescript": "7.0.2"
+    "typescript": "7.0.2",
+    "@types/yauzl": "3.4.0",
+    "esbuild": "0.28.2"
   },
   "contributes": {
     "commands": [
@@ -150,6 +152,26 @@
           "light": "resources/icons/actions/sort-active-light.svg",
           "dark": "resources/icons/actions/sort-active-dark.svg"
         }
+      },
+      {
+        "command": "eska.explorer.checkAnalyzerUpdates",
+        "title": "%checkAnalyzerUpdates%",
+        "category": "ESKA Explorer"
+      },
+      {
+        "command": "eska.explorer.prepareTools",
+        "title": "%prepareTools%",
+        "category": "ESKA Explorer"
+      },
+      {
+        "command": "eska.explorer.recoverProjectInstallation",
+        "title": "%recoverProjectInstallation%",
+        "category": "ESKA Explorer"
+      },
+      {
+        "command": "eska.explorer.recoverAnalyzerInstallation",
+        "title": "%recoverAnalyzerInstallation%",
+        "category": "ESKA Explorer"
       }
     ],
     "views": {
@@ -337,6 +359,18 @@
           "default": true,
           "scope": "window",
           "description": "%supportPolicy%"
+        },
+        "eska.explorer.analyzerExecutable": {
+          "type": "string",
+          "default": "bsl-analyzer-app",
+          "scope": "machine-overridable",
+          "description": "%analyzerExecutable%"
+        },
+        "eska.explorer.checkForAnalyzerUpdates": {
+          "type": "boolean",
+          "default": true,
+          "scope": "window",
+          "description": "%checkForAnalyzerUpdates%"
         }
       }
     },
@@ -373,5 +407,8 @@
     "eska",
     "metadata"
   ],
-  "icon": "resources/icon.png"
+  "icon": "resources/icon.png",
+  "dependencies": {
+    "yauzl": "3.4.0"
+  }
 }

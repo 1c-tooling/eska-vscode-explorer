@@ -1,0 +1,192 @@
+{
+  "schema_version": 1,
+  "stage": "T85",
+  "date": "2026-10-21",
+  "status": "passed-linux",
+  "explorer_parent_revision": "ce8cde5799d0d7eb7128d691201ca8638d33e261",
+  "root_revision": "347d942",
+  "platform": "Linux x86_64 GNU",
+  "editor": "VSCodium 1.109.5",
+  "extension_host_node": "22.21.1",
+  "cli_node": "22.23.1",
+  "bun": "1.4.2",
+  "extension_version": "0.0.12",
+  "runtime_sources": {
+    "bun.lock": "907f90365ce98143ab172800c92be197e878f46b5094bd38de0412e16aa861ac",
+    "package.json": "e9ae1cceff77fd14b0a2664014546260ff1fcc48682a50d2bba92511daf2d8c1",
+    "scripts/bundle.mjs": "a575d9213fbcbee91bc7eabfb04555793818d409a7d65000d3a305baf8ab9f5f",
+    "src/extension.ts": "314d4048c7803d46b5a332db113db5015b1a2a2c5fb6ad4183db56ff8eb2166a",
+    "src/messages.ts": "529a6aab0ec7286d1680c048588c193ff88b8794bc27520ff9fe9920a3a0b809",
+    "src/tooling/archive.ts": "ca18105265a43d276ca83403689d4c643c46c5707ce1bd0d7f23f659b335a41d",
+    "src/tooling/contracts.ts": "0b955bef36964820ac7f576b933a7964005eb070dc8a8e5e322fbae930a086ae",
+    "src/tooling/files.ts": "38ae25035893c0ca6529f1ff4c31b62b0e3606d0c2cf28726144695643034dcb",
+    "src/tooling/inspect.ts": "3be6d562d05c18786c63540bc159cff4c2541febe79af2f783512a1ced10a69c",
+    "src/tooling/install.ts": "63abf4dcf77d0938fc509b61567fdea1f5b526b8b3ec06545f2f275a7df3db3d",
+    "src/tooling/releases.ts": "658bb55d4beb7fd20172cbc5b36c64ed03b4fb98afb1c3fa6f86945a82ee36da",
+    "src/tooling/setup.ts": "f38eadb74ec51057f6f7d8ca4cc65a57eda89657fe1a8f35ae9aca00960e40b0",
+    "src/tooling/transaction.ts": "4045bafa921c78eeff4fcb7cdcb7842e20dc8947e42ba27d5e5f360393f7e759"
+  },
+  "checks": {
+    "node": {
+      "passed": 161,
+      "failed": 0,
+      "skipped": 0
+    },
+    "bun": {
+      "passed": 161,
+      "failed": 0
+    },
+    "typecheck": "passed",
+    "rust_workspace": {
+      "passed": 902,
+      "ignored": 12,
+      "suites": 35,
+      "fmt": "passed",
+      "check": "passed",
+      "clippy": "passed",
+      "rustdoc": "passed"
+    },
+    "python": {
+      "passed": 14
+    },
+    "vsix": {
+      "path": "/home/akalsin/Documents/Projects/eska-playground/t85-vsix-9Hrs6d/eska-explorer.vsix",
+      "sha256": "0bd1ed1fbdff3db470fbd2018e72c9ff6ef2ff468402e4ee77f801c9cdc6d4d0",
+      "files": 1302,
+      "native_status": "passed",
+      "built_before_this_evidence_file": true
+    },
+    "native_profiles": {
+      "status_installed_vsix": {
+        "passed": true,
+        "suite": "tool-status",
+        "vscode": "1.109.5",
+        "node": "22.21.1",
+        "project": "ESKA v0.14.3",
+        "analyzer": "BSL Analyzer v0.3.2 · suspended",
+        "tooltip": "Component: bsl-analyzer-app\nSelected version: 0.3.2\nSelected path: /home/akalsin/Documents/Projects/eska-playground/t85-installation-8UwpsT/managed/analyzer/bin/bsl-analyzer-app\nState: suspended\nManaged path: /home/akalsin/.eska/analyzer/bin/bsl-analyzer-app\nAvailable release: —\nOwner: ESKA Explorer\nClick to check this component for updates\ninjected-conflict",
+        "commands": [
+          [
+            "project",
+            true
+          ],
+          [
+            "analyzer",
+            true
+          ]
+        ]
+      },
+      "tree": {
+        "passed": true,
+        "vscode": "1.109.5",
+        "node": "22.21.1"
+      },
+      "legacy": {
+        "passed": true,
+        "vscode": "1.109.5",
+        "node": "22.21.1"
+      },
+      "custom_path": {
+        "passed": true,
+        "suite": "backend-override",
+        "vscode": "1.109.5"
+      }
+    }
+  },
+  "native_installation": {
+    "schema_version": 1,
+    "platform": "linux",
+    "architecture": "x64",
+    "node": "22.23.1",
+    "target": "x86_64-unknown-linux-gnu",
+    "prefix": "/home/akalsin/Documents/Projects/eska-playground/t85-installation-8UwpsT/managed",
+    "path": "",
+    "project": {
+      "kind": "project",
+      "path": "/home/akalsin/Documents/Projects/eska-playground/t85-installation-8UwpsT/managed/bin/eska-project",
+      "version": "0.14.3"
+    },
+    "analyzer": {
+      "kind": "analyzer",
+      "path": "/home/akalsin/Documents/Projects/eska-playground/t85-installation-8UwpsT/managed/analyzer/bin/bsl-analyzer-app",
+      "version": "0.3.2"
+    },
+    "project_source": {
+      "archive": "/home/akalsin/Documents/Projects/eska-playground/t97-packages-4tilolll/release-repeat/eska-project-0.14.3-x86_64-unknown-linux-gnu.zip",
+      "sha256": "295470b3812e2e7930a6ee36dccdeedb80dfb2bad85f4f6f60d11165b29460f7"
+    },
+    "public_releases": [
+      {
+        "kind": "project",
+        "version": "0.14.3",
+        "target": "x86_64-unknown-linux-gnu",
+        "restriction": "missing-asset:eska-project-0.14.3-x86_64-unknown-linux-gnu.zip"
+      },
+      {
+        "kind": "analyzer",
+        "version": "0.3.2",
+        "target": "x86_64-unknown-linux-gnu",
+        "asset": {
+          "name": "bsl-analyzer-app-linux-amd64",
+          "url": "https://github.com/itrous/bsl-analyzer/releases/download/v0.3.2/bsl-analyzer-app-linux-amd64",
+          "sha256": "e5ca2b17270338c797b6d1b6a7ea564e0b9235e8a823d1b99cf1b42a36e2fd0d",
+          "size": 75963744
+        }
+      }
+    ],
+    "analyzer_download_sha256": "e5ca2b17270338c797b6d1b6a7ea564e0b9235e8a823d1b99cf1b42a36e2fd0d",
+    "local_repeat_equal": true,
+    "limitation": "Project ZIP is local T97 output; a missing public asset is recorded without substituting the monolith."
+  },
+  "logs": {
+    "node-final": {
+      "path": "/tmp/eska-t85-node-final.log",
+      "sha256": "0b65c9f6ca8022f456c88541b7bba718d7cc34d81e75d7c68d943d272a162813"
+    },
+    "bun-final": {
+      "path": "/tmp/eska-t85-bun-final.log",
+      "sha256": "90d0868dfa5e54ebbfde36a07481347d1b9be09534b9b1b458940310a066699e"
+    },
+    "bun-typecheck": {
+      "path": "/tmp/eska-t85-bun-typecheck.log",
+      "sha256": "3074f884c12f5b2f1db23b58f4521c2682623ceb356117414be8cb2b0e765742"
+    },
+    "vsix-package": {
+      "path": "/tmp/eska-t85-vsix-package.log",
+      "sha256": "960c99c658c0da544184fccc65333c0e3c57eca5c116b7de39ee5f40e00eb99c"
+    },
+    "vsix-check": {
+      "path": "/tmp/eska-t85-vsix-check.log",
+      "sha256": "2b4ebe7ac1fa4a9013b8e052676ba46f970efe1147c5d0bb0eaba0936b9107a5"
+    },
+    "vsix-host": {
+      "path": "/tmp/eska-t85-vsix-host.log",
+      "sha256": "b0539f603e14ef05d50e842769a6366ca1823c89009c660b3bfce087a432f54a"
+    },
+    "tree-host": {
+      "path": "/tmp/eska-t85-tree-host.log",
+      "sha256": "c0b14da413c2befea89791439b554990f1b9b123fea813614ae63f530783e8f1"
+    },
+    "legacy-host": {
+      "path": "/tmp/eska-t85-legacy-host.log",
+      "sha256": "c0b14da413c2befea89791439b554990f1b9b123fea813614ae63f530783e8f1"
+    },
+    "override-host": {
+      "path": "/tmp/eska-t85-override-host.log",
+      "sha256": "6ffe90783cc1258752f9f32f46d7ab309e019041d6e350363ccd33616e0671ed"
+    },
+    "public-install": {
+      "path": "/tmp/eska-t85-public-install.log",
+      "sha256": "7a48bf082051e05592e917fe651f1c8eb6dd937a2588787253d96ea891d61968"
+    }
+  },
+  "limitations": [
+    "Public ESKA 0.14.3 has no project component asset. The real minimal install uses the local T97 ZIP, never the monolith. Publication pipeline unchanged.",
+    "Analyzer is the exact upstream 0.3.2 app; no local engine build. Network download digest is checked.",
+    "LSP is not started by T85; binary-verified and connected are separate states.",
+    "Update UI versions and callbacks use mocks; archive ownership, shared Python/Node receipts and locks, cancellation and journal rollback use real files/processes.",
+    "Injected error/suspension in native status tests is not T87 conflict-extension acceptance.",
+    "Windows, macOS, Remote and unsupported upstream architectures are not accepted by these Linux runs.",
+    "Power-loss and network filesystems are unverified; a crash inside recovery can leave a recovery marker requiring manual inspection."
+  ]
+}

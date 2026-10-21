@@ -6,8 +6,9 @@
 
 Зависимости закреплены в `bun.lock`: TypeScript 7.0.2, API VS Code 1.109.0,
 типы Node 22.20.3. Инструменты проверены 2026-09-18; Bun — 1.4.2.
-Production-код не имеет npm runtime-зависимостей и исполняется в Node extension
-host VS Code. Bun используется для инструментов проекта.
+Production-код работает в Node Extension Host. `yauzl` 3.4.0 и транзитивный
+`pend` включаются в bundle через esbuild 0.28.2; npm modules из checkout
+установленному VSIX не нужны. Bun используется для инструментов проекта.
 
 ```bash
 bun install --frozen-lockfile --ignore-scripts
@@ -218,3 +219,28 @@ is ready` после успешных проверок открытия форм
 нативных файловых событий остаётся неподтверждённой частью приёмки; её причина
 не установлена. Детерминированные проверки обновления вкладок выполняются
 в `properties-view.test.mjs`, независимо от файлового наблюдателя VSCodium.
+
+
+## Установщик компонентов T85
+
+`src/tooling/` содержит контракты, bounded probes/downloads, ZIP и транзакции
+T97, независимые состояния двух компонентов и UI. `test/tool-inspection.test.mjs`,
+`test/tool-installation.test.mjs` проверяют настоящие бинарники, совместные
+receipt и lock с Python CLI, malformed ZIP, rollback и отмену.
+`test/tool-setup.test.mjs` проверяет отдельные интервалы/настройки, ручную отмену,
+выбранный компонент, custom paths и сохранение приостановки клиента.
+
+```sh
+ESKA_TEST_ROOT="$(realpath ../eska-playground)" \
+ESKA_TEST_BINARY="$(realpath ../eska/target/debug/eska-project)" \
+ESKA_TEST_ANALYZER_BINARY=/absolute/path/bsl-analyzer-app \
+node --test test/tool-*.test.mjs
+```
+
+`test/native-tooling-install.mjs` требует также `ESKA_TEST_PROJECT_ARCHIVE`
+(абсолютный путь к component ZIP T97), скачивает официальный Analyzer и оставляет
+собственный изолированный стенд с `report.json`. Установка и native probes
+выполняются при пустом PATH. Полный монолит не вызывается.
+Для двух нативных индикаторов запустите `test/run-host.mjs test/tool-status-host.cjs`
+с теми же binary variables и `VSCODE_EXECUTABLE=codium`; `ESKA_TEST_VSIX`
+переводит проверку на код установленного пакета.

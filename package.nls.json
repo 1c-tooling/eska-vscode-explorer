@@ -28,5 +28,11 @@
   "supportPolicy": "Check 1C support rules on demand and open locked sources in protected read-only tabs, including ordinary unchanged file tabs. Preserve unsaved text with removable read-only settings. Disabling removes only ESKA restrictions. Applies to all workspace folders.",
   "backend": "Metadata backend. Project runs eska-project serve; legacy explicitly uses eska ide without changing your configured path.",
   "backendProject": "Standalone eska-project, Metadata API 1.12",
-  "backendLegacy": "Legacy eska ide, Metadata API 1.11; shown with a warning"
+  "backendLegacy": "Legacy eska ide, Metadata API 1.11; shown with a warning",
+  "analyzerExecutable": "Path or command name of the published bsl-analyzer-app. Explicit binaries are never overwritten.",
+  "checkForAnalyzerUpdates": "Check Analyzer releases at most once per day on this workspace host. Independent of ESKA update checks.",
+  "checkAnalyzerUpdates": "Check for BSL Analyzer updates",
+  "prepareTools": "Prepare project and language components",
+  "recoverProjectInstallation": "Recover project component installation",
+  "recoverAnalyzerInstallation": "Recover Analyzer installation"
 }

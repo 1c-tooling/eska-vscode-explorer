@@ -1,7 +1,7 @@
 # Установочный VSIX
 
 Пакет `1c-tooling.eska-explorer` устанавливается в VS Code ≥ 1.109.0.
-Версия берётся из `package.json`; первый опубликованный релиз — `0.0.1`. Версию меняет существующая release automation. VSIX не содержит backend eska.
+Версия берётся из `package.json`; первый опубликованный релиз — `0.0.1`. Версию меняет существующая release automation. VSIX не содержит бинарники backend; они устанавливаются отдельно.
 
 ## Установка
 
@@ -32,9 +32,12 @@ python3 scripts/check-vsix.py eska-explorer-0.0.1.vsix
 ```
 
 Закреплён официальный `@vscode/vsce` 4.0.0; компилятор и упаковщик запускаются через
-Bun. `--no-dependencies` допустим, поскольку у расширения нет runtime dependencies;
-backend устанавливается отдельно. При появлении такой зависимости пересмотрите
-упаковку. `.vscodeignore` разрешает только runtime JS, NLS, документацию, LICENSE, SVG и PNG-иконку магазина.
+Bun. `scripts/bundle.mjs` собирает production JS и runtime зависимости
+`yauzl`/`pend` в `out/extension.js` через закреплённый esbuild 0.28.2. Поэтому
+`--no-dependencies` не исключает рабочую ZIP-библиотеку из установленного VSIX.
+`out/THIRD-PARTY-NOTICES.txt` содержит лицензии всех модулей bundle; отсутствие
+лицензии останавливает сборку. Upstream license/NOTICE анализатора включены
+в `resources/analyzer-notices/` с source/hash provenance. `.vscodeignore` разрешает только runtime JS, NLS, документацию, LICENSE, SVG и PNG-иконку магазина.
 В пакет не входят node_modules, TS, тесты, карты исходников, стенды и Git-файлы.
 `check-vsix.py` проверяет identity, ZIP CRC, полный список и байты ресурсов.
 
@@ -46,7 +49,7 @@ backend устанавливается отдельно. При появлени
 ## Изолированная проверка установленного пакета
 
 ```sh
-ESKA_TEST_BINARY="$(realpath ../eska/target/dist/eska)" \
+ESKA_TEST_BINARY="$(realpath ../eska/target/debug/eska-project)" \
 ESKA_TEST_VSIX="$PWD/eska-explorer-0.0.1.vsix" \
 VSCODE_EXECUTABLE=codium node test/run-host.mjs test/icons-host.cjs
 ```

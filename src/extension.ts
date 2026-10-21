@@ -4,6 +4,8 @@ import { PROTECTED_SOURCE_SCHEME, ProtectedSources } from "./protected-source.js
 import { ProtectedLanguageFeatures } from "./protected-language.js";
 import * as vscode from "vscode";
 import { BackendSetup } from "./backend-setup.js";
+import { ToolingSetup } from "./tooling/setup.js";
+import { ToolFailure } from "./tooling/contracts.js";
 import { GitDecorations } from "./decorations.js";
 import { revealFile, relativeFile } from "./reveal.js";
 import { iconName } from "./icons.js";
@@ -48,6 +50,7 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
   private readonly output = vscode.window.createOutputChannel("ESKA Explorer", { log: true });
   private readonly connection: Connection;
   private readonly setup: BackendSetup;
+  private readonly tooling: ToolingSetup;
   private readonly legacyNotices = new Set<string>();
   private readonly view: vscode.TreeView<Element>;
   private readonly status = vscode.window.createStatusBarItem("eska.explorer.connection", vscode.StatusBarAlignment.Right, 0);
@@ -90,6 +93,10 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
     this.disposables.push(this.propertiesTabs);
     this.connection = new Connection(String(context.extension.packageJSON.version),
       (state) => this.update(state), (text, level) => this.output[level ?? "info"](text));
+    this.tooling = new ToolingSetup(context, (text, level) => { if (!this.disposed) this.output[level ?? "info"](text); },
+      () => this.renderProjectStatus(), async kind => { if (kind === "project") await this.disconnect(); },
+      async kind => { if (kind === "project") await this.connect(false); });
+    this.disposables.push(this.tooling);
     this.setup = new BackendSetup(context, (text, level) => { if (!this.disposed) this.output[level ?? "info"](text); },
       () => this.connection.disconnect(), () => this.connect(false));
     this.disposables.push(this.setup);
@@ -99,7 +106,11 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
       ["restart", () => this.connect(false)],
       ["disconnect", () => this.disconnect()],
       ["showLog", () => this.output.show(true)],
-      ["checkUpdates", () => this.setup.check(true, this.backendKind())],
+      ["checkUpdates", () => this.backendKind() === "legacy" ? this.setup.check(true, "legacy") : this.tooling.check("project")],
+      ["checkAnalyzerUpdates", () => this.tooling.check("analyzer")],
+      ["prepareTools", () => this.tooling.prepare(vscode.workspace.getConfiguration("eska.explorer", this.selected?.uri).get<string>("executable", "eska-project"), new AbortController().signal).catch(error => this.tooling.report(error))],
+      ["recoverProjectInstallation", () => this.tooling.recover("project")],
+      ["recoverAnalyzerInstallation", () => this.tooling.recover("analyzer")],
       ["refresh", () => this.refresh()],
       ["search", () => this.search()],
       ["revealActiveFile", () => this.revealActiveFile()],
@@ -141,6 +152,9 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
       }
     }));
     this.disposables.push(vscode.workspace.onDidChangeConfiguration((event) => {
+      if (event.affectsConfiguration("eska.explorer.analyzerExecutable")) {
+        void this.tooling.ensureAnalyzer(undefined, false).catch(error => this.tooling.report(error));
+      }
       if (event.affectsConfiguration("eska.explorer.executable", this.selected?.uri)
         || event.affectsConfiguration("eska.explorer.backend", this.selected?.uri)) {
         void this.disconnect();
@@ -166,6 +180,8 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
     }));
     this.disposables.push(vscode.window.onDidChangeActiveTextEditor(() => this.updateKeyboardContext()));
     this.selected = this.folders()[0];
+    this.renderProjectStatus();
+    void this.tooling.ensureAnalyzer(undefined, false).catch(error => this.tooling.report(error));
     if (this.selected) void this.connect(false);
   }
 
@@ -605,7 +621,8 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
       this.selected = folder;
       const backend = this.backendKind();
       const configured = vscode.workspace.getConfiguration("eska.explorer", folder.uri).get<string>("executable", "eska-project");
-      const executable = await this.setup.ensure(controller.signal, configured, backend);
+      const executable = backend === "project" ? await this.tooling.ensureProject(controller.signal, configured)
+        : await this.setup.ensure(controller.signal, configured, backend);
       if (!executable || this.disposed || controller.signal.aborted) return;
       if (!this.folders().some(value => value.uri.toString() === folder.uri.toString())) return;
       // Release the picker guard before the asynchronous handshake, allowing disconnect/restart.
@@ -613,7 +630,10 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
       await this.connection.connect({ executable, backend, path: folder.uri.fsPath, name: folder.name,
         locale: vscode.env.language.toLowerCase().startsWith("ru") ? "ru-RU" : "en-US" });
     } catch (error) {
-      if (!controller.signal.aborted && !this.disposed) this.showError(error instanceof ExplorerError ? error : new ExplorerError("spawnFailed"));
+      if (!controller.signal.aborted && !this.disposed) {
+        if (error instanceof ToolFailure) this.tooling.report(error);
+        else this.showError(error instanceof ExplorerError ? error : new ExplorerError("spawnFailed"));
+      }
     } finally { if (this.connecting === controller) this.selecting = false; }
   }
 
@@ -663,22 +683,28 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
     this.decorations.setTree(this.tree);
     this.updateKeyboardContext();
     this.changed.fire(undefined);
+    this.tooling.projectConnection(state);
     if (state.kind === "ready") {
-      this.status.text = this.text(state.target.backend === "legacy" ? "legacyStatus" : "projectStatus", state.version);
-      this.status.tooltip = this.text(state.target.backend === "legacy" ? "statusTooltip" : "projectStatusTooltip", state.version, state.target.executable);
-      this.status.show();
       void this.setup.background(state.target.backend ?? "project");
       if (state.target.backend === "legacy" && !this.legacyNotices.has(state.target.executable)) {
         this.legacyNotices.add(state.target.executable);
         void vscode.window.showWarningMessage(this.text("legacyBackendSelected"));
       }
-    } else {
-      // Never leave a successful connection indicator after disconnect or process failure.
-      this.status.hide();
-      this.status.text = "";
-      this.status.tooltip = undefined;
     }
     if (state.kind === "error") this.showError(state.error);
+  }
+
+  /** A disconnected component remains visible without claiming a connected or offered version. */
+  private renderProjectStatus(): void {
+    if (this.disposed) return;
+    const state = this.connection.state, tool = this.tooling.states.project;
+    const activity = tool.activity ? ` · ${this.text(`toolPhase_${tool.activity}`)}` : "";
+    this.status.text = state.kind === "ready"
+      ? this.text(state.target.backend === "legacy" ? "legacyStatus" : "projectStatus", state.version) + activity
+      : `ESKA · ${this.text(state.kind === "error" ? "toolPhase_error" : "toolPhase_disconnected")}${activity}`;
+    this.status.tooltip = state.kind === "ready" && state.target.backend === "legacy"
+      ? this.text("statusTooltip", state.version, state.target.executable) : this.tooling.tooltip("project");
+    this.status.show();
   }
 
   /** Setup instructions are a packaged document, not an automatic init or executable installer. */
@@ -708,7 +734,7 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
       for (const watcher of this.watchers) watcher.dispose();
       this.view.dispose();
       this.changed.dispose();
-      this.stopping = Promise.all([this.supportContexts.stop(), this.support.shutdown(), this.connection.dispose(), this.setup.shutdown()]).then(() => {}).finally(() => this.output.dispose());
+      this.stopping = Promise.all([this.supportContexts.stop(), this.support.shutdown(), this.connection.dispose(), this.setup.shutdown(), this.tooling.shutdown()]).then(() => {}).finally(() => this.output.dispose());
     }
     return this.stopping;
   }
