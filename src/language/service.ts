@@ -349,11 +349,19 @@ export class LanguageService implements vscode.Disposable {
     let backgroundRead = Promise.resolve();
     let interactiveReads = 0, releaseInteractive = () => {};
     let interactiveDone = Promise.resolve();
-    const read = async <T>(document: vscode.TextDocument, token: vscode.CancellationToken, action: () => vscode.ProviderResult<T>): Promise<T | undefined> => {
+    /** Retain priority through client preparation and result conversion, not only the protocol roundtrip. */
+    const interactive = () => {
+      if (++interactiveReads === 1) interactiveDone = new Promise(resolve => { releaseInteractive = resolve; });
+      return () => { if (--interactiveReads === 0) releaseInteractive(); };
+    };
+    const read = async <T>(document: vscode.TextDocument, token: vscode.CancellationToken, action: () => vscode.ProviderResult<T>, priority = true): Promise<T | undefined> => {
       const version = document.version, model = this.modelRevision;
       if (!this.accepts(revision, signal) || token.isCancellationRequested) return undefined;
-      const value = await action();
-      return this.accepts(revision, signal) && model === this.modelRevision && !document.isClosed && document.version === version && !token.isCancellationRequested ? value ?? undefined : undefined;
+      const release = priority ? interactive() : undefined;
+      try {
+        const value = await action();
+        return this.accepts(revision, signal) && model === this.modelRevision && !document.isClosed && document.version === version && !token.isCancellationRequested ? value ?? undefined : undefined;
+      } finally { release?.(); }
     };
     return {
       sendRequest: async (type, params, token, next) => {
@@ -368,7 +376,7 @@ export class LanguageService implements vscode.Disposable {
         const method = typeof type === "string" ? type : type.method;
         const background = BACKGROUND_READS.has(method) || method === "textDocument/codeAction"
           && isRecord(params) && isRecord(params.context) && params.context.triggerKind === 2;
-        if (!background && ++interactiveReads === 1) interactiveDone = new Promise(resolve => { releaseInteractive = resolve; });
+        const release = background ? undefined : interactive();
         try {
           /** Queued work must recheck its snapshot before sending anything to the server. */
           const send = () => {
@@ -390,7 +398,7 @@ export class LanguageService implements vscode.Disposable {
             || document?.isClosed || document?.version !== version) throw new vscode.CancellationError();
           return value;
         } finally {
-          if (!background && --interactiveReads === 0) releaseInteractive();
+          release?.();
           this.reading.delete(cancellation); subscription?.dispose(); cancellation.dispose();
         }
       },
@@ -398,7 +406,7 @@ export class LanguageService implements vscode.Disposable {
       provideDefinition: (doc, pos, token, next) => read(doc, token, () => next(doc, pos, token)),
       provideTypeDefinition: (doc, pos, token, next) => read(doc, token, () => next(doc, pos, token)),
       provideReferences: (doc, pos, context, token, next) => read(doc, token, () => next(doc, pos, context, token)),
-      provideDocumentSymbols: (doc, token, next) => read(doc, token, () => next(doc, token)),
+      provideDocumentSymbols: (doc, token, next) => read(doc, token, () => next(doc, token), false),
       provideCompletionItem: (doc, pos, context, token, next) => read(doc, token, () => next(doc, pos, context, token)),
       provideSignatureHelp: (doc, pos, context, token, next) => read(doc, token, () => next(doc, pos, context, token)),
       provideDocumentSemanticTokens: (doc, token, next) => read(doc, token, () => next(doc, token)),

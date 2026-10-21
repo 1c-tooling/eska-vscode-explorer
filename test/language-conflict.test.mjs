@@ -243,6 +243,26 @@ test("queued background snapshots wait for all running interactive replies, incl
   assert.deepEqual(await hints, ["hint"]); assert.deepEqual(order, ["hints"]);
 });
 
+test("interactive provider preparation and conversion retain priority over background snapshots", { timeout: 5000 }, async t => {
+  const f = fixture(); t.after(() => f.service.shutdown()); f.connect(); await settled(f.service);
+  const middleware = f.clients[0].clientOptions.middleware, prepared = barrier(), preparation = barrier(), converted = barrier(), conversion = barrier(), sent = [];
+  const document = { uri: { toString: () => "file:///same.bsl" }, version: 1, isClosed: false }, params = { textDocument: { uri: document.uri.toString() } };
+  const token = { isCancellationRequested: false };
+  const hover = middleware.provideHover(document, {}, token, async () => {
+    prepared.release(); await preparation.promise;
+    const value = await middleware.sendRequest("textDocument/hover", params, undefined, async () => "hover");
+    converted.release(); await conversion.promise;
+    return value;
+  });
+  await prepared.promise;
+  const hints = middleware.sendRequest("textDocument/inlayHint", params, undefined, async () => { sent.push("hints"); return ["hint"]; });
+  await Promise.resolve(); assert.deepEqual(sent, []);
+  preparation.release(); await converted.promise; assert.deepEqual(sent, []);
+  conversion.release(); assert.equal(await hover, "hover"); assert.deepEqual(await hints, ["hint"]);
+  assert.deepEqual(await middleware.provideDocumentSymbols(document, token,
+    () => middleware.sendRequest("textDocument/documentSymbol", params, undefined, async () => ["symbol"])), ["symbol"]);
+});
+
 test("a buffer edit cancels queued background work before forwarding and does not poison later requests", async t => {
   const f = fixture(); t.after(() => f.service.shutdown()); f.connect(); await settled(f.service);
   const middleware = f.clients[0].clientOptions.middleware, held = barrier(), entered = barrier();
