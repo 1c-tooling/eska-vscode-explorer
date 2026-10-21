@@ -1,0 +1,613 @@
+{
+  "schema_version": 1,
+  "stage": "T106",
+  "status": "IN-PROGRESS",
+  "date": "2026-10-22",
+  "performance_acceptance": "failed",
+  "authoritative_report": "../../../eska/docs/measurements/t106-performance.json",
+  "authoritative_report_sha256": "d6d3e01de6d09144b60f3ff31e5bb6a19c160264df92d1d83aa10bfb54e74559",
+  "explorer_revision": "0ca547a398ea73faba152b3f44a9c14a7488f88b",
+  "aggregates": {
+    "cold": {
+      "baseline": {
+        "treeReadyMs": {
+          "n": 5,
+          "median": 426.0736669999999,
+          "p95": 470.96071399999994,
+          "min": 404.17306599999995,
+          "max": 470.96071399999994
+        },
+        "languageReadyMs": {
+          "n": 5,
+          "median": 4781.198351999999,
+          "p95": 5011.701015,
+          "min": 4411.59541,
+          "max": 5011.701015
+        },
+        "launchToLanguageMs": {
+          "n": 5,
+          "median": 7284.553466796875,
+          "p95": 7323.240478515625,
+          "min": 6678.31005859375,
+          "max": 7323.240478515625
+        },
+        "openToLanguageMs": {
+          "n": 5,
+          "median": 4354.929443359375,
+          "p95": 4540.341552734375,
+          "min": 3952.372314453125,
+          "max": 4540.341552734375
+        },
+        "latency": {
+          "hover": {
+            "n": 150,
+            "median": 60.742348999999194,
+            "p95": 113.73054299999967,
+            "min": 46.47501899999952,
+            "max": 122.80724000000191
+          },
+          "completion": {
+            "n": 150,
+            "median": 67.54014299999926,
+            "p95": 152.59052399999928,
+            "min": 57.24602099999902,
+            "max": 328.0277589999987
+          },
+          "definition": {
+            "n": 150,
+            "median": 100.09602450000011,
+            "p95": 273.64781700000094,
+            "min": 45.23192500000005,
+            "max": 340.96121700000003
+          },
+          "editDiagnostics": {
+            "n": 150,
+            "median": 149.07818299999963,
+            "p95": 263.84914299999946,
+            "min": 65.19893900000079,
+            "max": 293.1936620000015
+          },
+          "steadyHover": {
+            "n": 150,
+            "median": 47.5849515000009,
+            "p95": 58.20229699999982,
+            "min": 42.82266300000265,
+            "max": 59.98150100000203
+          }
+        },
+        "resources": {
+          "peakRssMiB": {
+            "n": 5,
+            "median": 2209.62890625,
+            "p95": 2276.53125,
+            "min": 2198.4140625,
+            "max": 2276.53125
+          },
+          "peakPssMiB": {
+            "n": 5,
+            "median": 1422.986328125,
+            "p95": 1460.5390625,
+            "min": 1402.0166015625,
+            "max": 1460.5390625
+          },
+          "cpuSeconds": {
+            "n": 5,
+            "median": 60.52,
+            "p95": 61.49,
+            "min": 53.93,
+            "max": 61.49
+          },
+          "physicalReadBytes": {
+            "n": 5,
+            "median": 84992000,
+            "p95": 128405504,
+            "min": 3624960,
+            "max": 128405504
+          },
+          "physicalWriteBytes": {
+            "n": 5,
+            "median": 45494272,
+            "p95": 81666048,
+            "min": 45121536,
+            "max": 81666048
+          },
+          "idleRssMiB": {
+            "n": 5,
+            "median": 2169.51953125,
+            "p95": 2218.359375,
+            "min": 2156.6171875,
+            "max": 2218.359375
+          },
+          "idlePssMiB": {
+            "n": 5,
+            "median": 1380.4580078125,
+            "p95": 1429.0859375,
+            "min": 1370.1494140625,
+            "max": 1429.0859375
+          }
+        }
+      },
+      "candidate": {
+        "treeReadyMs": {
+          "n": 5,
+          "median": 312.14746,
+          "p95": 329.63682200000005,
+          "min": 259.431162,
+          "max": 329.63682200000005
+        },
+        "languageReadyMs": {
+          "n": 5,
+          "median": 5463.148448999999,
+          "p95": 5691.091084,
+          "min": 5238.671617,
+          "max": 5691.091084
+        },
+        "launchToLanguageMs": {
+          "n": 5,
+          "median": 7707.988037109375,
+          "p95": 8000.97314453125,
+          "min": 7381.43896484375,
+          "max": 8000.97314453125
+        },
+        "openToLanguageMs": {
+          "n": 5,
+          "median": 5160.018310546875,
+          "p95": 5378.451904296875,
+          "min": 4918.134765625,
+          "max": 5378.451904296875
+        },
+        "latency": {
+          "hover": {
+            "n": 150,
+            "median": 62.626352499999484,
+            "p95": 117.85296499999822,
+            "min": 48.278629999997065,
+            "max": 138.73022299999866
+          },
+          "completion": {
+            "n": 150,
+            "median": 68.68487450000066,
+            "p95": 217.54545600000165,
+            "min": 58.71479499999987,
+            "max": 339.28637100000014
+          },
+          "definition": {
+            "n": 150,
+            "median": 97.03701049999927,
+            "p95": 251.70486900000105,
+            "min": 44.49859899999865,
+            "max": 314.9943770000027
+          },
+          "editDiagnostics": {
+            "n": 150,
+            "median": 149.96268250000048,
+            "p95": 261.65200900000127,
+            "min": 66.5903559999997,
+            "max": 296.09243699999934
+          },
+          "steadyHover": {
+            "n": 150,
+            "median": 46.07882450000034,
+            "p95": 54.14810600000055,
+            "min": 42.72277899999972,
+            "max": 62.19610400000238
+          }
+        },
+        "resources": {
+          "peakRssMiB": {
+            "n": 5,
+            "median": 2243.0078125,
+            "p95": 2345.953125,
+            "min": 2224.67578125,
+            "max": 2345.953125
+          },
+          "peakPssMiB": {
+            "n": 5,
+            "median": 1448.3310546875,
+            "p95": 1514.2685546875,
+            "min": 1419.763671875,
+            "max": 1514.2685546875
+          },
+          "cpuSeconds": {
+            "n": 5,
+            "median": 60.64,
+            "p95": 62.16,
+            "min": 60.11,
+            "max": 62.16
+          },
+          "physicalReadBytes": {
+            "n": 5,
+            "median": 198520832,
+            "p95": 302149632,
+            "min": 57098240,
+            "max": 302149632
+          },
+          "physicalWriteBytes": {
+            "n": 5,
+            "median": 51597312,
+            "p95": 72658944,
+            "min": 35962880,
+            "max": 72658944
+          },
+          "idleRssMiB": {
+            "n": 5,
+            "median": 2194.0546875,
+            "p95": 2276.64453125,
+            "min": 2177.6015625,
+            "max": 2276.64453125
+          },
+          "idlePssMiB": {
+            "n": 5,
+            "median": 1398.869140625,
+            "p95": 1483.7294921875,
+            "min": 1384.48828125,
+            "max": 1483.7294921875
+          }
+        }
+      }
+    },
+    "repeat": {
+      "baseline": {
+        "treeReadyMs": {
+          "n": 5,
+          "median": 383.6503009999999,
+          "p95": 455.4841590000001,
+          "min": 366.19364900000005,
+          "max": 455.4841590000001
+        },
+        "languageReadyMs": {
+          "n": 5,
+          "median": 5025.132071999999,
+          "p95": 5072.501706,
+          "min": 4763.781412,
+          "max": 5072.501706
+        },
+        "launchToLanguageMs": {
+          "n": 5,
+          "median": 7388.468017578125,
+          "p95": 7532.355712890625,
+          "min": 7185.782958984375,
+          "max": 7532.355712890625
+        },
+        "openToLanguageMs": {
+          "n": 5,
+          "median": 4573.657958984375,
+          "p95": 4658.712646484375,
+          "min": 4383.1416015625,
+          "max": 4658.712646484375
+        },
+        "latency": {
+          "hover": {
+            "n": 150,
+            "median": 61.47953750000124,
+            "p95": 119.59123799999998,
+            "min": 46.74574600000051,
+            "max": 127.34328000000096
+          },
+          "completion": {
+            "n": 150,
+            "median": 69.89015550000022,
+            "p95": 207.5596370000003,
+            "min": 59.372645999999804,
+            "max": 221.1643550000008
+          },
+          "definition": {
+            "n": 150,
+            "median": 101.12010750000036,
+            "p95": 243.44163499999922,
+            "min": 44.98536199999944,
+            "max": 402.8823479999992
+          },
+          "editDiagnostics": {
+            "n": 150,
+            "median": 149.4432629999992,
+            "p95": 272.28568500000074,
+            "min": 65.33353200000056,
+            "max": 295.8602229999997
+          },
+          "steadyHover": {
+            "n": 150,
+            "median": 47.81408550000015,
+            "p95": 56.675663000001805,
+            "min": 43.76482000000033,
+            "max": 65.13456999999835
+          }
+        },
+        "resources": {
+          "peakRssMiB": {
+            "n": 5,
+            "median": 2237.69140625,
+            "p95": 2262.76171875,
+            "min": 2230.16796875,
+            "max": 2262.76171875
+          },
+          "peakPssMiB": {
+            "n": 5,
+            "median": 1435.353515625,
+            "p95": 1458.5771484375,
+            "min": 1412.6162109375,
+            "max": 1458.5771484375
+          },
+          "cpuSeconds": {
+            "n": 5,
+            "median": 60.93,
+            "p95": 61.33,
+            "min": 59.74,
+            "max": 61.33
+          },
+          "physicalReadBytes": {
+            "n": 5,
+            "median": 112197632,
+            "p95": 209457152,
+            "min": 21270528,
+            "max": 209457152
+          },
+          "physicalWriteBytes": {
+            "n": 5,
+            "median": 28884992,
+            "p95": 53493760,
+            "min": 26636288,
+            "max": 53493760
+          },
+          "idleRssMiB": {
+            "n": 5,
+            "median": 2179.48828125,
+            "p95": 2214.21484375,
+            "min": 2161.25,
+            "max": 2214.21484375
+          },
+          "idlePssMiB": {
+            "n": 5,
+            "median": 1390.962890625,
+            "p95": 1426.7919921875,
+            "min": 1378.7001953125,
+            "max": 1426.7919921875
+          }
+        }
+      },
+      "candidate": {
+        "treeReadyMs": {
+          "n": 5,
+          "median": 286.044499,
+          "p95": 300.4303289999999,
+          "min": 269.172243,
+          "max": 300.4303289999999
+        },
+        "languageReadyMs": {
+          "n": 5,
+          "median": 5592.4608,
+          "p95": 5690.513023,
+          "min": 5356.52015,
+          "max": 5690.513023
+        },
+        "launchToLanguageMs": {
+          "n": 5,
+          "median": 7821.437255859375,
+          "p95": 7911.500244140625,
+          "min": 7638.199462890625,
+          "max": 7911.500244140625
+        },
+        "openToLanguageMs": {
+          "n": 5,
+          "median": 5308.78515625,
+          "p95": 5404.078857421875,
+          "min": 5066.0888671875,
+          "max": 5404.078857421875
+        },
+        "latency": {
+          "hover": {
+            "n": 150,
+            "median": 62.602210000000014,
+            "p95": 116.00491800000054,
+            "min": 47.81518099999812,
+            "max": 189.90237999999954
+          },
+          "completion": {
+            "n": 150,
+            "median": 70.15770299999986,
+            "p95": 217.42819299999974,
+            "min": 56.416997000000265,
+            "max": 335.8324029999985
+          },
+          "definition": {
+            "n": 150,
+            "median": 119.3976264999992,
+            "p95": 296.5322130000004,
+            "min": 45.56839399999808,
+            "max": 323.9025500000025
+          },
+          "editDiagnostics": {
+            "n": 150,
+            "median": 153.23504349999985,
+            "p95": 273.09558300000026,
+            "min": 65.14186000000063,
+            "max": 303.98785399999906
+          },
+          "steadyHover": {
+            "n": 150,
+            "median": 48.40807400000085,
+            "p95": 57.97942999999941,
+            "min": 43.14216300000044,
+            "max": 82.34094499999992
+          }
+        },
+        "resources": {
+          "peakRssMiB": {
+            "n": 5,
+            "median": 2238.62109375,
+            "p95": 2239.80078125,
+            "min": 2119.08984375,
+            "max": 2239.80078125
+          },
+          "peakPssMiB": {
+            "n": 5,
+            "median": 1433.7919921875,
+            "p95": 1436.376953125,
+            "min": 1413.458984375,
+            "max": 1436.376953125
+          },
+          "cpuSeconds": {
+            "n": 5,
+            "median": 62.71,
+            "p95": 64.5,
+            "min": 61.56,
+            "max": 64.5
+          },
+          "physicalReadBytes": {
+            "n": 5,
+            "median": 117284864,
+            "p95": 324419584,
+            "min": 28397568,
+            "max": 324419584
+          },
+          "physicalWriteBytes": {
+            "n": 5,
+            "median": 26890240,
+            "p95": 32935936,
+            "min": 25673728,
+            "max": 32935936
+          },
+          "idleRssMiB": {
+            "n": 5,
+            "median": 2187.46484375,
+            "p95": 2193.57421875,
+            "min": 2066.25,
+            "max": 2193.57421875
+          },
+          "idlePssMiB": {
+            "n": 5,
+            "median": 1394.64453125,
+            "p95": 1399.0927734375,
+            "min": 1366.609375,
+            "max": 1399.0927734375
+          }
+        }
+      }
+    }
+  },
+  "fixed_t90_gates": [
+    {
+      "mode": "cold",
+      "metric": "treeReadyMs",
+      "overhead_percent": -26.738617244796757,
+      "fixed_t90_limit_percent": 10.622,
+      "passed": true
+    },
+    {
+      "mode": "cold",
+      "metric": "languageReadyMs",
+      "overhead_percent": 14.263162638185388,
+      "fixed_t90_limit_percent": 10,
+      "passed": false
+    },
+    {
+      "mode": "cold",
+      "metric": "hover",
+      "overhead_percent": 3.1016309560242927,
+      "fixed_t90_limit_percent": 12.79,
+      "passed": true,
+      "method_changed": false
+    },
+    {
+      "mode": "cold",
+      "metric": "completion",
+      "overhead_percent": 1.6948905482794263,
+      "fixed_t90_limit_percent": 10,
+      "passed": true,
+      "method_changed": false
+    },
+    {
+      "mode": "cold",
+      "metric": "definition",
+      "overhead_percent": -3.056079415022961,
+      "fixed_t90_limit_percent": 10,
+      "passed": true,
+      "method_changed": false
+    },
+    {
+      "mode": "cold",
+      "metric": "editDiagnostics",
+      "overhead_percent": 0.5933125036819531,
+      "fixed_t90_limit_percent": 40.759,
+      "passed": true,
+      "method_changed": true
+    },
+    {
+      "mode": "repeat",
+      "metric": "treeReadyMs",
+      "overhead_percent": -25.441346389038788,
+      "fixed_t90_limit_percent": 17.113,
+      "passed": true
+    },
+    {
+      "mode": "repeat",
+      "metric": "languageReadyMs",
+      "overhead_percent": 11.289827209938451,
+      "fixed_t90_limit_percent": 10,
+      "passed": false
+    },
+    {
+      "mode": "repeat",
+      "metric": "hover",
+      "overhead_percent": 1.826091323472867,
+      "fixed_t90_limit_percent": 10,
+      "passed": true,
+      "method_changed": false
+    },
+    {
+      "mode": "repeat",
+      "metric": "completion",
+      "overhead_percent": 0.38281142470721896,
+      "fixed_t90_limit_percent": 10,
+      "passed": true,
+      "method_changed": false
+    },
+    {
+      "mode": "repeat",
+      "metric": "definition",
+      "overhead_percent": 18.07505890952379,
+      "fixed_t90_limit_percent": 10,
+      "passed": false,
+      "method_changed": false
+    },
+    {
+      "mode": "repeat",
+      "metric": "editDiagnostics",
+      "overhead_percent": 2.537270950782622,
+      "fixed_t90_limit_percent": 41.069,
+      "passed": true,
+      "method_changed": true
+    }
+  ],
+  "validation": {
+    "typecheck": true,
+    "bundle": true,
+    "node_tests_passed": 201,
+    "node_tests_failed": 0,
+    "node_tests_skipped": 2,
+    "skips": "Optional real analyzer probe and archive-install unit scenarios lacked their opt-in environment variables. Published analyzer was exercised separately in native tests.",
+    "bun": "Not installed; not run.",
+    "native_passed": [
+      "connection coalescing and explicit restart",
+      "language provider correctness and lazy startup",
+      "guarded rename, formatter and quickfix with support policy enabled",
+      "XML/BSL refresh, manifest and root fingerprint changes",
+      "two simultaneous windows and conflicting context lease",
+      "own protected bridge, late response rejection and native alias write denial"
+    ]
+  },
+  "initial_failed_attempts": [
+    "Protected-language initially timed out waiting for the readonly rejection category. An instrumented diagnostic repeat and two unchanged official repeats passed; the initial timeout remains unexplained.",
+    "The first final language-host invocation omitted ESKA_HOST_SUPPORT_DISABLED=1 and could not edit its protected fixture. Re-running in the documented fixture mode passed."
+  ],
+  "limitations": [
+    "Only Linux/VSCodium was exercised; Windows, macOS, VS Code and Remote were not.",
+    "All performance runs use support policy disabled equally; policy enforcement was tested in separate native cases.",
+    "Cold clears owned .eska only; OS page cache is not flushed. The variants always run baseline then candidate. Physical I/O is not a byte-volume comparison of application requests.",
+    "Startup retains lazy LSP semantics and config leases. Launch-to-language is supplementary and does not replace the fixed T90 gate.",
+    "Nine of twelve original gates pass. Startup in both modes and repeated-run definition still exceed their fixed limits. T106 is not complete.",
+    "The partial series under series/ was stopped for a further startup fix and is excluded; its owned processes were reaped.",
+    "The report-streaming memory benchmark is synthetic and separate from these real editor measurements."
+  ],
+  "raw_series": "/home/akalsin/Documents/Projects/eska-playground/t106-review-8un6rmfa/series-final"
+}
