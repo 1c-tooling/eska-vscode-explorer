@@ -31,6 +31,15 @@ async function run() {
   const document = await vscode.workspace.openTextDocument(uri), editor = await vscode.window.showTextDocument(document);
   const xml = await vscode.workspace.openTextDocument(vscode.Uri.file(fixture.descriptor)), xmlBefore = xml.getText();
   await until(() => explorer.tooling.states.analyzer.phase === "ready", "real LSP ready");
+  await until(async () => {
+    try {
+      const values = await vscode.commands.executeCommand("vscode.executeHoverProvider", uri, new vscode.Position(5, 15));
+      return values?.some(value => value.contents.some(content => (typeof content === "string" ? content : content.value).includes("Проверка")));
+    } catch (error) {
+      if (error instanceof vscode.CancellationError) return false;
+      throw error;
+    }
+  }, "checked current language model");
   const allowed = await explorer.support.languageWriteAccess([file]); assert.equal(allowed(), true);
   await assert.rejects(explorer.support.languageWriteAccess([fixture.descriptor]), "shared XML has a real locked attribute");
   const client = explorer.language.session.client, apply = client.clientOptions.middleware.workspace.handleApplyEdit;
@@ -47,6 +56,8 @@ async function run() {
     edits: [{ range: { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } }, newText: text }] });
   const original = document.getText();
   assert.equal((await apply({ edit: { documentChanges: [change(document), change(xml)] } })).applied, false);
+  assert.ok(trace.some(value => typeof value === "string" && value.includes('"event":"language_edit_rejected"')
+    && value.includes('"reason":"readonly"')), "mixed XML is rejected by the actual policy guard");
   assert.equal(document.getText(), original); assert.equal(xml.getText(), xmlBefore);
   assert.equal((await apply({ edit: { documentChanges: [change(document), change(document, "x", document.version, uri.with({ scheme: "eska-protected" }).toString())] } })).applied, false);
   assert.equal((await apply({ edit: { documentChanges: [change(document, "x", document.version - 1)] } })).applied, false);

@@ -128,7 +128,10 @@ exports.activate = async function () {
     if (code !== 0) throw new Error(`Extension host exited ${code}\n${output}`);
     try {
       const result = JSON.parse(await readFile(join(fixture.root, "host-result.json"), "utf8"));
-      if (result.passed !== true) throw new Error(`Acceptance result did not pass: ${result.error ?? "unknown failure"}`);
+      if (result.passed !== true) {
+        if (process.env.ESKA_HOST_FULL_LOG) await writeFile(`${process.env.ESKA_HOST_FULL_LOG}.result.json`, JSON.stringify(result, null, 2) + "\n");
+        throw new Error(`Acceptance result did not pass: ${result.error ?? "unknown failure"}`);
+      }
       for (const pid of result.shutdownPids ?? []) {
         try { process.kill(pid, 0); }
         catch (error) { if (error.code === "ESRCH") continue; throw error; }
