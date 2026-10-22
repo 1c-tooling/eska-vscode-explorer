@@ -16,7 +16,7 @@
 4. Откройте доверенную папку с `eska.toml` и Designer XML; раскройте **ESKA: 1C Explorer**.
    [Настройка проекта](setup.ru.md). bsl-analyzer необязателен.
 
-Также можно выполнить `code --install-extension /полный/путь/eska-explorer-0.0.1.vsix`.
+Также можно выполнить `code --install-extension /полный/путь/eska-explorer-0.0.12.vsix`.
 Для VSCodium замените `code` на `codium`. Установка VSIX не регистрирует publisher
 в Marketplace и ничего не публикует. В Remote backend должен находиться на машине
 проекта; фактическая приёмка Remote пока не выполнена.
@@ -28,7 +28,7 @@
 ```sh
 bun install --frozen-lockfile --ignore-scripts
 bun run package
-python3 scripts/check-vsix.py eska-explorer-0.0.1.vsix
+python3 scripts/check-vsix.py eska-explorer-0.0.12.vsix
 ```
 
 Закреплён официальный `@vscode/vsce` 4.0.0; компилятор и упаковщик запускаются через
@@ -41,6 +41,9 @@ Bun. `scripts/bundle.mjs` собирает production JS и runtime зависи
 в `resources/analyzer-notices/` с source/hash provenance. `.vscodeignore` разрешает
 только runtime JS, BSL/SDBL-грамматики и language configuration, NLS, документацию,
 LICENSE, SVG и PNG-иконку магазина.
+Скриншоты README из `docs/images/*.png` также включаются в пакет и проверяются
+побайтно: относительные ссылки работают в установленном VSIX без обращения к GitHub.
+Имя VSIX берите из результата упаковки; при совпадающей версии подтвердите замену.
 В пакет не входят node_modules, TS, тесты, карты исходников, стенды и Git-файлы.
 `check-vsix.py` проверяет identity, ZIP CRC, полный список и байты ресурсов.
 
@@ -53,7 +56,7 @@ LICENSE, SVG и PNG-иконку магазина.
 
 ```sh
 ESKA_TEST_BINARY="$(realpath ../eska/target/debug/eska-project)" \
-ESKA_TEST_VSIX="$PWD/eska-explorer-0.0.1.vsix" \
+ESKA_TEST_VSIX="$PWD/eska-explorer-0.0.12.vsix" \
 VSCODE_EXECUTABLE=codium node test/run-host.mjs test/icons-host.cjs
 ```
 
