@@ -74,10 +74,15 @@ exports.run = async function () {
     return value?.data?.length > 0 && value;
   }, "semantic tokens from the actual server");
   assert.equal(document.getText(document.getWordRangeAtPosition(position)), "Проверка");
-  editor.selection = new vscode.Selection(5, 0, 5, 0);
+  assert.equal(vscode.window.activeTextEditor.document.uri.toString(), uri.toString(), "editable fixture stays in the source editor");
+  // Await the renderer acknowledgement; assigning editor.selection only queues an RPC.
+  await vscode.window.showTextDocument(document, { selection: new vscode.Range(5, 0, 5, 0), preview: false });
+  await vscode.commands.executeCommand("workbench.action.focusActiveEditorGroup");
   await vscode.commands.executeCommand("editor.action.commentLine");
+  await until(() => /^\s*\/\/\s*Результат/.test(document.lineAt(5).text), () => `comment command did not update BSL: ${document.getText()}`);
   assert.match(document.lineAt(5).text, /^\s*\/\/\s*Результат/);
   await vscode.commands.executeCommand("undo");
+  await until(() => document.getText() === text, "native undo restores the original BSL text");
   assert.equal(document.getText(), text);
   const end = document.positionAt(document.getText().length), syntaxLine = text.split("\n").length - 1;
   const parseErrors = () => vscode.languages.getDiagnostics(uri).filter(value => {

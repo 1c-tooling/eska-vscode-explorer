@@ -15,7 +15,7 @@ import { projectPackage, unpackProject } from "../out/tooling/archive.js";
 import { publishTransaction, cleanStage, restoreTransaction } from "../out/tooling/transaction.js";
 
 const run = promisify(execFile), repository = fileURLToPath(new URL("../", import.meta.url));
-const pythonTools = resolve(repository, "../eska/tools");
+const pythonTools = process.env.ESKA_TEST_PYTHON_TOOLS ?? resolve(repository, "../eska/tools");
 
 /** Each scenario owns one unique playground directory and removes only that directory. */
 async function fixture(t) {

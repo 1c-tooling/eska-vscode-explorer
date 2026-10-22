@@ -18,7 +18,7 @@ jobs:
   release:
     if: github.repository == '1c-tooling/eska-vscode-explorer' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 30
     outputs:
       version: ${{ steps.publish.outputs.version }}
     steps:
@@ -39,10 +39,24 @@ jobs:
           bun run --bun compile
           mkdir -p ../eska-playground
           export ESKA_TEST_ROOT="$(realpath ../eska-playground)"
+          node scripts/prepare-backends.mjs
+      - name: Проверки с установленными бэкендами
+        run: |
           bun test
           knope --validate
           KNOPE_TEST_BINARY="$(command -v knope)" \
             python3 -m unittest discover -s test -p '*_test.py'
+      - name: Проверка VSIX и LSP в чистом редакторе
+        run: |
+          sudo apt-get update && sudo apt-get install -y xvfb libasound2t64
+          bash scripts/install-editor.sh
+          bun run --bun package
+      - name: Запуск установленного VSIX
+        env:
+          ESKA_HOST_SUPPORT_DISABLED: '1'
+        run: |
+          export ESKA_TEST_VSIX="$(realpath "eska-explorer-$(node -p 'require("./package.json").version').vsix")"
+          timeout 180s xvfb-run -a node test/run-host.mjs test/language-host.cjs
       - name: Publish the prepared version
         id: publish
         env:
