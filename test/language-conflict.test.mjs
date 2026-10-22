@@ -4,6 +4,7 @@ import { createRequire } from "node:module";
 import { readFileSync } from "node:fs";
 import { resolve, join } from "node:path";
 import { runInNewContext } from "node:vm";
+import { LSPErrorCodes, ResponseError } from "vscode-languageserver-protocol/node";
 
 const ID = "elishevkirill.bsl-analyzer-lsp";
 
@@ -78,7 +79,7 @@ function fixture({ available = false, enabled = true, hold, outside = false, sta
   runInNewContext(`(function(require,module,exports){${readFileSync(new URL("../out/watch.js", import.meta.url), "utf8")}\n})`, { process, setTimeout, clearTimeout })(
     name => name === "vscode" ? vscode : watchRequire(name), watching, watching.exports);
   runInNewContext(`(function(require,module,exports){${readFileSync(new URL("../out/language/service.js", import.meta.url), "utf8")}\n})`, { AbortController, AbortSignal, process, setTimeout, clearTimeout })(
-    name => name === "vscode" ? vscode : name === "vscode-languageclient/node" ? { LanguageClient: FakeClient, CloseAction: {}, ErrorAction: {} }
+    name => name === "vscode" ? vscode : name === "vscode-languageclient/node" ? { LanguageClient: FakeClient, CloseAction: {}, ErrorAction: {}, LSPErrorCodes, ResponseError }
       : name === "./process.js" ? { LanguageProcess: FakeOwner }
         : name === "./edits.js" ? { LanguageEdits: class { middleware() { return {}; } async shutdown() {} } }
           : name === "../watch.js" ? watching.exports : require(name), adapter, adapter.exports);
@@ -86,12 +87,19 @@ function fixture({ available = false, enabled = true, hold, outside = false, sta
   const policyRoots = [];
   const service = new adapter.exports.LanguageService(context, connection, tooling, {}, () => {}, undefined, roots => policyRoots.push([...roots]));
   return { root, sourceRoot, service, tooling, calls, warnings, commands, owners, clients, watchers, policyRoots, dto, pause, waiting, get reached() { return reached; }, get leased() { return leased; },
+    /** Give independent callers genuine cancellable subscriptions in the fake editor. */
+    cancellation() { return new vscode.CancellationTokenSource(); },
     /** Exercise the actual metadata subscription without a second project parser. */
     metadata(params = {}) { for (const listener of notifications) listener("metadata/changed", { sessionId: "session", projectId: "project", ...params }); },
     /** Pause a later request after initial startup has completed. */
     holdAt(name) { hold = name; held = false; },
     /** Model the editor changing an open buffer while a config check is pending. */
     advanceDocument() { vscode.workspace.textDocuments[0].version++; },
+    /** Reopening the same URI creates a new document lifetime even if its version restarts at one. */
+    reopenDocument() {
+      const document = vscode.workspace.textDocuments[0]; document.isClosed = true;
+      vscode.workspace.textDocuments[0] = { ...document, version: 1, isClosed: false };
+    },
     /** Deliver a real content change, keeping the mock document inside the selected context. */
     changeDocument() {
       const document = vscode.workspace.textDocuments[0];
@@ -197,7 +205,7 @@ test("buffer edits reject old reads without publishing an artificial empty diagn
   f.changeDocument();
   assert.equal(requestToken.isCancellationRequested, true, "obsolete work is cancelled before the upstream response");
   held.release("old definition");
-  await assert.rejects(reply);
+  await assert.rejects(reply, error => error.code === LSPErrorCodes.RequestCancelled);
   assert.deepEqual(client.diagnostics.get(uri), ["original"]);
   middleware.handleDiagnostics(uri, ["fresh"], (uri, values) => client.diagnostics.set(uri, values));
   assert.deepEqual(client.diagnostics.get(uri), ["fresh"]);
@@ -205,76 +213,115 @@ test("buffer edits reject old reads without publishing an artificial empty diagn
   assert.equal(client.diagnostics.get(uri), undefined, "changing context must still clear previous diagnostics");
 });
 
-test("background VFS snapshots are serialized while interactive reads bypass the queue", async t => {
-  const f = fixture(); t.after(() => f.service.shutdown()); f.connect(); await settled(f.service);
-  const middleware = f.clients[0].clientOptions.middleware, held = barrier(), entered = barrier(), order = [];
-  const params = { textDocument: { uri: "file:///same.bsl" } };
-  const symbols = middleware.sendRequest("textDocument/documentSymbol", params, undefined, () => {
-    order.push("symbols"); entered.release(); return held.promise;
-  });
-  await entered.promise;
-  const hints = middleware.sendRequest("textDocument/inlayHint", params, undefined, async () => { order.push("hints"); return ["hint"]; });
-  const automatic = middleware.sendRequest("textDocument/codeAction", { ...params, context: { triggerKind: 2 } }, undefined,
-    async () => { order.push("automatic"); return ["fix"]; });
-  for (const method of ["hover", "completion", "definition", "codeAction"]) {
-    assert.equal(await middleware.sendRequest(`textDocument/${method}`, params, undefined, async () => { order.push(method); return method; }), method);
-  }
-  assert.deepEqual(order, ["symbols", "hover", "completion", "definition", "codeAction"]);
-  held.release(["symbol"]);
-  assert.deepEqual(await symbols, ["symbol"]); assert.deepEqual(await hints, ["hint"]);
-  assert.deepEqual(await automatic, ["fix"]);
-  assert.deepEqual(order, ["symbols", "hover", "completion", "definition", "codeAction", "hints", "automatic"]);
-});
-
-test("queued background snapshots wait for all running interactive replies, including a failed request", async t => {
-  const f = fixture(); t.after(() => f.service.shutdown()); f.connect(); await settled(f.service);
-  const middleware = f.clients[0].clientOptions.middleware, symbolsHeld = barrier(), symbolsEntered = barrier(), hoverHeld = barrier(), definitionHeld = barrier();
-  const params = { textDocument: { uri: "file:///same.bsl" } }, order = [];
-  const symbols = middleware.sendRequest("textDocument/documentSymbol", params, undefined, () => { symbolsEntered.release(); return symbolsHeld.promise; });
-  await symbolsEntered.promise;
-  const hover = middleware.sendRequest("textDocument/hover", params, undefined, () => hoverHeld.promise);
-  const definition = middleware.sendRequest("textDocument/definition", params, undefined, async () => { await definitionHeld.promise; throw new Error("request failed"); });
-  const rejected = assert.rejects(definition);
-  const hints = middleware.sendRequest("textDocument/inlayHint", params, undefined, async () => { order.push("hints"); return ["hint"]; });
-  symbolsHeld.release(["symbol"]); await symbols;
-  assert.deepEqual(order, []);
-  hoverHeld.release("hover"); assert.equal(await hover, "hover"); assert.deepEqual(order, []);
-  definitionHeld.release(); await rejected;
-  assert.deepEqual(await hints, ["hint"]); assert.deepEqual(order, ["hints"]);
-});
-
-test("interactive provider preparation and conversion retain priority over background snapshots", { timeout: 5000 }, async t => {
-  const f = fixture(); t.after(() => f.service.shutdown()); f.connect(); await settled(f.service);
-  const middleware = f.clients[0].clientOptions.middleware, prepared = barrier(), preparation = barrier(), converted = barrier(), conversion = barrier(), sent = [];
-  const document = { uri: { toString: () => "file:///same.bsl" }, version: 1, isClosed: false }, params = { textDocument: { uri: document.uri.toString() } };
-  const token = { isCancellationRequested: false };
-  const hover = middleware.provideHover(document, {}, token, async () => {
-    prepared.release(); await preparation.promise;
-    const value = await middleware.sendRequest("textDocument/hover", params, undefined, async () => "hover");
-    converted.release(); await conversion.promise;
-    return value;
-  });
-  await prepared.promise;
-  const hints = middleware.sendRequest("textDocument/inlayHint", params, undefined, async () => { sent.push("hints"); return ["hint"]; });
-  await Promise.resolve(); assert.deepEqual(sent, []);
-  preparation.release(); await converted.promise; assert.deepEqual(sent, []);
-  conversion.release(); assert.equal(await hover, "hover"); assert.deepEqual(await hints, ["hint"]);
-  assert.deepEqual(await middleware.provideDocumentSymbols(document, token,
-    () => middleware.sendRequest("textDocument/documentSymbol", params, undefined, async () => ["symbol"])), ["symbol"]);
-  assert.deepEqual(await middleware.provideDocumentSemanticTokens(document, token,
-    () => middleware.sendRequest("textDocument/semanticTokens/full", params, undefined, async () => [0, 0, 5, 0, 0])), [0, 0, 5, 0, 0]);
-});
-
-test("a buffer edit cancels queued background work before forwarding and does not poison later requests", async t => {
+test("identical concurrent symbols share one upstream snapshot and receive independent response objects", async t => {
   const f = fixture(); t.after(() => f.service.shutdown()); f.connect(); await settled(f.service);
   const middleware = f.clients[0].clientOptions.middleware, held = barrier(), entered = barrier();
-  const params = { textDocument: { uri: "file:///same.bsl" } };
-  const symbols = middleware.sendRequest("textDocument/documentSymbol", params, undefined, () => { entered.release(); return held.promise; });
+  const params = { textDocument: { uri: "file:///same.bsl" } }; let calls = 0;
+  /** One real request remains pending while a second editor consumer asks for the same snapshot. */
+  const next = () => { calls++; entered.release(); return held.promise; };
+  const one = middleware.sendRequest("textDocument/documentSymbol", params, undefined, next);
+  const two = middleware.sendRequest("textDocument/documentSymbol", params, undefined, next);
+  await entered.promise; assert.equal(calls, 1);
+  held.release([{ name: "symbol", children: [] }]);
+  const [first, second] = await Promise.all([one, two]);
+  assert.deepEqual(first, second); assert.notEqual(first, second);
+  first[0].name = "changed by a converter"; assert.equal(second[0].name, "symbol");
+  assert.deepEqual(await middleware.sendRequest("textDocument/documentSymbol", params, undefined, async () => { calls++; return ["fresh"]; }), ["fresh"]);
+  assert.equal(calls, 2, "completed results are never cached");
+});
+
+test("in-flight sharing includes request parameters and the current document version", async t => {
+  const f = fixture(); t.after(() => f.service.shutdown()); f.connect(); await settled(f.service);
+  const middleware = f.clients[0].clientOptions.middleware, held = barrier(), entered = barrier(); let calls = 0;
+  const params = { textDocument: { uri: "file:///same.bsl" }, range: { start: { line: 0, character: 0 }, end: { line: 1, character: 0 } } };
+  /** Different requested ranges must never reuse another consumer's response. */
+  const next = () => { if (++calls === 2) entered.release(); return held.promise; };
+  const one = middleware.sendRequest("textDocument/inlayHint", params, undefined, next);
+  const two = middleware.sendRequest("textDocument/inlayHint", { ...params, range: { ...params.range, end: { line: 2, character: 0 } } }, undefined, next);
+  await entered.promise; assert.equal(calls, 2);
+  const stale = Promise.all([assert.rejects(one), assert.rejects(two)]);
+  f.advanceDocument();
+  assert.deepEqual(await middleware.sendRequest("textDocument/inlayHint", params, undefined, async () => { calls++; return ["new version"]; }), ["new version"]);
+  held.release(["old version"]); await stale; assert.equal(calls, 3);
+});
+
+test("closing and reopening the same URI cannot share a response from its previous document lifetime", async t => {
+  const f = fixture(); t.after(() => f.service.shutdown()); f.connect(); await settled(f.service);
+  const middleware = f.clients[0].clientOptions.middleware, held = barrier(), entered = barrier(), params = { textDocument: { uri: "file:///same.bsl" } };
+  const old = middleware.sendRequest("textDocument/documentSymbol", params, undefined, () => { entered.release(); return held.promise; });
+  const stale = assert.rejects(old); await entered.promise; f.reopenDocument();
+  assert.deepEqual(await middleware.sendRequest("textDocument/documentSymbol", params, undefined, async () => ["reopened"]), ["reopened"]);
+  held.release(["closed document"]); await stale;
+});
+
+test("cancelling one shared caller does not cancel the remaining reader", async t => {
+  const f = fixture(); t.after(() => f.service.shutdown()); f.connect(); await settled(f.service);
+  const middleware = f.clients[0].clientOptions.middleware, held = barrier(), entered = barrier(), firstToken = f.cancellation(), secondToken = f.cancellation();
+  const params = { textDocument: { uri: "file:///same.bsl" } }; let upstream, calls = 0;
+  /** The upstream token belongs to the group rather than either editor caller. */
+  const next = (_type, _params, token) => { upstream = token; calls++; entered.release(); return held.promise; };
+  const one = middleware.sendRequest("textDocument/documentSymbol", params, firstToken.token, next);
+  const two = middleware.sendRequest("textDocument/documentSymbol", params, secondToken.token, next);
+  const cancelled = assert.rejects(one);
+  await entered.promise; firstToken.cancel(); await cancelled;
+  assert.equal(upstream.isCancellationRequested, false); assert.equal(calls, 1);
+  held.release(["valid for second caller"]); assert.deepEqual(await two, ["valid for second caller"]);
+});
+
+test("cancelling every subscriber cancels upstream immediately without poisoning an identical later request", async t => {
+  const f = fixture(); t.after(() => f.service.shutdown()); f.connect(); await settled(f.service);
+  const middleware = f.clients[0].clientOptions.middleware, held = barrier(), entered = barrier(), firstToken = f.cancellation(), secondToken = f.cancellation();
+  const params = { textDocument: { uri: "file:///same.bsl" } }; let upstream;
+  /** An uncooperative peer can reply late even after the shared cancellation has been delivered. */
+  const next = (_type, _params, token) => { upstream = token; entered.release(); return held.promise; };
+  const one = middleware.sendRequest("textDocument/documentSymbol", params, firstToken.token, next);
+  const two = middleware.sendRequest("textDocument/documentSymbol", params, secondToken.token, next);
+  const cancelled = Promise.all([assert.rejects(one), assert.rejects(two)]);
+  await entered.promise; firstToken.cancel(); secondToken.cancel(); await cancelled;
+  assert.equal(upstream.isCancellationRequested, true);
+  assert.deepEqual(await middleware.sendRequest("textDocument/documentSymbol", params, undefined, async () => ["fresh"]), ["fresh"]);
+  held.release(["obsolete"]);
+});
+
+test("model invalidation cancels every shared subscription before an obsolete upstream reply", async t => {
+  const f = fixture(); t.after(() => f.service.shutdown()); f.connect(); await settled(f.service);
+  const middleware = f.clients[0].clientOptions.middleware, held = barrier(), entered = barrier();
+  const params = { textDocument: { uri: "file:///same.bsl" } }; let upstream;
+  /** Both consumers refer to the old model even if the peer ignores cancellation. */
+  const next = (_type, _params, token) => { upstream = token; entered.release(); return held.promise; };
+  const one = middleware.sendRequest("textDocument/documentSymbol", params, undefined, next);
+  const two = middleware.sendRequest("textDocument/documentSymbol", params, undefined, next);
+  const cancelled = Promise.all([assert.rejects(one), assert.rejects(two)]);
+  await entered.promise; f.changeDocument(); await cancelled;
+  assert.equal(upstream.isCancellationRequested, true);
+  assert.deepEqual(await middleware.sendRequest("textDocument/documentSymbol", params, undefined, async () => ["current model"]), ["current model"]);
+  held.release(["obsolete"]);
+});
+
+test("a shared upstream rejection remains a rejection and does not cache a failed operation", async t => {
+  const f = fixture(); t.after(() => f.service.shutdown()); f.connect(); await settled(f.service);
+  const middleware = f.clients[0].clientOptions.middleware, held = barrier(), params = { textDocument: { uri: "file:///same.bsl" } }; let calls = 0;
+  /** Even an unstructured rejection must never become an apparently successful empty response. */
+  const next = async () => { calls++; await held.promise; return Promise.reject(undefined); };
+  const one = middleware.sendRequest("textDocument/documentSymbol", params, undefined, next);
+  const two = middleware.sendRequest("textDocument/documentSymbol", params, undefined, next);
+  const failed = Promise.all([assert.rejects(one), assert.rejects(two)]);
+  held.release(); await failed; assert.equal(calls, 1);
+  assert.deepEqual(await middleware.sendRequest("textDocument/documentSymbol", params, undefined, async () => { calls++; return ["retry"]; }), ["retry"]);
+  assert.equal(calls, 2);
+});
+
+test("semantic tokens and symbols remain independent background providers", { timeout: 5000 }, async t => {
+  const f = fixture(); t.after(() => f.service.shutdown()); f.connect(); await settled(f.service);
+  const middleware = f.clients[0].clientOptions.middleware, held = barrier(), entered = barrier();
+  const document = { uri: { toString: () => "file:///same.bsl" }, version: 1, isClosed: false }, params = { textDocument: { uri: document.uri.toString() } };
+  const token = { isCancellationRequested: false };
+  const symbols = middleware.provideDocumentSymbols(document, token,
+    () => middleware.sendRequest("textDocument/documentSymbol", params, undefined, () => { entered.release(); return held.promise; }));
   await entered.promise;
-  const hints = middleware.sendRequest("textDocument/inlayHint", params, undefined, () => assert.fail("stale queued request reached the server"));
-  const cancelled = Promise.all([assert.rejects(symbols), assert.rejects(hints)]);
-  f.changeDocument(); held.release(["old symbol"]); await cancelled;
-  assert.deepEqual(await middleware.sendRequest("textDocument/documentSymbol", params, undefined, async () => ["fresh symbol"]), ["fresh symbol"]);
+  assert.deepEqual(await middleware.provideDocumentSemanticTokens(document, token,
+    () => middleware.sendRequest("textDocument/semanticTokens/full", params, undefined, async () => [0, 0, 5, 0, 0])), [0, 0, 5, 0, 0]);
+  held.release(["symbol"]); assert.deepEqual(await symbols, ["symbol"]);
 });
 
 test("root-descriptor changes replace the old client only after releasing its lease and drop its diagnostics", async t => {

@@ -1,6 +1,6 @@
 import * as vscode from "vscode";
 import { basename, isAbsolute, join, relative, sep } from "node:path";
-import { CloseAction, ErrorAction, LanguageClient, type Middleware } from "vscode-languageclient/node";
+import { CloseAction, ErrorAction, LanguageClient, LSPErrorCodes, ResponseError, type Middleware } from "vscode-languageclient/node";
 import type { Connection, ConnectionState } from "../connection.js";
 import { ExplorerError, isRecord } from "../protocol.js";
 import { message, type MessageKey } from "../messages.js";
@@ -10,6 +10,7 @@ import type { ToolingSetup } from "../tooling/setup.js";
 import { analysisContext, analyzerConfiguration, analyzerFailure, type AnalysisContext, type AnalyzerConfiguration } from "./context.js";
 import { LanguageProcess } from "./process.js";
 import { LanguageProgress } from "./progress.js";
+import { InFlightReads } from "./inflight.js";
 import { readonlyPattern } from "../support-settings.js";
 import { cancellableChoice } from "../tooling/choice.js";
 import type { SupportController } from "../support.js";
@@ -24,10 +25,7 @@ interface Session {
   observers: vscode.Disposable[];
 }
 const CONFLICTING_EXTENSION = "elishevkirill.bsl-analyzer-lsp";
-const BACKGROUND_READS = new Set([
-  "textDocument/documentSymbol", "textDocument/foldingRange", "textDocument/inlayHint",
-  "textDocument/semanticTokens/full", "textDocument/semanticTokens/full/delta", "textDocument/semanticTokens/range", "textDocument/codeLens",
-]);
+const SHARED_READS = new Set(["textDocument/documentSymbol", "textDocument/inlayHint"]);
 
 /** One language session owns its config lease, client, child and generation independently of TreeView visibility. */
 export class LanguageService implements vscode.Disposable {
@@ -346,22 +344,15 @@ export class LanguageService implements vscode.Disposable {
 
   /** Discard reads from replaced servers or changed/closed buffers; writing routes have their own complete-edit guard. */
   private readingMiddleware(revision: number, signal: AbortSignal): Middleware {
-    let backgroundRead = Promise.resolve();
-    let interactiveReads = 0, releaseInteractive = () => {};
-    let interactiveDone = Promise.resolve();
-    /** Retain priority through client preparation and result conversion, not only the protocol roundtrip. */
-    const interactive = () => {
-      if (++interactiveReads === 1) interactiveDone = new Promise(resolve => { releaseInteractive = resolve; });
-      return () => { if (--interactiveReads === 0) releaseInteractive(); };
-    };
-    const read = async <T>(document: vscode.TextDocument, token: vscode.CancellationToken, action: () => vscode.ProviderResult<T>, priority = true): Promise<T | undefined> => {
+    // URI/version pairs may recur after closing a buffer; its editor document identity must remain distinct.
+    const shared = new WeakMap<vscode.TextDocument, InFlightReads>();
+    /** The generic client middleware expects a protocol cancellation, which it handles without an error notification. */
+    const cancelled = () => new ResponseError(LSPErrorCodes.RequestCancelled, "request_cancelled");
+    const read = async <T>(document: vscode.TextDocument, token: vscode.CancellationToken, action: () => vscode.ProviderResult<T>): Promise<T | undefined> => {
       const version = document.version, model = this.modelRevision;
       if (!this.accepts(revision, signal) || token.isCancellationRequested) return undefined;
-      const release = priority ? interactive() : undefined;
-      try {
-        const value = await action();
-        return this.accepts(revision, signal) && model === this.modelRevision && !document.isClosed && document.version === version && !token.isCancellationRequested ? value ?? undefined : undefined;
-      } finally { release?.(); }
+      const value = await action();
+      return this.accepts(revision, signal) && model === this.modelRevision && !document.isClosed && document.version === version && !token.isCancellationRequested ? value ?? undefined : undefined;
     };
     return {
       sendRequest: async (type, params, token, next) => {
@@ -369,36 +360,32 @@ export class LanguageService implements vscode.Disposable {
         const uri = isRecord(params) && isRecord(params.textDocument) ? params.textDocument.uri : undefined;
         const document = typeof uri === "string" ? vscode.workspace.textDocuments.find(value => value.uri.toString() === uri) : undefined;
         const version = document?.version;
-        if (!this.accepts(revision, signal) || token?.isCancellationRequested) throw new vscode.CancellationError();
+        if (!this.accepts(revision, signal) || token?.isCancellationRequested) throw cancelled();
         const cancellation = new vscode.CancellationTokenSource();
         const subscription = token?.onCancellationRequested(() => cancellation.cancel());
         this.reading.add(cancellation);
         const method = typeof type === "string" ? type : type.method;
-        const background = BACKGROUND_READS.has(method) || method === "textDocument/codeAction"
-          && isRecord(params) && isRecord(params.context) && params.context.triggerKind === 2;
-        const release = background ? undefined : interactive();
+        const key = document && SHARED_READS.has(method) ? JSON.stringify([method, model, version, params]) : undefined;
+        let readers: InFlightReads | undefined;
+        if (key && document) {
+          readers = shared.get(document);
+          if (!readers) {
+            readers = new InFlightReads(() => new vscode.CancellationTokenSource(), cancelled);
+            shared.set(document, readers);
+          }
+        }
         try {
-          /** Queued work must recheck its snapshot before sending anything to the server. */
-          const send = () => {
-            if (cancellation.token.isCancellationRequested || !this.accepts(revision, signal)
-              || model !== this.modelRevision || document?.isClosed || document?.version !== version) throw new vscode.CancellationError();
-            return next(type, params, cancellation.token);
+          /** Shared callers use a common upstream token while keeping individual freshness checks. */
+          const send = (requestToken: vscode.CancellationToken) => {
+            if (requestToken.isCancellationRequested || !this.accepts(revision, signal)
+              || model !== this.modelRevision || document?.isClosed || document?.version !== version) throw cancelled();
+            return next(type, params, requestToken);
           };
-          /** An already running interactive read takes priority over the next background snapshot. */
-          const sendBackground = async () => {
-            while (interactiveReads) await interactiveDone;
-            return send();
-          };
-          // Each upstream read freezes the workspace paths. Bound background concurrency
-          // without a timer, disabling providers, or delaying interactive requests.
-          const reply = background ? backgroundRead.then(sendBackground) : send();
-          if (background) backgroundRead = reply.then(() => undefined, () => undefined);
-          const value = await reply;
+          const value = await (key && readers ? readers.read(key, cancellation.token, send) : send(cancellation.token));
           if (!this.accepts(revision, signal) || model !== this.modelRevision || token?.isCancellationRequested
-            || document?.isClosed || document?.version !== version) throw new vscode.CancellationError();
+            || document?.isClosed || document?.version !== version) throw cancelled();
           return value;
         } finally {
-          release?.();
           this.reading.delete(cancellation); subscription?.dispose(); cancellation.dispose();
         }
       },
@@ -406,10 +393,10 @@ export class LanguageService implements vscode.Disposable {
       provideDefinition: (doc, pos, token, next) => read(doc, token, () => next(doc, pos, token)),
       provideTypeDefinition: (doc, pos, token, next) => read(doc, token, () => next(doc, pos, token)),
       provideReferences: (doc, pos, context, token, next) => read(doc, token, () => next(doc, pos, context, token)),
-      provideDocumentSymbols: (doc, token, next) => read(doc, token, () => next(doc, token), false),
+      provideDocumentSymbols: (doc, token, next) => read(doc, token, () => next(doc, token)),
       provideCompletionItem: (doc, pos, context, token, next) => read(doc, token, () => next(doc, pos, context, token)),
       provideSignatureHelp: (doc, pos, context, token, next) => read(doc, token, () => next(doc, pos, context, token)),
-      provideDocumentSemanticTokens: (doc, token, next) => read(doc, token, () => next(doc, token), false),
+      provideDocumentSemanticTokens: (doc, token, next) => read(doc, token, () => next(doc, token)),
       handleDiagnostics: (uri, values, next) => {
         if (!this.current(revision, signal)) return;
         if (this.configurationPending) {
