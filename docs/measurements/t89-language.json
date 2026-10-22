@@ -1,0 +1,120 @@
+{
+  "schema_version": 1,
+  "stage": "T89",
+  "runtime_revision": "87d3cee1970f50ef9a1d233b9b695893df8f7937",
+  "test_source_files": {
+    "test/language-fixture.mjs": "1ca9f5b6f704c97ca061ded29f4f30af41ca3fb9a48d4ab70615e685bc440efc",
+    "test/run-host.mjs": "24e71bc8f5416b66672838a04bfc97e387f31288064da7e4479fdb6b8c97f4a7",
+    "test/language-parity-host.cjs": "c56fe2fc61bdd583a49069e5a7c3a2895b50ca4d2ce7de8a958640c94589d60b",
+    "test/language-performance-host.cjs": "a1eeb5297288d98392db852691a4aa3631936fe4cd284b6094585afc8cbdd0c1",
+    "test/language-buhmfo-host.cjs": "a4a7b62bda9d28209e17cf93e109c8db688e4beecfc67b7ca97dfc70aa7972e8"
+  },
+  "platform": "Linux x86_64 GNU; VSCodium 1.109.5",
+  "checks": {
+    "typecheck": true,
+    "bundle": true,
+    "node_passed": 198,
+    "bun_passed": 198,
+    "skipped": 0,
+    "small_cli_lsp": {
+      "passed": true,
+      "files": 2,
+      "diagnostics": 9,
+      "policy_enabled": true,
+      "evidence": "/home/akalsin/Documents/Projects/eska-playground/t89-acceptance-64abnlk1/profile-ljlsa_w8/parity-final.json",
+      "sha256": "80f6e64239de00dcc88feb7fedba0186bf4f4d92398e81e536dbfb70e9c3a48e"
+    },
+    "large_context": {
+      "passed": true,
+      "suite": "buhmfo-lifecycle",
+      "vscode": "1.109.5",
+      "sources": 6,
+      "support_policy": false,
+      "native_file_watcher_readiness_attempts": 35,
+      "xml_global_resolution": true,
+      "ordinary_xml_pid_preserved": true,
+      "branch_roundtrip": true,
+      "branch_diagnostics_fresh": true,
+      "root_fingerprint_roundtrip": true,
+      "metadata_pid_preserved": true,
+      "application_sources_roundtrip": [
+        6,
+        1,
+        6
+      ],
+      "excluded_extension_diagnostics_cleared": true,
+      "evidence": "/home/akalsin/Documents/Projects/eska-playground/t89-buhmfo-lifecycle-o7u5kx1s/report-final.json",
+      "sha256": "70d808e7b8feab729e9ef45da75b978d0a43d77df7054871e51c4e454aa522d5"
+    },
+    "large_cli_lsp": {
+      "passed": true,
+      "files": 23162,
+      "complete": true,
+      "all_published_diagnostics_equal": true,
+      "total_diagnostics": 1362653,
+      "selected_native_lsp": [
+        {
+          "file": "/home/akalsin/Documents/Projects/eska-playground/t89-buhmfo-lifecycle-o7u5kx1s/project/src/ExternalSystems/src/WebServices/es_GetData/Ext/Module.bsl",
+          "diagnostics": 5,
+          "equal": true
+        },
+        {
+          "file": "/home/akalsin/Documents/Projects/eska-playground/t89-buhmfo-lifecycle-o7u5kx1s/project/src/buhmfo/src/Catalogs/Номенклатура/Ext/ObjectModule.bsl",
+          "diagnostics": 3,
+          "equal": true
+        },
+        {
+          "file": "/home/akalsin/Documents/Projects/eska-playground/t89-buhmfo-lifecycle-o7u5kx1s/project/src/buhmfo/src/CommonModules/GoogleПереводчик/Ext/Module.bsl",
+          "diagnostics": 4,
+          "equal": true
+        }
+      ],
+      "lsp_comparison_fields": [
+        "code",
+        "severity",
+        "start_line",
+        "start_column",
+        "end_line",
+        "end_column",
+        "message without upstream standard suffix"
+      ],
+      "native_lsp_tags": "Not captured by the native fixture; public CLI tags were compared against all upstream JSONL diagnostics",
+      "root_functional_receipt": "eska/docs/measurements/t89-functional.json"
+    }
+  },
+  "performance": {
+    "series": "/home/akalsin/Documents/Projects/eska-playground/t89-acceptance-64abnlk1/series-fresh-x3nxjx6_",
+    "passed_launches": 20,
+    "repeats_per_mode_per_variant": 5,
+    "operations_per_launch": 30,
+    "fresh_semantic_repair_required": true,
+    "idle_seconds": 5,
+    "additional_steady_hover_repeats": 30,
+    "acceptance": "failed; tree/language startup and interleaved definition exceed the original tolerance. See root ESKA t89-corrected.json.",
+    "follow_up_task": "T106",
+    "follow_up_status": "PLANNED",
+    "fixed_t90_tolerances_changed": false
+  },
+  "native_source_watch_note": "The large native editor test waits for an observed external BSL roundtrip before switching branches. No additional watcher or manual reload is injected in the final run.",
+  "environments_unverified": [
+    "Windows",
+    "macOS",
+    "VS Code",
+    "Remote"
+  ],
+  "date": "2026-10-22",
+  "status": "done_with_deferred_performance",
+  "functional_status": "passed",
+  "test_revision": "7d326c1",
+  "acceptance_decision": {
+    "date": "2026-10-22",
+    "source": "Direct human reply in this chat",
+    "user_quote": "Добавить как задачу оптимизации. Прогодим более сильной моделью",
+    "t89_acceptance": "accepted_with_documented_performance_deferral",
+    "performance_gates": "failed; original numeric results and tolerances preserved",
+    "follow_up_task": "T106",
+    "follow_up_status": "PLANNED",
+    "follow_up_execution": "Later with a stronger model; not started",
+    "scope": "Current Linux/VSCodium; other environments unverified by prior user decision"
+  }
+}

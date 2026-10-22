@@ -3,6 +3,19 @@ import { dirname, isAbsolute, relative, sep } from "node:path";
 import { MetadataTree, type ProjectTree } from "./tree.js";
 import { nativePath } from "./source.js";
 
+/** Share source filtering between metadata batches and language-only sources outside the selected tree. */
+export function watchSourceFiles(source: string, observed: (path: string) => void): vscode.FileSystemWatcher {
+  const watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(vscode.Uri.file(source), "**/*"));
+  /** Directory events matter too; cache/Git writes must never feed analysis invalidation loops. */
+  const changed = (uri: vscode.Uri): void => {
+    const path = relative(source, uri.fsPath), components = path.split(sep);
+    if (!path || isAbsolute(path) || components.includes("..") || components.includes(".git") || components.includes(".eska")) return;
+    observed(uri.fsPath);
+  };
+  watcher.onDidCreate(changed); watcher.onDidChange(changed); watcher.onDidDelete(changed);
+  return watcher;
+}
+
 /** Bound and serialize filesystem batches; overflow becomes a full refresh rather than lost changes. */
 export class ProjectWatcher implements vscode.Disposable {
   private readonly watcher: vscode.FileSystemWatcher;
@@ -15,19 +28,15 @@ export class ProjectWatcher implements vscode.Disposable {
   private readonly source: string;
 
   constructor(private readonly tree: MetadataTree, readonly project: ProjectTree,
-    private readonly failed: (error: unknown) => void) {
+    private readonly failed: (error: unknown) => void, private readonly observed: (path: string) => void) {
     this.source = nativePath(project.info.sourcePath);
-    this.watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(vscode.Uri.file(this.source), "**/*"));
-    this.watcher.onDidCreate((uri) => this.add(uri));
-    this.watcher.onDidChange((uri) => this.add(uri));
-    this.watcher.onDidDelete((uri) => this.add(uri));
+    this.watcher = watchSourceFiles(this.source, path => this.add(path));
   }
 
-  /** Include directory renames/deletions; exclude backend cache and Git internals to prevent feedback. */
-  private add(uri: vscode.Uri): void {
-    const path = relative(this.source, uri.fsPath);
-    const components = path.split(sep);
-    if (!path || isAbsolute(path) || components.includes("..") || components.includes(".git") || components.includes(".eska")) return;
+  /** Queue only source-relative paths already validated by the shared observer. */
+  private add(file: string): void {
+    const path = relative(this.source, file);
+    this.observed(file);
     if (!this.full) this.paths.add(path);
     if (this.paths.size > 4096) { this.paths.clear(); this.full = true; }
     this.schedule();
@@ -85,7 +94,7 @@ export class ProjectWatcher implements vscode.Disposable {
 }
 
 /** Watch exact manifests along discovery ancestry without parsing TOML or traversing directories. */
-export function watchManifests(start: string, projects: readonly ProjectTree[], changed: () => void): vscode.Disposable {
+export function watchManifests(start: string, projects: readonly ProjectTree[], changed: () => void, observed: () => void): vscode.Disposable {
   const folders = new Set(projects.map((project) => nativePath(project.info.rootPath)));
   let folder = start;
   while (!folders.has(folder)) {
@@ -103,7 +112,7 @@ export function watchManifests(start: string, projects: readonly ProjectTree[], 
   const watchers = [...folders].map((path) => {
     const watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(vscode.Uri.file(path), "eska.toml"));
     /** Replace the discovery session once after a burst of manifest changes. */
-    const update = (): void => { clearTimeout(timer); timer = setTimeout(changed, 150); };
+    const update = (): void => { observed(); clearTimeout(timer); timer = setTimeout(changed, 150); };
     watcher.onDidCreate(update); watcher.onDidChange(update); watcher.onDidDelete(update);
     return watcher;
   });

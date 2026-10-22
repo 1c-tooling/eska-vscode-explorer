@@ -1,0 +1,150 @@
+{
+  "schema_version": 1,
+  "stage": "T87",
+  "date": "2026-10-21",
+  "status": "passed-linux",
+  "explorer_parent_revision": "cfbc836363f364ed3a483c9e00dd684105577d77",
+  "root_revision": "61483658d18a654befd87d2bb8c636ce773db968",
+  "platform": "Linux x86_64 GNU",
+  "editor": "VSCodium 1.109.5",
+  "extension_host_node": "22.21.1",
+  "cli_node": "22.23.1",
+  "bun": "1.4.2",
+  "analyzer": "0.3.2",
+  "known_extension_id": "elishevkirill.bsl-analyzer-lsp",
+  "runtime_sources": {
+    "src/language/service.ts": "17a9518329eb47bcaea808ff38bdef607fcb9596d43c644fafb82617c3fce6ab",
+    "src/tooling/setup.ts": "535b07b0a19fea5485cb490361d9b916e0b91285436214829030f3211e2f1ff1",
+    "src/messages.ts": "ebecca20b79164a63b1b123b57ffdf4c7c2fc0a4cdeffc61baba1a66255736f8",
+    "package.json": "94ac1b04f2ff6b109a983c737f70212997255fd6d5bda74788fa27cafc4fb1ae",
+    "bun.lock": "8775a019abafe363688123c762ebcb2d515b29807ce43c5dd1ea8bf916b69600",
+    "scripts/bundle.mjs": "beb356ba5b762b4c3f93386ce9d1bcc74925c2566baceac4c45cb88bbff08aaa"
+  },
+  "checks": {
+    "typecheck": "passed",
+    "compile": "passed",
+    "node": {
+      "passed": 178,
+      "failed": 0,
+      "skipped": 0
+    },
+    "bun": {
+      "passed": 178,
+      "failed": 0,
+      "skipped": 0
+    },
+    "native_source": {
+      "conflict": [
+        {
+          "passed": true,
+          "suite": "language-conflict",
+          "vscode": "1.109.5",
+          "initially_inactive": true,
+          "registry_fixture": true,
+          "real_validator_cancelled": true,
+          "config_not_published_on_cancel": true,
+          "active_own_client_reaped": true,
+          "lease_released": true,
+          "resumed_after_removal": true,
+          "shutdownPids": [
+            20750,
+            20791,
+            20864,
+            20714
+          ]
+        }
+      ],
+      "reload": [
+        {
+          "passed": true,
+          "suite": "language-conflict-reload",
+          "vscode": "1.109.5",
+          "run": 0,
+          "available": true,
+          "state": "suspended-conflict",
+          "registry_fixture": true,
+          "shutdownPids": [
+            21363
+          ]
+        },
+        {
+          "passed": true,
+          "suite": "language-conflict-reload",
+          "vscode": "1.109.5",
+          "run": 1,
+          "available": false,
+          "state": "ready",
+          "registry_fixture": true,
+          "shutdownPids": [
+            21620,
+            21647
+          ]
+        },
+        {
+          "passed": true,
+          "suite": "language-conflict-reload",
+          "vscode": "1.109.5",
+          "run": 2,
+          "available": true,
+          "state": "suspended-conflict",
+          "registry_fixture": true,
+          "shutdownPids": [
+            21977
+          ]
+        }
+      ],
+      "foreign": [
+        {
+          "passed": true,
+          "suite": "language-foreign",
+          "vscode": "1.109.5",
+          "extension": "ElishevKirill.bsl-analyzer-lsp",
+          "extension_version": "0.1.12",
+          "initially_active": true,
+          "foreign_hover": 1,
+          "own_session_absent": true,
+          "foreign_pids_preserved": [
+            25365
+          ],
+          "config_unchanged": true,
+          "shutdownPids": [
+            25365,
+            25378
+          ]
+        }
+      ]
+    }
+  },
+  "vsix": {
+    "path": "/home/akalsin/Documents/Projects/eska-playground/t87-vsix-3eghybq_/eska-explorer.vsix",
+    "receipt": "/home/akalsin/Documents/Projects/eska-playground/t87-vsix-3eghybq_/receipt.json",
+    "checksum_note": "Final archive hash is saved beside it to avoid a self-referential hash inside the VSIX."
+  },
+  "evidence_scope": {
+    "inactive_registry_fixture": "Own tiny extension with the known ID; no foreign engine. Actual public registry and install/uninstall, real validator and owned LSP.",
+    "reload_fixture": "Same private profile, three real host launches; startup disable flag only in middle launch.",
+    "foreign_client": "Actual frozen extension 0.1.12 and published 0.3.2; hover correct, its PID preserved after own stop, config unchanged.",
+    "update_conflict": "Mocked download/install boundaries exercise production ToolingSetup state preservation; archive transactions are separately accepted in T85.",
+    "async_races": "Production LanguageService with mocked process, protocol and UI boundaries; every awaited startup boundary invalidated.",
+    "support_policy_in_native_language_profiles": false
+  },
+  "behavior": {
+    "activation_is_not_required_for_conflict": true,
+    "warning": "once per conflict episode",
+    "management_command": "workbench.extensions.search @id:elishevkirill.bsl-analyzer-lsp",
+    "foreign_control": "No activation, disable, uninstall, storage edit or process termination by Explorer.",
+    "resume": "Fresh context only after registry absence and when language features are enabled.",
+    "updates": "Independent checks/installations preserve current conflict phase and detail."
+  },
+  "unverified_environments": [
+    "Windows",
+    "macOS",
+    "VS Code",
+    "Remote"
+  ],
+  "not_accepted": [
+    "T88 atomic source-edit policy, protected URI and context freshness",
+    "T89 final minimal-installation matrix and buhmfo performance"
+  ],
+  "harness_note": "Initial foreign PID detection was corrected to the actual --stdio argument appended by the frozen language-client transport."
+}

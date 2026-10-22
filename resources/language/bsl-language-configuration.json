@@ -1,0 +1,86 @@
+{
+  "comments": {
+    "lineComment": "//"
+  },
+  "brackets": [
+    [
+      "(",
+      ")"
+    ],
+    [
+      "[",
+      "]"
+    ]
+  ],
+  "autoClosingPairs": [
+    {
+      "open": "(",
+      "close": ")",
+      "notIn": [
+        "string",
+        "comment"
+      ]
+    },
+    {
+      "open": "[",
+      "close": "]",
+      "notIn": [
+        "string",
+        "comment"
+      ]
+    },
+    {
+      "open": "\"",
+      "close": "\"",
+      "notIn": [
+        "string",
+        "comment"
+      ]
+    },
+    {
+      "open": "'",
+      "close": "'",
+      "notIn": [
+        "string",
+        "comment"
+      ]
+    }
+  ],
+  "surroundingPairs": [
+    [
+      "(",
+      ")"
+    ],
+    [
+      "[",
+      "]"
+    ],
+    [
+      "\"",
+      "\""
+    ]
+  ],
+  "wordPattern": "[^\\s\\x22\\x27\\x60.,;:()\\[\\]{}\\\\+*/%<>=!&|?\\-]+",
+  "folding": {
+    "markers": {
+      "start": {
+        "pattern": "^\\s*#(?:Область|Region)(?:\\s|$)",
+        "flags": "i"
+      },
+      "end": {
+        "pattern": "^\\s*#(?:КонецОбласти|EndRegion)(?:\\s|$)",
+        "flags": "i"
+      }
+    }
+  },
+  "indentationRules": {
+    "increaseIndentPattern": {
+      "pattern": "^\\s*(?:(?:Асинх|Async)\\s+)?(?:Процедура|Функция|Procedure|Function|Если|ИначеЕсли|If|ElsIf|Для|Пока|For|While|Попытка|Try|Иначе|Else|Исключение|Except)(?:\\s|$)",
+      "flags": "i"
+    },
+    "decreaseIndentPattern": {
+      "pattern": "^\\s*(?:КонецПроцедуры|КонецФункции|КонецЕсли|КонецЦикла|КонецПопытки|EndProcedure|EndFunction|EndIf|EndDo|EndTry|Иначе|Else|ИначеЕсли|ElsIf|Исключение|Except)(?:\\s|;|$)",
+      "flags": "i"
+    }
+  }
+}

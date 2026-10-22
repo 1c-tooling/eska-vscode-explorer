@@ -31,7 +31,7 @@ exports.run = async function () {
   await vscode.workspace.getConfiguration('eska.explorer').update('executable', process.env.ESKA_HOST_GLOBAL_BINARY, vscode.ConfigurationTarget.Workspace);
   await vscode.commands.executeCommand('eska.explorer.restart');
   await until(() => explorer.connection.state.kind === 'error', 'incompatible override is rejected');
-  assert.equal(explorer.connection.state.error.code, 'incompatible');
+  assert.ok(['incompatible', 'handshakeFailed', 'legacyBackend'].includes(explorer.connection.state.error.code), 'the selected old component is rejected without fallback');
   await vscode.workspace.getConfiguration('eska.explorer').update('executable', process.env.ESKA_TEST_BINARY, vscode.ConfigurationTarget.Workspace);
   await vscode.commands.executeCommand('eska.explorer.restart');
   await until(() => explorer.connection.state.kind === 'ready', 'compatible override reconnects');

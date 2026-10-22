@@ -1,12 +1,12 @@
 import { isAbsolute } from "node:path";
 import { diagnostic, errorContext, type DiagnosticLog } from "./diagnostics.js";
 import { BackendProcess, type ProcessOptions } from "./process.js";
-import { API_VERSION, ExplorerError, isRecord, parseHandshake, parseWorkspace, type WorkspaceSession } from "./protocol.js";
+import { API_VERSION, LEGACY_API_VERSION, ExplorerError, isRecord, parseHandshake, parseWorkspace, type BackendKind, type WorkspaceSession } from "./protocol.js";
 
-export interface ConnectionTarget { executable: string; path: string; name: string; locale: "ru-RU" | "en-US" }
+export interface ConnectionTarget { executable: string; path: string; name: string; locale: "ru-RU" | "en-US"; backend?: BackendKind }
 export type ConnectionState =
   | { kind: "disconnected" | "connecting" | "stopping" }
-  | { kind: "ready"; session: WorkspaceSession; version: string; supportPolicy: boolean; supportFiles: boolean; target: ConnectionTarget }
+  | { kind: "ready"; session: WorkspaceSession; version: string; supportPolicy: boolean; supportFiles: boolean; analyzerConfiguration: boolean; target: ConnectionTarget }
   | { kind: "error"; error: ExplorerError };
 
 /** Own the lifecycle independently of VS Code so restarts can be tested with real pipes. */
@@ -62,6 +62,18 @@ export class Connection {
     return { dispose: () => { this.listeners.delete(listener); } };
   }
 
+  /** Analyzer RPCs use their own input schema and lease, without a metadata generation or injected sessionId. */
+  async analyzerRequest(method: "analyzer/context" | "analyzer/configStatus" | "analyzer/configPrepare" | "analyzer/migrationPreview"
+    | "analyzer/migrationApply" | "analyzer/acquire" | "analyzer/release", params: Record<string, unknown>, signal?: AbortSignal): Promise<unknown> {
+    const state = this.current;
+    if (state.kind !== "ready" || !state.analyzerConfiguration) throw new ExplorerError("incompatible");
+    const child = this.sessionChild(state.session.sessionId);
+    const timeout = ["analyzer/configPrepare", "analyzer/migrationPreview", "analyzer/migrationApply"].includes(method) ? 190_000 : 30_000;
+    const result = await child.request(method, params, timeout, signal);
+    if (child !== this.sessionChild(state.session.sessionId)) throw new ExplorerError("obsolete");
+    return result;
+  }
+
   /** Validate both lifecycle state and session identity before any metadata operation. */
   private sessionChild(sessionId: string): BackendProcess {
     if (this.current.kind !== "ready" || this.current.session.sessionId !== sessionId || !this.child) {
@@ -84,12 +96,15 @@ export class Connection {
       try {
         await this.stopChild();
         if (revision !== this.revision) return;
+        const backend = target.backend ?? "project";
         if (!isAbsolute(target.path) || !target.executable.trim()
+          || !["project", "legacy"].includes(backend)
           || (!isAbsolute(target.executable) && /[\\/]/.test(target.executable))
           || target.executable.includes("\0") || target.executable !== target.executable.trim()) {
           throw new ExplorerError("invalidExecutable");
         }
         const child = this.create({ executable: target.executable, cwd: target.path, log: this.log,
+          args: backend === "legacy" ? ["ide", "--stdio"] : ["serve", "--stdio"],
           notification: (method, params) => {
             if (revision === this.revision) for (const listener of this.listeners) listener(method, params);
           },
@@ -99,9 +114,9 @@ export class Connection {
         });
         this.child = child;
         const response = await child.request("initialize", {
-          apiVersion: API_VERSION, client: { name: "eska-explorer", version: this.version }, locale: target.locale, allowPropertyEdits: true,
+          apiVersion: backend === "legacy" ? LEGACY_API_VERSION : API_VERSION, client: { name: "eska-explorer", version: this.version }, locale: target.locale, allowPropertyEdits: true,
         }, 10_000);
-        const version = parseHandshake(response);
+        const version = parseHandshake(response, backend);
         negotiated = true;
         if (revision !== this.revision) return;
         const session = parseWorkspace(await child.request("workspace/open", {
@@ -112,7 +127,8 @@ export class Connection {
             projects: session.projects.map((project) => ({ projectId: project.projectId, type: project.type,
               rootPath: project.rootPath, sourcePath: project.sourcePath, generation: project.generation })) });
           this.set({ kind: "ready", session, version, supportPolicy: isRecord(response) && isRecord(response.capabilities) && response.capabilities.supportPolicy === true,
-            supportFiles: isRecord(response) && isRecord(response.capabilities) && response.capabilities.supportFiles === true, target });
+            supportFiles: isRecord(response) && isRecord(response.capabilities) && response.capabilities.supportFiles === true,
+            analyzerConfiguration: isRecord(response) && isRecord(response.capabilities) && response.capabilities.analyzerConfiguration === true, target });
         }
       } catch (error) {
         if (!negotiated && error instanceof ExplorerError

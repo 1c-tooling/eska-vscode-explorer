@@ -2,8 +2,9 @@ import * as vscode from 'vscode';
 import { Connection, type ConnectionTarget } from './connection.js';
 import { MetadataTree } from './tree.js';
 import { ProjectWatcher, watchManifests } from './watch.js';
+import { nativePath } from './source.js';
 
-/** Protect additional VS Code folders without changing the Explorer's selected navigation context. */
+/** Protect additional workspace/application roots without changing the selected navigation tree. */
 export class SupportContexts {
   private revision = 0;
   private connections: Connection[] = [];
@@ -25,6 +26,9 @@ export class SupportContexts {
     this.publish([...this.trees], [...this.pending]);
     for (const target of targets) {
       if (revision !== this.revision) return;
+      if (this.trees.some(tree => tree.projects.some(project => nativePath(project.info.rootPath) === target.path))) {
+        this.pending.delete(target.path); this.publish([...this.trees], [...this.pending]); continue;
+      }
       let tree: MetadataTree | undefined;
       const resources: vscode.Disposable[] = [];
       const connection = new Connection(this.version, state => {
@@ -40,8 +44,8 @@ export class SupportContexts {
             else await tree?.refresh(project).catch(error => this.log(String(error)));
           });
           this.trees.push(tree);
-          for (const project of tree.projects) resources.push(new ProjectWatcher(tree, project, error => this.log(String(error))));
-          resources.push(watchManifests(target.path, tree.projects, () => { void connection.connect(target); }));
+          for (const project of tree.projects) resources.push(new ProjectWatcher(tree, project, error => this.log(String(error)), () => {}));
+          resources.push(watchManifests(target.path, tree.projects, () => { void connection.connect(target); }, () => {}));
         }
         this.publish([...this.trees], [...this.pending]);
       }, text => this.log(text));

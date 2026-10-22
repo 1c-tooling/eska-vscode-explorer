@@ -152,17 +152,21 @@ class ReleaseTests(unittest.TestCase):
         run(binary, "prepare-release")
         self.assertEqual(json.loads((self.root / "package.json").read_text())["version"], "0.1.1")
         self.assertIn("Исправлено подключение", (self.root / "CHANGELOG.md").read_text())
+        self.assertIn("### Исправлено", (self.root / "CHANGELOG.md").read_text())
+        self.assertNotIn("### Fixes", (self.root / "CHANGELOG.md").read_text())
         self.assertEqual(set(run("git", "diff", "--cached", "--name-only").splitlines()), {"package.json", "CHANGELOG.md"})
         run("git", "commit", "-qm", "chore(release): Подготовлена версия 0.1.1")
         run("git", "tag", "v0.1.1")
         run("git", "commit", "--allow-empty", "-qm", "feat(explorer): Добавлена возможность")
         run(binary, "prepare-release")
         self.assertEqual(json.loads((self.root / "package.json").read_text())["version"], "0.1.2")
+        self.assertIn("### Добавлено", (self.root / "CHANGELOG.md").read_text())
         run("git", "commit", "-qm", "chore(release): Подготовлена версия 0.1.2")
         run("git", "tag", "v0.1.2")
         run("git", "commit", "--allow-empty", "-qm", "feat(explorer)!: Изменён контракт")
         run(binary, "prepare-release")
         self.assertEqual(json.loads((self.root / "package.json").read_text())["version"], "0.2.0")
+        self.assertIn("### Несовместимые изменения", (self.root / "CHANGELOG.md").read_text())
 
 
 

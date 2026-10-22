@@ -1,4 +1,4 @@
-import { API_VERSION, MAX_HEADER, MAX_REQUEST, MAX_RESPONSE } from "../out/protocol.js";
+import { API_VERSION, LEGACY_API_VERSION, MAX_HEADER, MAX_REQUEST, MAX_RESPONSE } from "../out/protocol.js";
 
 const mode = process.argv[2] ?? "ok";
 let input = Buffer.alloc(0);
@@ -36,9 +36,9 @@ function handle(request) {
   if (mode === "garbage") { process.stdout.write("ordinary command help\r\n\r\n"); return; }
   if (request.method === "initialize") {
     initialized = true;
-    const result = { apiVersion: mode === "incompatible" ? { major: 2, minor: 0 } : API_VERSION,
-      server: { name: "eska", version: "test" },
-      capabilities: { search: true, clientFileEvents: true, designerXml: true, readOnly: false, propertyEditing: true, metadataRename: true, linkedPropertyEdits: true, unsignedIntegerProperties: true, multiContext: false },
+    const result = { apiVersion: mode === "incompatible" ? { major: 2, minor: 0 } : mode === "legacy" ? LEGACY_API_VERSION : API_VERSION,
+      server: { name: mode === "legacy" ? "eska" : "eska-project", version: "test" },
+      capabilities: { analyzerConfiguration: mode !== "legacy", search: true, clientFileEvents: true, designerXml: true, readOnly: false, propertyEditing: true, metadataRename: true, linkedPropertyEdits: true, unsignedIntegerProperties: true, multiContext: false },
       limits: { maxHeaderBytes: MAX_HEADER, maxRequestBytes: MAX_REQUEST, maxResponseBytes: MAX_RESPONSE } };
     if (mode === "slow") setTimeout(() => ok(result), 200);
     else ok(result);

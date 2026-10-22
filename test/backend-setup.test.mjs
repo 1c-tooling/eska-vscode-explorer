@@ -75,13 +75,38 @@ test("development override bypasses global probes and installation without bypas
   assert.equal(ui.tasks.length, 0);
 });
 
+/** Selecting the project component cannot invoke the monolith's probe, updater or installer. */
+test("project default resolves only eska-project and never installs the legacy CLI", async t => {
+  const { root, setup } = await fixture(t);
+  const path = join(root, "bin/eska-project");
+  replace(t, installation, "inspectGlobal", async () => assert.fail("legacy CLI probe"));
+  replace(t, installation, "latestRelease", async () => assert.fail("legacy release query"));
+  replace(t, installation, "findGlobal", async (_paths, _home, _platform, component) => {
+    assert.equal(component, "eska-project"); return path;
+  });
+  assert.equal(await setup.ensure(), path);
+  await setup.background();
+  await setup.check(true);
+  assert.equal(ui.tasks.length, 0);
+});
+
+/** A missing standalone component stays missing instead of silently falling back to eska. */
+test("missing project backend gives an actionable error without a legacy bootstrap", async t => {
+  const { setup } = await fixture(t);
+  replace(t, installation, "inspectGlobal", async () => assert.fail("legacy CLI probe"));
+  replace(t, installation, "latestRelease", async () => assert.fail("legacy release query"));
+  replace(t, installation, "findGlobal", async () => undefined);
+  await assert.rejects(setup.ensure(), { code: "executableMissing" });
+  assert.equal(ui.tasks.length, 0);
+});
+
 /** The ordinary default still resolves and checks the global CLI. */
 test("default backend keeps global compatibility preflight", async t => {
   const { root, setup } = await fixture(t);
   const path = join(root, "global/eska");
   let probes = 0;
   replace(t, installation, "inspectGlobal", async () => { probes++; return { path, version: "0.14.1", compatible: true }; });
-  assert.equal(await setup.ensure(), path);
+  assert.equal(await setup.ensure(undefined, undefined, "legacy"), path);
   assert.equal(probes, 1);
 });
 
@@ -90,10 +115,10 @@ test("declining a CLI update starts no task; accepting handles early completion 
   const path = join(root, "bin/eska");
   replace(t, installation, "inspectGlobal", async () => ({ path, version: ui.tasks.length ? "0.11.1" : "0.11.0", compatible: true, selfUpdate: true }));
   replace(t, installation, "checkUpdate", async () => ({ version: "0.11.1", method: "cargo" }));
-  await setup.check(true);
+  await setup.check(true, "legacy");
   assert.deepEqual(events, []); assert.equal(ui.tasks.length, 0);
   ui.approved = true;
-  await setup.check(true);
+  await setup.check(true, "legacy");
   assert.deepEqual(events, ["disconnect", "reconnect"]);
   assert.equal(ui.tasks.length, 1);
   assert.deepEqual(JSON.parse(JSON.stringify(ui.tasks[0].args[4].args.slice(0, 2))), [path, ["update", "--target-version", "0.11.1", "--format", "json"]]);
@@ -108,7 +133,7 @@ test("an update accepted from a background notification reports task failure and
   replace(t, installation, "inspectGlobal", async () => ({ path: join(root, "eska"), version: "0.11.0", compatible: true, selfUpdate: true }));
   replace(t, installation, "checkUpdate", async () => ({ version: "0.11.1", method: "installer" }));
   ui.approved = true; ui.exitCode = 7;
-  await setup.check(false);
+  await setup.check(false, "legacy");
   assert.equal(ui.errors.length, 1);
   assert.deepEqual(events, ["disconnect"]);
   assert.equal(ui.paths.length, 0);
@@ -127,7 +152,7 @@ test("bootstrap uses exactly the release approved by the user and disposes tempo
     return { executable: "never-executed", args: [], cwd: root, async dispose() { disposed++; } };
   });
   ui.approved = true;
-  await setup.check(true);
+  await setup.check(true, "legacy");
   assert.equal(queries, 1); assert.equal(disposed, 1); assert.equal(ui.errors.length, 0);
 });
 
@@ -142,7 +167,7 @@ test("shutdown cancels and awaits an in-flight CLI probe without opening install
     await new Promise(resolve => { cleaned = resolve; });
     return undefined;
   });
-  const opening = setup.ensure();
+  const opening = setup.ensure(undefined, undefined, "legacy");
   await ready;
   let stopped = false;
   const shutdown = setup.shutdown().then(() => { stopped = true; });
@@ -169,7 +194,7 @@ test("shutdown waits for the installation task and removes its lock", async t =>
     return execution;
   });
   ui.approved = true;
-  const updating = setup.check(true);
+  const updating = setup.check(true, "legacy");
   await ready;
   await setup.shutdown();
   await updating;
@@ -183,10 +208,10 @@ test("network failure stays quiet in the background and never disconnects", asyn
   const { root, setup, events } = await fixture(t);
   replace(t, installation, "inspectGlobal", async () => ({ path: join(root, "eska"), version: "0.11.0", compatible: true, selfUpdate: true }));
   replace(t, installation, "checkUpdate", async () => { throw new Error("network unavailable"); });
-  await setup.check(false);
+  await setup.check(false, "legacy");
   assert.deepEqual(events, []);
   assert.equal(ui.tasks.length + ui.errors.length, 0);
-  await setup.check(true);
+  await setup.check(true, "legacy");
   assert.equal(ui.errors.length, 1);
   assert.deepEqual(events, []);
 });
@@ -197,7 +222,7 @@ test("an older copy remaining first in PATH prevents a false successful update",
   replace(t, installation, "inspectGlobal", async () => ({ path: join(root, "first/eska"), version: "0.11.0", compatible: true, selfUpdate: true }));
   replace(t, installation, "checkUpdate", async () => ({ version: "0.11.1", method: "installer" }));
   ui.approved = true;
-  await setup.check(true);
+  await setup.check(true, "legacy");
   assert.equal(ui.errors.length, 1);
   assert.deepEqual(events, ["disconnect"]);
   assert.equal(ui.tasks.length, 1);

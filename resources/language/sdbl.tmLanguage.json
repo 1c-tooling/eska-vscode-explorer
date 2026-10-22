@@ -1,0 +1,42 @@
+{
+  "name": "SDBL",
+  "scopeName": "source.sdbl",
+  "patterns": [
+    {
+      "name": "comment.line.double-slash.sdbl",
+      "begin": "//",
+      "end": "$"
+    },
+    {
+      "name": "string.quoted.double.sdbl",
+      "begin": "\"",
+      "end": "\"(?!\")",
+      "patterns": [
+        {
+          "name": "constant.character.escape.sdbl",
+          "match": "\"\""
+        }
+      ]
+    },
+    {
+      "name": "variable.parameter.sdbl",
+      "match": "&[\\p{L}_][\\p{L}0-9_]*"
+    },
+    {
+      "name": "keyword.control.sdbl",
+      "match": "(?i:\\b(?:ВЫБРАТЬ|РАЗЛИЧНЫЕ|РАЗРЕШЕННЫЕ|ПЕРВЫЕ|КАК|ИЗ|ГДЕ|ИМЕЮЩИЕ|ОБЪЕДИНИТЬ|ВСЕ|УПОРЯДОЧИТЬ|ПО|ВОЗР|УБЫВ|СГРУППИРОВАТЬ|ИТОГИ|ОБЩИЕ|ПОМЕСТИТЬ|ИНДЕКСИРОВАТЬ|УНИЧТОЖИТЬ|СОЕДИНЕНИЕ|ЛЕВОЕ|ПРАВОЕ|ПОЛНОЕ|ВНУТРЕННЕЕ|ВНЕШНЕЕ|ВЫБОР|КОГДА|ТОГДА|ИНАЧЕ|КОНЕЦ|ЕСТЬ|NULL|ИСТИНА|ЛОЖЬ|И|ИЛИ|НЕ|В|МЕЖДУ|ПОДОБНО|ССЫЛКА|SELECT|DISTINCT|ALLOWED|TOP|AS|FROM|WHERE|HAVING|UNION|ALL|ORDER|BY|ASC|DESC|GROUP|TOTALS|OVERALL|INTO|INDEX|DROP|JOIN|LEFT|RIGHT|FULL|INNER|OUTER|CASE|WHEN|THEN|ELSE|END|IS|TRUE|FALSE|AND|OR|NOT|IN|BETWEEN|LIKE|REFS)\\b)"
+    },
+    {
+      "name": "constant.numeric.sdbl",
+      "match": "\\b[0-9]+(?:\\.[0-9]+)?\\b"
+    },
+    {
+      "name": "support.function.sdbl",
+      "match": "[\\p{L}_][\\p{L}0-9_]*(?=\\s*\\()"
+    },
+    {
+      "name": "keyword.operator.sdbl",
+      "match": "<>|<=|>=|[=<>+*/%\\-]"
+    }
+  ]
+}

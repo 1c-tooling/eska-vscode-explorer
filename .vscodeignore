@@ -5,6 +5,9 @@
 !README.md
 !CHANGELOG.md
 !out/*.js
+!out/THIRD-PARTY-NOTICES.txt
+!resources/analyzer-notices/*
+!resources/language/*
 !resources/icons/**/*.svg
 !resources/properties/*.css
 !resources/properties/*.js
@@ -12,6 +15,7 @@
 !resources/rename/*.css
 !resources/rename/*.js
 !docs/*.md
+!docs/images/*.png
 !docs/measurements/*.json
 !resources/icon.png
 !resources/icons/support/LICENSE

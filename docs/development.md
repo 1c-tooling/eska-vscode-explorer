@@ -6,8 +6,9 @@
 
 Зависимости закреплены в `bun.lock`: TypeScript 7.0.2, API VS Code 1.109.0,
 типы Node 22.20.3. Инструменты проверены 2026-09-18; Bun — 1.4.2.
-Production-код не имеет npm runtime-зависимостей и исполняется в Node extension
-host VS Code. Bun используется для инструментов проекта.
+Production-код работает в Node Extension Host. `yauzl` 3.4.0, `vscode-languageclient`
+10.1.2 и их зависимости включаются в bundle через esbuild 0.28.2; npm modules из checkout
+установленному VSIX не нужны. Bun используется для инструментов проекта.
 
 ```bash
 bun install --frozen-lockfile --ignore-scripts
@@ -27,11 +28,14 @@ node --test test/*.test.mjs
 собственный временный каталог внутри соседнего `eska-playground`:
 
 ```bash
-ESKA_TEST_BINARY="$(realpath ../eska/target/debug/eska)" \
+ESKA_TEST_BINARY="$(realpath ../eska/target/debug/eska-project)" \
 ESKA_TEST_ROOT="$(realpath ../eska-playground)" \
 node --test test/integration.test.mjs test/tree.test.mjs test/search.test.mjs
 ```
 
+Дополнительный `ESKA_LEGACY_TEST_BINARY` указывает на прежнюю полную CLI
+для проверки явного legacy и отсутствия автоматического fallback.
+Для native legacy-профиля задайте также `ESKA_TEST_BACKEND=legacy`.
 Без `ESKA_TEST_BINARY` тесты реального backend пропускаются; unit/process tests остаются
 обязательными. Сборка/выгрузка 1С не запускается. Для ручного запуска после
 компиляции: `code --extensionDevelopmentPath="$PWD" <папка-проекта>`.
@@ -42,21 +46,21 @@ playground, проверяет XML/BSL, клавиатурное сворачи�
 внешние изменения, повреждение/восстановление XML и смену manifest:
 
 ```bash
-ESKA_TEST_BINARY="$(realpath ../eska/target/debug/eska)" \
+ESKA_TEST_BINARY="$(realpath ../eska/target/debug/eska-project)" \
 VSCODE_EXECUTABLE=codium bun run test:host
 ```
 
 Отдельный нативный сценарий фильтра (без команд клавиатурного фокуса):
 
 ```bash
-ESKA_TEST_BINARY="$(realpath ../eska/target/debug/eska)" \
+ESKA_TEST_BINARY="$(realpath ../eska/target/debug/eska-project)" \
 VSCODE_EXECUTABLE=codium node test/run-host.mjs test/filter-host.cjs
 ```
 
 Сценарий иконок проверяет четыре темы, вложенные элементы и уровни масштаба:
 
 ```bash
-ESKA_TEST_BINARY="$(realpath ../eska/target/debug/eska)" \
+ESKA_TEST_BINARY="$(realpath ../eska/target/debug/eska-project)" \
 VSCODE_EXECUTABLE=codium node test/run-host.mjs test/icons-host.cjs
 ```
 
@@ -101,7 +105,7 @@ VSCodium 1.109.5 (Node 22.21.1) подтвердил активацию, под�
 в нативном Extension Host:
 
 ```sh
-ESKA_TEST_BINARY="$(realpath ../eska/target/debug/eska)" \
+ESKA_TEST_BINARY="$(realpath ../eska/target/debug/eska-project)" \
 ESKA_TEST_ROOT="$(realpath ../eska-playground)" \
 VSCODE_EXECUTABLE=codium node test/run-host.mjs test/presentation-host.cjs
 ```
@@ -113,7 +117,7 @@ VSCODE_EXECUTABLE=codium node test/run-host.mjs test/presentation-host.cjs
 Нативная проверка предопределённых данных:
 
 ```sh
-ESKA_TEST_BINARY="$(realpath ../eska/target/debug/eska)" \
+ESKA_TEST_BINARY="$(realpath ../eska/target/debug/eska-project)" \
 ESKA_TEST_ROOT="$(realpath ../eska-playground)" \
 VSCODE_EXECUTABLE=codium node test/run-host.mjs test/predefined-host.cjs
 ```
@@ -125,7 +129,7 @@ VSCODE_EXECUTABLE=codium node test/run-host.mjs test/predefined-host.cjs
 Нативный сценарий использует собственный workspace с двумя проектами:
 
 ```sh
-ESKA_TEST_BINARY="$(realpath ../eska/target/debug/eska)" \
+ESKA_TEST_BINARY="$(realpath ../eska/target/debug/eska-project)" \
 VSCODE_EXECUTABLE=codium node test/run-host.mjs test/workspace-host.cjs
 ```
 
@@ -163,11 +167,11 @@ native shutdown и освобождение объектов за 20 подкл�
 `scripts/check-vsix.py`.
 
 ```sh
-ESKA_TEST_BINARY="$(realpath ../eska/target/debug/eska)" \
+ESKA_TEST_BINARY="$(realpath ../eska/target/debug/eska-project)" \
 ESKA_TEST_ROOT="$(realpath ../eska-playground)" \
 VSCODE_EXECUTABLE=codium node test/run-host.mjs test/properties-host.cjs
 
-ESKA_TEST_BINARY="$(realpath ../eska/target/debug/eska)" \
+ESKA_TEST_BINARY="$(realpath ../eska/target/debug/eska-project)" \
 ESKA_TEST_ROOT="$(realpath ../eska-playground)" \
 VSCODE_EXECUTABLE=codium node test/run-host.mjs test/properties-layout-host.cjs
 ```
@@ -215,3 +219,64 @@ is ready` после успешных проверок открытия форм
 нативных файловых событий остаётся неподтверждённой частью приёмки; её причина
 не установлена. Детерминированные проверки обновления вкладок выполняются
 в `properties-view.test.mjs`, независимо от файлового наблюдателя VSCodium.
+
+
+## Установщик компонентов T85
+
+`src/tooling/` содержит контракты, bounded probes/downloads, ZIP и транзакции
+T97, независимые состояния двух компонентов и UI. `test/tool-inspection.test.mjs`,
+`test/tool-installation.test.mjs` проверяют настоящие бинарники, совместные
+receipt и lock с Python CLI, malformed ZIP, rollback и отмену.
+`test/tool-setup.test.mjs` проверяет отдельные интервалы/настройки, ручную отмену,
+выбранный компонент, custom paths и сохранение приостановки клиента.
+
+```sh
+ESKA_TEST_ROOT="$(realpath ../eska-playground)" \
+ESKA_TEST_BINARY="$(realpath ../eska/target/debug/eska-project)" \
+ESKA_TEST_ANALYZER_BINARY=/absolute/path/bsl-analyzer-app \
+node --test test/tool-*.test.mjs
+```
+
+`test/native-tooling-install.mjs` требует также `ESKA_TEST_PROJECT_ARCHIVE`
+(абсолютный путь к component ZIP T97), скачивает официальный Analyzer и оставляет
+собственный изолированный стенд с `report.json`. Установка и native probes
+выполняются при пустом PATH. Полный монолит не вызывается.
+Для двух нативных индикаторов запустите `test/run-host.mjs test/tool-status-host.cjs`
+с теми же binary variables и `VSCODE_EXECUTABLE=codium`; `ESKA_TEST_VSIX`
+переводит проверку на код установленного пакета.
+
+## Языковой клиент T86
+
+`src/language/` владеет контекстом из Metadata API, config lease, LSP-клиентом
+и единственным дочерним процессом. Остановка и отмена проверяются настоящими
+процессами; [описание и команды](language-service.md#проверка).
+Обычные tree-профили runner отключают свой LSP. Для языковых профилей задайте
+`ESKA_TEST_LANGUAGE=1` и абсолютный `ESKA_TEST_ANALYZER_BINARY`.
+`ESKA_TEST_PYTHON` нужен только сценарию отмены с управляемым тестовым wrapper,
+он не является зависимостью расширения.
+
+## Конфликт расширений T87
+
+С binary variables из T86, `ESKA_TEST_LANGUAGE=1`, `ESKA_HOST_SUPPORT_DISABLED=1`
+и `VSCODE_EXECUTABLE=codium`:
+
+```sh
+ESKA_HOST_ENABLE_EXTENSIONS=1 ESKA_HOST_CONFLICT_FIXTURE=initial \
+  node test/run-host.mjs test/language-conflict-host.cjs
+ESKA_HOST_ENABLE_EXTENSIONS=1 ESKA_HOST_CONFLICT_FIXTURE=initial \
+  ESKA_HOST_CONFLICT_RELOAD=1 \
+  node test/run-host.mjs test/language-conflict-reload-host.cjs
+ESKA_BSL_EXTENSION=/absolute/path/to/bsl-analyzer-extension \
+  ESKA_BSL_BINARY="$ESKA_TEST_ANALYZER_BINARY" \
+  node test/run-host.mjs test/language-foreign-host.cjs
+```
+
+Первому сценарию нужен также `ESKA_TEST_PYTHON`: он задерживает настоящий config
+validator тестовым wrapper. `conflict-fixture.mjs` создаёт и локально упаковывает
+собственное неактивное расширение с известным ID в каталоге runner. Fixture
+проверяет публичные install/uninstall и реестр, не содержит чужого движка.
+Три запуска reload-профиля используют один extensions-dir и startup-флаг
+`--disable-extension` только во втором запуске. Внутренние disable-команды
+и хранилище редактора не используются. Последний профиль отдельно проверяет
+реальное стороннее расширение и его процесс; учёт PID использует Linux `/proc`.
+`ESKA_TEST_VSIX` включает проверку установленного пакета.

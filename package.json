@@ -22,7 +22,9 @@
   "activationEvents": [
     "onFileSystem:eska-protected",
     "onView:eska.explorer.projects",
-    "workspaceContains:**/eska.toml"
+    "workspaceContains:**/eska.toml",
+    "onLanguage:bsl",
+    "onLanguage:sdbl"
   ],
   "capabilities": {
     "untrustedWorkspaces": {
@@ -35,7 +37,7 @@
     }
   },
   "scripts": {
-    "compile": "node scripts/support-icons.mjs && tsc -p .",
+    "compile": "node scripts/support-icons.mjs && tsc -p . && node scripts/bundle.mjs",
     "check": "tsc -p . --noEmit",
     "test": "bun run --bun compile && bun test",
     "test:node": "npm run compile && node --test test/*.test.mjs",
@@ -48,7 +50,9 @@
     "@types/vscode": "1.109.0",
     "@vscode/vsce": "4.0.0",
     "ovsx": "1.2.0",
-    "typescript": "7.0.2"
+    "typescript": "7.0.2",
+    "@types/yauzl": "3.4.0",
+    "esbuild": "0.28.2"
   },
   "contributes": {
     "commands": [
@@ -150,6 +154,36 @@
           "light": "resources/icons/actions/sort-active-light.svg",
           "dark": "resources/icons/actions/sort-active-dark.svg"
         }
+      },
+      {
+        "command": "eska.explorer.checkAnalyzerUpdates",
+        "title": "%checkAnalyzerUpdates%",
+        "category": "ESKA Explorer"
+      },
+      {
+        "command": "eska.explorer.prepareTools",
+        "title": "%prepareTools%",
+        "category": "ESKA Explorer"
+      },
+      {
+        "command": "eska.explorer.recoverProjectInstallation",
+        "title": "%recoverProjectInstallation%",
+        "category": "ESKA Explorer"
+      },
+      {
+        "command": "eska.explorer.recoverAnalyzerInstallation",
+        "title": "%recoverAnalyzerInstallation%",
+        "category": "ESKA Explorer"
+      },
+      {
+        "command": "eska.explorer.restartLanguage",
+        "title": "%restartLanguage%",
+        "category": "ESKA Explorer"
+      },
+      {
+        "command": "eska.explorer.selectAnalysisContext",
+        "title": "%selectAnalysisContext%",
+        "category": "ESKA Explorer"
       }
     ],
     "views": {
@@ -284,9 +318,23 @@
     "configuration": {
       "title": "ESKA: 1C Explorer",
       "properties": {
+        "eska.explorer.backend": {
+          "type": "string",
+          "enum": [
+            "project",
+            "legacy"
+          ],
+          "enumDescriptions": [
+            "%backendProject%",
+            "%backendLegacy%"
+          ],
+          "default": "project",
+          "scope": "machine-overridable",
+          "description": "%backend%"
+        },
         "eska.explorer.executable": {
           "type": "string",
-          "default": "eska",
+          "default": "eska-project",
           "scope": "machine-overridable",
           "description": "%executable%"
         },
@@ -323,6 +371,24 @@
           "default": true,
           "scope": "window",
           "description": "%supportPolicy%"
+        },
+        "eska.explorer.analyzerExecutable": {
+          "type": "string",
+          "default": "bsl-analyzer-app",
+          "scope": "machine-overridable",
+          "description": "%analyzerExecutable%"
+        },
+        "eska.explorer.checkForAnalyzerUpdates": {
+          "type": "boolean",
+          "default": true,
+          "scope": "window",
+          "description": "%checkForAnalyzerUpdates%"
+        },
+        "eska.explorer.languageFeatures": {
+          "type": "boolean",
+          "default": true,
+          "scope": "window",
+          "description": "%languageFeatures%"
         }
       }
     },
@@ -344,6 +410,43 @@
         "key": "f5",
         "when": "focusedView == eska.explorer.projects"
       }
+    ],
+    "languages": [
+      {
+        "id": "bsl",
+        "extensions": [
+          ".bsl"
+        ],
+        "aliases": [
+          "BSL",
+          "1C (BSL)",
+          "1С"
+        ],
+        "configuration": "./resources/language/bsl-language-configuration.json"
+      },
+      {
+        "id": "sdbl",
+        "extensions": [
+          ".sdbl"
+        ],
+        "aliases": [
+          "SDBL",
+          "1C Query"
+        ],
+        "configuration": "./resources/language/sdbl-language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "bsl",
+        "scopeName": "source.bsl",
+        "path": "./resources/language/bsl.tmLanguage.json"
+      },
+      {
+        "language": "sdbl",
+        "scopeName": "source.sdbl",
+        "path": "./resources/language/sdbl.tmLanguage.json"
+      }
     ]
   },
   "publisher": "1c-tooling",
@@ -359,5 +462,9 @@
     "eska",
     "metadata"
   ],
-  "icon": "resources/icon.png"
+  "icon": "resources/icon.png",
+  "dependencies": {
+    "yauzl": "3.4.0",
+    "vscode-languageclient": "10.1.2"
+  }
 }

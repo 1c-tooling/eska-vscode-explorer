@@ -89,16 +89,35 @@ test("backend ignoring shutdown is terminated within a deadline", async (t) => {
 function connection(t, mode = "ok") {
   const children = [];
   const states = [];
+  const starts = [];
   const value = new Connection("0", (state) => states.push(state), () => {}, (options) => {
+    starts.push(options.args);
     const peer = new BackendProcess({ ...options, executable: process.execPath, args: [fixture, mode] });
     children.push(peer);
     return peer;
   });
   t.after(() => value.dispose());
-  return { value, children, states };
+  return { value, children, states, starts };
 }
 
 const target = { executable: process.execPath, path: process.cwd(), name: "test", locale: "ru-RU" };
+
+/** A legacy peer is accepted only by the explicit legacy transport, with no automatic replacement. */
+test("backend selection controls arguments, identity and API negotiation", async t => {
+  const project = connection(t);
+  await project.value.connect(target);
+  assert.equal(project.value.state.kind, "ready");
+  assert.deepEqual(project.starts, [["serve", "--stdio"]]);
+  assert.equal(project.value.state.analyzerConfiguration, true);
+  const legacy = connection(t, "legacy");
+  await legacy.value.connect({ ...target, backend: "legacy" });
+  assert.equal(legacy.value.state.kind, "ready");
+  assert.deepEqual(legacy.starts, [["ide", "--stdio"]]);
+  assert.equal(legacy.value.state.analyzerConfiguration, false);
+  await legacy.value.connect({ ...target, backend: "project" });
+  assert.equal(legacy.value.state.error.code, "legacyBackend");
+  assert.equal(legacy.children.length, 2, "mismatch does not start a fallback process");
+});
 
 test("incompatible API is rejected before workspace/open", async (t) => {
   const { value, children } = connection(t, "incompatible");

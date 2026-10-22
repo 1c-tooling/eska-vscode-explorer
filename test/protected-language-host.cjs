@@ -3,12 +3,14 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const vscode = require('vscode');
 const { revealFile } = require('../out/reveal.js');
+let stage = 'bootstrap';
 
 /** Wait for the independently started language server and forwarded events. */
 async function until(predicate, reason) {
   const deadline = Date.now() + 60000;
   while (Date.now() < deadline) {
-    if (await predicate()) return;
+    try { if (await predicate()) return; }
+    catch { /* A replaced or starting provider can cancel a request before it becomes ready. */ }
     await new Promise(resolve => setTimeout(resolve, 100));
   }
   assert.fail(reason);
@@ -21,10 +23,12 @@ function diagnostics(uri) {
 }
 
 /** Exercise the installed analyzer on a protected document without ever displaying a native tab. */
-exports.run = async function () {
+async function run() {
   const fixture = JSON.parse(process.env.ESKA_HOST_FIXTURE);
   const analyzer = vscode.extensions.all.find(extension => extension.packageJSON.name === 'bsl-analyzer-lsp');
-  assert.ok(analyzer, 'run with ESKA_BSL_EXTENSION and ESKA_BSL_BINARY');
+  const own = process.env.ESKA_HOST_OWN_PROTECTED === '1';
+  if (own) { assert.equal(analyzer, undefined); assert.equal(process.env.ESKA_TEST_LANGUAGE, '1'); }
+  else assert.ok(analyzer, 'run with ESKA_BSL_EXTENSION and ESKA_BSL_BINARY');
   const text = 'Функция ЧислоТест()\n    Возврат 1;\nКонецФункции\n\nПроцедура Проверка()\n    Значение = ЧислоТест();\n    Сообщить(Значение);\nКонецПроцедуры\n';
   await fs.writeFile(fixture.module, text);
   const owner = '11111111-1111-1111-1111-111111111111';
@@ -35,6 +39,16 @@ exports.run = async function () {
   const source = vscode.Uri.file(fixture.module);
   const uri = source.with({ scheme: 'eska-protected' });
   const explorer = await vscode.extensions.all.find(extension => extension.packageJSON.name === 'eska-explorer').activate();
+  let deniedByPolicy = false;
+  if (own) {
+    const originalLog = explorer.language.log;
+    /** Observe the production write guard's category rather than counting a transient cancellation as a policy rejection. */
+    explorer.language.log = (value, level) => {
+      if (typeof value === 'string' && value.includes('"event":"language_edit_rejected"') && value.includes('"reason":"readonly"')) deniedByPolicy = true;
+      originalLog(value, level);
+    };
+  }
+  if (own) assert.equal(explorer.support.enabled, true);
   await vscode.commands.executeCommand('eska.explorer.connect');
   await until(() => explorer.tree && explorer.connection.state.kind === 'ready', 'backend and tree are ready');
   const entry = await revealFile(explorer.tree, fixture.module);
@@ -43,7 +57,10 @@ exports.run = async function () {
   const view = vscode.window.activeTextEditor.document;
   assert.equal(view.uri.toString(), uri.toString(), 'support policy opens a protected module');
   assert.equal(view.languageId, 'bsl');
+  stage = 'language-ready';
+  if (own) await until(() => explorer.tooling.states.analyzer.phase === 'ready', 'own LSP ready');
   let tokens;
+  stage = 'semantic-tokens';
   await until(async () => {
     tokens = await vscode.commands.executeCommand('vscode.provideDocumentSemanticTokens', uri);
     return tokens?.data.length > 0;
@@ -51,6 +68,7 @@ exports.run = async function () {
   assert.deepEqual(tokens.data, (await vscode.commands.executeCommand('vscode.provideDocumentSemanticTokens', source)).data);
   assert.deepEqual(await vscode.commands.executeCommand('vscode.provideDocumentSemanticTokensLegend', uri),
     await vscode.commands.executeCommand('vscode.provideDocumentSemanticTokensLegend', source));
+  stage = 'reading-providers';
   const symbols = await vscode.commands.executeCommand('vscode.executeDocumentSymbolProvider', uri);
   assert.ok(symbols.some(symbol => symbol.name.includes('ЧислоТест')), 'outline comes from the analyzer');
   const position = new vscode.Position(5, 19);
@@ -69,6 +87,7 @@ exports.run = async function () {
   assert.equal(view.getText(), text, 'language bridge never unlocks the view');
   await assert.rejects(vscode.workspace.fs.writeFile(uri, Buffer.from('// blocked\n')));
 
+  stage = 'diagnostics-update';
   await fs.writeFile(fixture.module, 'Процедура Проверка(\n');
   await until(() => view.getText() === 'Процедура Проверка(\n' && diagnostics(uri).filter(value => value.severity === 0).length >= 2,
     'syntax diagnostics after an external edit');
@@ -78,9 +97,74 @@ exports.run = async function () {
   await until(async () => (await vscode.commands.executeCommand('vscode.provideDocumentSemanticTokens', uri))?.data.length > 0,
     'highlighting survives source changes');
   assert.equal(await fs.readFile(fixture.module, 'utf8'), text);
+  const ownedPids = [];
+  if (own) {
+    const client = explorer.language.session.client, originalRequest = client.sendRequest.bind(client);
+    stage = 'late-real-hover';
+    await until(async () => (await vscode.commands.executeCommand('vscode.executeHoverProvider', uri, position))?.length > 0, 'protected hover is current before delaying a reply');
+    let resume, captured, held = false, late;
+    const gate = new Promise(resolve => { resume = resolve; });
+    /** Delay the real hover reply after upstream computed it; the bridge must still reject a superseded view. */
+    client.sendRequest = async (type, ...args) => {
+      const result = await originalRequest(type, ...args);
+      if ((typeof type === 'string' ? type : type.method) === 'textDocument/hover' && !held) { held = true; captured(); await gate; }
+      return result;
+    };
+    const deadline = Date.now() + 30000;
+    // A bridge read may finish empty during source resynchronization; retry completed reads without overlapping pending calls.
+    while (!held) {
+      const reached = new Promise(resolve => { captured = resolve; });
+      const candidate = vscode.commands.executeCommand('vscode.executeHoverProvider', uri, position);
+      let timer;
+      try {
+        const state = await Promise.race([reached.then(() => 'held'), candidate.then(() => 'finished', () => 'finished'),
+          new Promise((_resolve, reject) => { timer = setTimeout(() => reject(new Error('real hover capture timed out')), Math.max(1, deadline - Date.now())); })]);
+        if (state === 'held') { late = candidate; break; }
+      } finally { clearTimeout(timer); }
+      assert.ok(Date.now() < deadline, 'real hover reply was captured');
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+    await fs.writeFile(fixture.module, '// changed while hover waited\n' + text);
+    await until(() => view.getText().startsWith('// changed') && vscode.workspace.textDocuments.some(value => value.uri.toString() === source.toString()
+      && value.getText().startsWith('// changed')), 'both source and protected view changed');
+    resume(); assert.deepEqual(await late, []); client.sendRequest = originalRequest;
+    await fs.writeFile(fixture.module, text);
+    await until(() => view.getText() === text, 'protected view restored');
+    stage = 'write-denials';
+    let rename;
+    await until(async () => {
+      try { rename = await vscode.commands.executeCommand('vscode.executeDocumentRenameProvider', source, new vscode.Position(0, 12), 'ЗапрещённаяЗамена'); }
+      catch (error) { if (!['No result.', 'Canceled'].includes(error.message)) throw error; }
+      return deniedByPolicy;
+    }, 'native alias rename was denied by source policy');
+    assert.ok(!rename?.size, 'native file alias cannot rename a locked source');
+    assert.equal((await vscode.commands.executeCommand('vscode.executeFormatDocumentProvider', uri, { tabSize: 4, insertSpaces: true }))?.length ?? 0, 0);
+    assert.equal((await vscode.commands.executeCommand('vscode.executeCodeActionProvider', uri, fullRange(view)))?.length ?? 0, 0);
+    const oldPid = explorer.language.session.owner.child.pid; ownedPids.push(oldPid);
+    stage = 'own-restart';
+    await explorer.language.restart();
+    await until(() => explorer.tooling.states.analyzer.phase === 'ready' && explorer.language.session?.owner?.child.pid !== oldPid, 'own LSP restarted');
+    await until(async () => (await vscode.commands.executeCommand('vscode.executeHoverProvider', uri, position))?.length > 0, 'protected hover after own restart');
+    await until(async () => (await vscode.commands.executeCommand('vscode.provideDocumentSemanticTokens', uri))?.data.length > 0, 'protected tokens after own restart');
+    assert.equal(await fs.readFile(fixture.module, 'utf8'), text);
+    ownedPids.push(explorer.language.session.owner.child.pid, explorer.connection.child.pid);
+  }
   assert.ok(!vscode.window.tabGroups.all.flatMap(group => group.tabs).some(tab => tab.input instanceof vscode.TabInputText
     && tab.input.uri.toString() === source.toString()), 'no writable counterpart tab was created');
   await fs.writeFile(path.join(fixture.root, 'host-result.json'), JSON.stringify({ passed: true, suite: 'protected-language',
-    vscode: vscode.version, analyzer: analyzer.packageJSON.version, semanticTokens: tokens.data.length / 5,
-    outline: true, hover: true, definitions: true, references: true, folding: true, diagnostics: true, readonly: true }));
+    vscode: vscode.version, analyzer: own ? '0.3.2 (own LSP)' : analyzer.packageJSON.version, semanticTokens: tokens.data.length / 5,
+    outline: true, hover: true, definitions: true, references: true, folding: true, diagnostics: true, readonly: true,
+    own_lsp: own, late_real_hover_rejected: own, own_restart: own, native_alias_rename_denied: own, shutdownPids: ownedPids }));
+}
+
+/** Keep failure details available after the isolated host has closed. */
+exports.run = async function () {
+  try { await run(); }
+  catch (error) {
+    const fixture = JSON.parse(process.env.ESKA_HOST_FIXTURE);
+    await fs.writeFile(path.join(fixture.root, 'host-result.json'), JSON.stringify({ passed: false, error: `${stage}: ${error.stack ?? error}` }));
+  }
 };
+
+/** Request all possible fixes without synthesizing any write provider for the protected view. */
+function fullRange(document) { return new vscode.Range(0, 0, document.lineCount, 0); }

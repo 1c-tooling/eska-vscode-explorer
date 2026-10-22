@@ -4,6 +4,9 @@ import { PROTECTED_SOURCE_SCHEME, ProtectedSources } from "./protected-source.js
 import { ProtectedLanguageFeatures } from "./protected-language.js";
 import * as vscode from "vscode";
 import { BackendSetup } from "./backend-setup.js";
+import { ToolingSetup } from "./tooling/setup.js";
+import { ToolFailure } from "./tooling/contracts.js";
+import { LanguageService } from "./language/service.js";
 import { GitDecorations } from "./decorations.js";
 import { revealFile, relativeFile } from "./reveal.js";
 import { iconName } from "./icons.js";
@@ -11,7 +14,7 @@ import { SearchView } from "./search-view.js";
 import { Connection, type ConnectionState } from "./connection.js";
 import { assertHost } from "./host.js";
 import { message, type MessageKey } from "./messages.js";
-import { ExplorerError } from "./protocol.js";
+import { ExplorerError, type BackendKind } from "./protocol.js";
 import type { PropertyChoice } from "./properties.js";
 import { PropertyTabs } from "./properties-view.js";
 import { MetadataTree, type TreeEntry, type ProjectTree } from "./tree.js";
@@ -21,6 +24,7 @@ import { nativePath, isCommonModule, directModuleRole, isModuleLeaf, isForm, res
 import { FormSources, type FormSource } from "./forms.js";
 import { WorkspaceFiles, fileName, type WorkspaceEntry } from "./workspace-files.js";
 import { ProjectWatcher, watchManifests, watchDirectory } from "./watch.js";
+import { basename } from "node:path";
 
 interface Notice { label: string; loading?: boolean; supportFailure?: boolean; project?: ProjectTree; parent?: Element }
 type Element = TreeEntry | Notice | FormSource | WorkspaceEntry;
@@ -48,6 +52,9 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
   private readonly output = vscode.window.createOutputChannel("ESKA Explorer", { log: true });
   private readonly connection: Connection;
   private readonly setup: BackendSetup;
+  private readonly tooling: ToolingSetup;
+  private readonly language: LanguageService;
+  private readonly legacyNotices = new Set<string>();
   private readonly view: vscode.TreeView<Element>;
   private readonly status = vscode.window.createStatusBarItem("eska.explorer.connection", vscode.StatusBarAlignment.Right, 0);
   private readonly disposables: vscode.Disposable[] = [];
@@ -71,13 +78,20 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
   private attempted = false;
   private selecting = false;
   private connecting: AbortController | undefined;
+  private connectionAttempt: Promise<void> = Promise.resolve();
   private disposed = false;
   private stopping: Promise<void> | undefined;
   private supportSelection: { tree: MetadataTree; entry: TreeEntry } | undefined;
+  private languagePolicyRoots: readonly string[] = [];
+  private additionalPolicyTrees: MetadataTree[] = [];
+  private supportContextsKey: string | undefined;
+  private supportContextsPending: Promise<void> = Promise.resolve();
 
   constructor(private readonly context: vscode.ExtensionContext) {
     this.support = new SupportController(context, () => this.supportRepaint(), text => this.output.warn(text));
-    this.supportContexts = new SupportContexts(String(context.extension.packageJSON.version), (trees, pending) => this.support.setAdditionalTrees(trees, pending), () => this.support.invalidate(), text => this.output.info(text));
+    this.supportContexts = new SupportContexts(String(context.extension.packageJSON.version), (trees, pending) => {
+      this.additionalPolicyTrees = trees; this.support.setAdditionalTrees(trees, pending);
+    }, () => this.support.invalidate(), text => this.output.info(text));
     this.status.name = "ESKA Explorer";
     this.status.command = "eska.explorer.checkUpdates";
     this.disposables.push(this.status, this.decorations, this.protectedSources);
@@ -89,6 +103,13 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
     this.disposables.push(this.propertiesTabs);
     this.connection = new Connection(String(context.extension.packageJSON.version),
       (state) => this.update(state), (text, level) => this.output[level ?? "info"](text));
+    this.tooling = new ToolingSetup(context, (text, level) => { if (!this.disposed) this.output[level ?? "info"](text); },
+      () => this.renderProjectStatus(), async kind => { if (kind === "project") await this.disconnect(); else await this.language.stop(); },
+      async kind => { if (kind === "project") await this.connect(false); else await this.language.restart(false); });
+    this.disposables.push(this.tooling);
+    this.language = new LanguageService(context, this.connection, this.tooling, this.output, (text, level) => this.output[level ?? "info"](text),
+      this.support, roots => this.registerLanguagePolicyRoots(roots));
+    this.disposables.push(this.language);
     this.setup = new BackendSetup(context, (text, level) => { if (!this.disposed) this.output[level ?? "info"](text); },
       () => this.connection.disconnect(), () => this.connect(false));
     this.disposables.push(this.setup);
@@ -98,7 +119,13 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
       ["restart", () => this.connect(false)],
       ["disconnect", () => this.disconnect()],
       ["showLog", () => this.output.show(true)],
-      ["checkUpdates", () => this.setup.check(true)],
+      ["checkUpdates", () => this.backendKind() === "legacy" ? this.setup.check(true, "legacy") : this.tooling.check("project")],
+      ["checkAnalyzerUpdates", () => this.tooling.check("analyzer")],
+      ["prepareTools", () => this.tooling.prepare(vscode.workspace.getConfiguration("eska.explorer", this.selected?.uri).get<string>("executable", "eska-project"), new AbortController().signal).catch(error => this.tooling.report(error))],
+      ["recoverProjectInstallation", () => this.tooling.recover("project")],
+      ["recoverAnalyzerInstallation", () => this.tooling.recover("analyzer")],
+      ["restartLanguage", () => this.language.restart()],
+      ["selectAnalysisContext", () => this.language.selectContext()],
       ["refresh", () => this.refresh()],
       ["search", () => this.search()],
       ["revealActiveFile", () => this.revealActiveFile()],
@@ -135,20 +162,23 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
         if (this.selected) void this.connect(false);
         else void this.disconnect();
       } else if (this.connection.state.kind === "ready") {
-        const target = this.connection.state.target;
-        void this.supportContexts.start(this.folders().filter(folder => folder.uri.fsPath !== target.path).map(folder => ({ ...target, path: folder.uri.fsPath, name: folder.name })));
+        void this.refreshSupportContexts();
       }
     }));
     this.disposables.push(vscode.workspace.onDidChangeConfiguration((event) => {
-      if (event.affectsConfiguration("eska.explorer.executable", this.selected?.uri)) {
+      if (event.affectsConfiguration("eska.explorer.analyzerExecutable")) {
+        void this.language.restart(false);
+      }
+      if (event.affectsConfiguration("eska.explorer.languageFeatures")) void this.language.restart(false);
+      if (event.affectsConfiguration("eska.explorer.executable", this.selected?.uri)
+        || event.affectsConfiguration("eska.explorer.backend", this.selected?.uri)) {
         void this.disconnect();
       }
       if (event.affectsConfiguration("eska.explorer.supportPolicy")) {
         this.support.invalidate();
         const state = this.connection.state;
         if (state.kind === "ready") {
-          void this.supportContexts.start(this.folders().filter(folder => folder.uri.fsPath !== state.target.path)
-            .map(folder => ({ ...state.target, path: folder.uri.fsPath, name: folder.name })));
+          void this.refreshSupportContexts();
         } else void this.supportContexts.stop();
       }
       if (event.affectsConfiguration("eska.explorer.hideEmptyRootGroups")) {
@@ -164,6 +194,8 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
     }));
     this.disposables.push(vscode.window.onDidChangeActiveTextEditor(() => this.updateKeyboardContext()));
     this.selected = this.folders()[0];
+    this.renderProjectStatus();
+    void this.tooling.ensureAnalyzer(undefined, false).catch(error => this.tooling.report(error));
     if (this.selected) void this.connect(false);
   }
 
@@ -572,14 +604,25 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
   }
 
   /** Invalidate preflight as well as the protocol connection so late probes cannot reconnect. */
-  private disconnect(): Promise<void> {
+  private async disconnect(): Promise<void> {
     this.connecting?.abort();
     this.selecting = false;
-    return this.connection.disconnect();
+    await this.language.stop();
+    await this.connection.disconnect();
+  }
+
+  /** Connect reuses a single-folder session or its handshake; restart explicitly replaces it. */
+  private connect(choose: boolean): Promise<void> {
+    if (this.selecting || (choose && ["connecting", "ready"].includes(this.connection.state.kind)
+      && this.folders().length === 1 && this.selected?.uri.toString() === this.folders()[0]?.uri.toString())) {
+      return this.connectionAttempt;
+    }
+    this.connectionAttempt = this.openConnection(choose);
+    return this.connectionAttempt;
   }
 
   /** Selection is explicit for unrelated multi-root folders; workspace members are opened by eska. */
-  private async connect(choose: boolean): Promise<void> {
+  private async openConnection(choose: boolean): Promise<void> {
     if (this.disposed || this.selecting) return;
     this.connecting?.abort();
     const controller = new AbortController();
@@ -601,26 +644,73 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
       if (!this.folders().some((value) => value.uri.toString() === folder.uri.toString())) return;
       assertHost(vscode.workspace.isTrusted, folder.uri.scheme, vscode.env.remoteName);
       this.selected = folder;
-      const configured = vscode.workspace.getConfiguration("eska.explorer", folder.uri).get<string>("executable", "eska");
-      const executable = await this.setup.ensure(controller.signal, configured);
+      const backend = this.backendKind();
+      const configured = vscode.workspace.getConfiguration("eska.explorer", folder.uri).get<string>("executable", "eska-project");
+      const executable = backend === "project" ? await this.tooling.ensureProject(controller.signal, configured)
+        : await this.setup.ensure(controller.signal, configured, backend);
       if (!executable || this.disposed || controller.signal.aborted) return;
       if (!this.folders().some(value => value.uri.toString() === folder.uri.toString())) return;
       // Release the picker guard before the asynchronous handshake, allowing disconnect/restart.
       this.selecting = false;
-      await this.connection.connect({ executable, path: folder.uri.fsPath, name: folder.name,
+      await this.language.stop();
+      if (controller.signal.aborted || this.disposed) return;
+      await this.connection.connect({ executable, backend, path: folder.uri.fsPath, name: folder.name,
         locale: vscode.env.language.toLowerCase().startsWith("ru") ? "ru-RU" : "en-US" });
     } catch (error) {
-      if (!controller.signal.aborted && !this.disposed) this.showError(error instanceof ExplorerError ? error : new ExplorerError("spawnFailed"));
+      if (!controller.signal.aborted && !this.disposed) {
+        if (error instanceof ToolFailure) this.tooling.report(error);
+        else this.showError(error instanceof ExplorerError ? error : new ExplorerError("spawnFailed"));
+      }
     } finally { if (this.connecting === controller) this.selecting = false; }
   }
 
   /** Read workspace folders afresh after pickers or asynchronous lifecycle operations. */
   private folders(): readonly vscode.WorkspaceFolder[] { return vscode.workspace.workspaceFolders ?? []; }
 
+  /** Policy follows backend-resolved application roots without delaying analysis on unrelated folder sessions. */
+  private registerLanguagePolicyRoots(roots: readonly string[]): void {
+    const next = [...new Set(roots)].sort();
+    if (JSON.stringify(next) === JSON.stringify(this.languagePolicyRoots)) return;
+    this.languagePolicyRoots = next;
+    // Let an existing folder open finish first: its actual projects may already cover the requested member roots.
+    void this.supportContextsPending.then(() => this.refreshSupportContexts()).catch(() => {});
+  }
+
+  /** Reuse established project scopes; a language edit still fails closed until the targeted backend policy is ready. */
+  private refreshSupportContexts(): Promise<void> {
+    const state = this.connection.state;
+    if (this.disposed || state.kind !== "ready") return this.supportContextsPending;
+    const mainRoots = new Set(state.session.projects.map(project => nativePath(project.rootPath)));
+    const targets = new Map(this.folders().filter(folder => folder.uri.fsPath !== state.target.path)
+      .map(folder => [folder.uri.fsPath, { ...state.target, path: folder.uri.fsPath, name: folder.name }]));
+    for (const root of this.languagePolicyRoots) {
+      const covered = mainRoots.has(root) || this.additionalPolicyTrees.some(tree => {
+        const origin = tree.connection.target?.path;
+        return origin !== undefined && targets.has(origin) && tree.projects.some(project => nativePath(project.info.rootPath) === root);
+      });
+      if (!covered && !targets.has(root)) targets.set(root, { ...state.target, path: root, name: basename(root) });
+    }
+    const key = JSON.stringify([state.session.sessionId, this.support.enabled, [...targets.keys()].sort()]);
+    if (this.supportContextsKey === key) return this.supportContextsPending;
+    this.supportContextsKey = key;
+    this.supportContextsPending = this.supportContexts.start([...targets.values()]).catch(error => {
+      if (!this.disposed) this.output.warn(JSON.stringify({ event: "support_context_failed", code: error instanceof ExplorerError ? error.code : "requestFailed" }));
+    });
+    return this.supportContextsPending;
+  }
+
+  /** Backend selection changes process arguments and negotiated identity without rewriting a custom path. */
+  private backendKind(): BackendKind {
+    const value = vscode.workspace.getConfiguration("eska.explorer", this.selected?.uri).get<string>("backend", "project");
+    if (value !== "project" && value !== "legacy") throw new ExplorerError("incompatible");
+    return value;
+  }
+
   /** Process logs never become the view's labels or user-facing error text. */
   private update(state: ConnectionState): void {
     if (this.disposed) return;
-    void this.supportContexts.stop();
+    this.supportContextsPending = this.supportContexts.stop(); this.supportContextsKey = undefined;
+    if (state.kind !== "ready") this.languagePolicyRoots = [];
     this.searchView?.dispose();
     this.propertiesTabs.stale();
     this.tree?.dispose();
@@ -641,35 +731,46 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
       });
       try {
         for (const project of tree.projects) this.watchers.push(new ProjectWatcher(tree, project,
-          (error) => { this.output.info(`watch_error code=${error instanceof ExplorerError ? error.code : "requestFailed"}`); }));
-        this.watchers.push(watchManifests(state.target.path, tree.projects, () => { void this.connect(false); }));
+          (error) => { this.output.info(`watch_error code=${error instanceof ExplorerError ? error.code : "requestFailed"}`); },
+          path => this.language.sourceChanged(path)));
+        this.watchers.push(watchManifests(state.target.path, tree.projects, () => { void this.connect(false); }, () => this.language.manifestChanged()));
       } catch (error) { this.showError(error instanceof ExplorerError ? error : new ExplorerError("unsupportedPath")); }
     }
     this.support.setTree(this.tree, state.kind === "ready" && state.supportPolicy, state.kind === "disconnected" || state.kind === "stopping", state.kind === "ready" && state.supportFiles);
     if (state.kind === "ready") {
-      void this.supportContexts.start(this.folders().filter(folder => folder.uri.fsPath !== state.target.path)
-        .map(folder => ({ ...state.target, path: folder.uri.fsPath, name: folder.name })));
+      void this.refreshSupportContexts();
     }
     this.decorations.setTree(this.tree);
     this.updateKeyboardContext();
     this.changed.fire(undefined);
+    this.tooling.projectConnection(state);
+    this.language.connectionChanged(state);
     if (state.kind === "ready") {
-      this.status.text = `ESKA v${state.version}`;
-      this.status.tooltip = this.text("statusTooltip", state.version, state.target.executable);
-      this.status.show();
-      void this.setup.background();
-    } else {
-      // Never leave a successful connection indicator after disconnect or process failure.
-      this.status.hide();
-      this.status.text = "";
-      this.status.tooltip = undefined;
+      void this.setup.background(state.target.backend ?? "project");
+      if (state.target.backend === "legacy" && !this.legacyNotices.has(state.target.executable)) {
+        this.legacyNotices.add(state.target.executable);
+        void vscode.window.showWarningMessage(this.text("legacyBackendSelected"));
+      }
     }
     if (state.kind === "error") this.showError(state.error);
   }
 
+  /** A disconnected component remains visible without claiming a connected or offered version. */
+  private renderProjectStatus(): void {
+    if (this.disposed) return;
+    const state = this.connection.state, tool = this.tooling.states.project;
+    const activity = tool.activity ? ` · ${this.text(`toolPhase_${tool.activity}`)}` : "";
+    this.status.text = state.kind === "ready"
+      ? this.text(state.target.backend === "legacy" ? "legacyStatus" : "projectStatus", state.version) + activity
+      : `ESKA · ${this.text(state.kind === "error" ? "toolPhase_error" : "toolPhase_disconnected")}${activity}`;
+    this.status.tooltip = state.kind === "ready" && state.target.backend === "legacy"
+      ? this.text("statusTooltip", state.version, state.target.executable) : this.tooling.tooltip("project");
+    this.status.show();
+  }
+
   /** Setup instructions are a packaged document, not an automatic init or executable installer. */
   private showError(error: ExplorerError): void {
-    const setup = error.code === "manifestMissing" || error.code === "executableMissing" || error.code === "incompatible" || error.code === "handshakeFailed";
+    const setup = error.code === "manifestMissing" || error.code === "executableMissing" || error.code === "incompatible" || error.code === "handshakeFailed" || error.code === "legacyBackend";
     void vscode.window.showErrorMessage(this.text(error.code), this.text(setup ? "initialization" : "log"))
       .then((choice) => {
         if (!choice || this.disposed) return;
@@ -694,7 +795,12 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
       for (const watcher of this.watchers) watcher.dispose();
       this.view.dispose();
       this.changed.dispose();
-      this.stopping = Promise.all([this.supportContexts.stop(), this.support.shutdown(), this.connection.dispose(), this.setup.shutdown()]).then(() => {}).finally(() => this.output.dispose());
+      const other = Promise.allSettled([this.supportContexts.stop(), this.support.shutdown(), this.setup.shutdown(), this.tooling.shutdown()]);
+      this.stopping = (async () => {
+        const language = await Promise.allSettled([this.language.shutdown()]);
+        const metadata = await Promise.allSettled([this.connection.dispose()]);
+        for (const result of [...language, ...metadata, ...await other]) if (result.status === "rejected") throw result.reason;
+      })().finally(() => this.output.dispose());
     }
     return this.stopping;
   }

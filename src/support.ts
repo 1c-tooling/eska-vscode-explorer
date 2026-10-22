@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { join, relative, isAbsolute } from 'node:path';
 import { createHash } from 'node:crypto';
-import { isRecord, isWirePath } from './protocol.js';
+import { ExplorerError, isRecord, isWirePath } from './protocol.js';
 import { nativePath } from './source.js';
 import type { MetadataTree, ProjectTree, TreeEntry } from './tree.js';
 import { reconcileRules, readonlyPattern, readonlyPatterns } from './support-settings.js';
@@ -204,6 +204,27 @@ export class SupportController implements vscode.FileDecorationProvider {
     const policy = this.fileIndex.get(vscode.Uri.file(path).toString())?.file;
     return !checked || epoch !== this.epoch || !policy || policy.readOnly || policy.unknown
       ? ProtectedSources.protectedUri(vscode.Uri.file(path)) : vscode.Uri.file(path);
+  }
+
+  /** Authorize the entire language edit against fresh backend policy, then expose a synchronous freshness check. */
+  async languageWriteAccess(paths: readonly string[]): Promise<() => boolean> {
+    const epoch = this.epoch;
+    if (!this.enabled) return () => !this.stopped && epoch === this.epoch && !this.enabled;
+    if (!paths.length || !this.targeted || !this.available || !this.tree || paths.some(path => !this.locate(path))) {
+      throw new ExplorerError('sourceChanged');
+    }
+    let checked = false;
+    this.serial = this.serial.then(async () => { await this.queryFiles([...paths], epoch); checked = true; })
+      .catch(error => this.log(`support_language_edit_failed ${String(error)}`));
+    await this.serial;
+    const current = (): boolean => checked && !this.stopped && this.enabled && epoch === this.epoch && paths.every(path => {
+      const entry = this.locate(path), policy = this.fileIndex.get(vscode.Uri.file(path).toString());
+      return !!entry && !!policy && !policy.file.readOnly && !policy.file.unknown
+        && entry.project.info.generation === policy.snapshot.generation
+        && entry.project.info.eventSequence === policy.snapshot.eventSequence;
+    });
+    if (!current()) throw new ExplorerError('sourceChanged');
+    return current;
   }
 
   /** Native file opens use the same immutable provider; dirty buffers are never discarded or replaced. */

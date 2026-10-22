@@ -11,7 +11,7 @@ permissions:
 jobs:
   check:
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
@@ -24,10 +24,24 @@ jobs:
         run: |
           bun run --bun check
           bun run --bun compile
-      - name: Test client and release preparation
+      - name: Install released backends into a clean prefix
         run: |
           mkdir -p ../eska-playground
           export ESKA_TEST_ROOT="$(realpath ../eska-playground)"
+          node scripts/prepare-backends.mjs
+      - name: Test client and release preparation
+        run: |
           bun test
           KNOPE_TEST_BINARY="$(command -v knope)" \
             python3 -m unittest discover -s test -p '*_test.py'
+      - name: Install the test editor
+        run: |
+          sudo apt-get update && sudo apt-get install -y xvfb libasound2t64
+          bash scripts/install-editor.sh
+      - name: Check the packaged extension with real Metadata API and LSP
+        env:
+          ESKA_HOST_SUPPORT_DISABLED: '1'
+        run: |
+          bun run --bun package
+          export ESKA_TEST_VSIX="$(realpath "eska-explorer-$(node -p 'require("./package.json").version').vsix")"
+          timeout 180s xvfb-run -a node test/run-host.mjs test/language-host.cjs
