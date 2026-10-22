@@ -1,6 +1,12 @@
 [package]
 versioned_files = ["package.json"]
 changelog = "CHANGELOG.md"
+extra_changelog_sections = [
+    { types = ["major"], name = "Несовместимые изменения" },
+    { types = ["minor"], name = "Добавлено" },
+    { types = ["patch"], name = "Исправлено" },
+    { footers = ["Changelog-Note"], name = "Примечания" },
+]
 
 [github]
 owner = "1c-tooling"
