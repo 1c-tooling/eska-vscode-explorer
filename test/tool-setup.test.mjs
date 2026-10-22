@@ -8,6 +8,7 @@ import { runInNewContext } from "node:vm";
 
 const require = createRequire(import.meta.url), os = require("node:os");
 const releases = require("../out/tooling/releases.js"), installation = require("../out/tooling/install.js");
+const originalManagedVersion = installation.managedVersion, originalLatestToolRelease = releases.latestToolRelease;
 const ui = { approved: false, cancelled: false, messages: [], settings: {}, bars: [] };
 const vscode = {
   env: { language: "en-US", remoteName: undefined },
@@ -25,9 +26,20 @@ const adapter = { exports: {} }, setupRequire = createRequire(new URL("../out/to
 runInNewContext(`(function(require,module,exports){${readFileSync(new URL("../out/tooling/setup.js", import.meta.url), "utf8")}\n})`, { AbortController, AbortSignal, process, Date })(
   name => name === "vscode" ? vscode : setupRequire(name), adapter, adapter.exports);
 const { ToolingSetup } = adapter.exports;
+const restorations = new WeakMap();
 
-/** Mocks replace only orchestration boundaries; binary/archive behavior is exercised in tool-installation tests. */
-function replace(t, object, key, value) { const prior = object[key]; object[key] = value; t.after(() => { object[key] = prior; }); }
+/** Restore nested overrides in reverse order so no UI mock escapes into real installation tests. */
+function replace(t, object, key, value) {
+  let saved = restorations.get(t);
+  if (!saved) {
+    saved = [];
+    restorations.set(t, saved);
+    t.after(() => { for (const restore of saved.reverse()) restore(); });
+  }
+  const prior = object[key];
+  saved.push(() => { object[key] = prior; });
+  object[key] = value;
+}
 
 /** No UI test reads or mutates the user's global installation or persistent update timestamps. */
 async function fixture(t) {
@@ -172,4 +184,9 @@ test("a failed binary probe updates the visible version while keeping the confli
   assert.equal(setup.states.analyzer.phase, "suspended-conflict");
   assert.ok(!setup.analyzerStatus.text.includes("v0.3.2"));
   assert.match(setup.analyzerStatus.tooltip, /foreign extension/);
+});
+
+test("UI scenarios restore shared module functions for following test files", () => {
+  assert.equal(installation.managedVersion, originalManagedVersion);
+  assert.equal(releases.latestToolRelease, originalLatestToolRelease);
 });
