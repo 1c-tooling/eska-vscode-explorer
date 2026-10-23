@@ -52,6 +52,23 @@ dirty XML больше лимита inline, наборы СКД и union, нес
 конфликт; файлы создаются только в собственном каталоге playground.
 [Результаты клиентской части T101 и нативного save-прототипа](measurements/t101-query-client.json).
 
+Для физического стиля новых строк `QueryDocument.plan` принимает четвёртым
+аргументом `{lineEnding: "lf" | "crlf", signal?}`; перед отправкой проверяется
+`queryEditing.editorLineEndings`. Стиль берётся из `TextDocument.eol` владельца.
+Чистый XML-запрос остаётся LF; CRLF не добавляется к SDBL для управления XML.
+Нативная проверка в development host сопоставляет хэш и projected map с реально
+изменённым буфером для LF, CRLF и первого перевода строки, затем проверяет BOM:
+
+```sh
+ESKA_TEST_BINARY="$(realpath ../eska/target/debug/eska-project)" \
+ESKA_TEST_ROOT="$(realpath ../eska/../eska-playground)" \
+ESKA_HOST_SUPPORT_DISABLED=1 VSCODE_EXECUTABLE=codium \
+node test/run-host.mjs test/query-eol-host.cjs
+```
+
+Этот тест использует скомпилированный клиент из checkout; готовые вкладки
+и установленный VSIX им не принимаются. Для VS Code замените `codium` на `code`.
+
 Интеграционная проверка использует существующий бинарник CLI и создаёт только
 собственный временный каталог внутри соседнего `eska-playground`:
 

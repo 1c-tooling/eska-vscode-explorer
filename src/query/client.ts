@@ -155,9 +155,12 @@ export class QueryDocument {
   }
 
   /** Plan only: the caller must recheck the live editor version before applying replacements. */
-  async plan(query: QueryIdentity, text: string, comments: CommentDecision[] = [], signal?: AbortSignal): Promise<QueryPlan> {
+  async plan(query: QueryIdentity, text: string, comments: CommentDecision[] = [],
+    options: { signal?: AbortSignal; lineEnding?: "lf" | "crlf" } = {}): Promise<QueryPlan> {
+    const { signal, lineEnding } = options;
+    if (lineEnding !== undefined && !this.client.limits.editorLineEndings) throw new ExplorerError("incompatible");
     const result = await this.client.withText(text, this.generation, async input => {
-      return this.request("query/plan", { query, ...input, comments }, signal);
+      return this.request("query/plan", { query, ...input, comments, ...(lineEnding === undefined ? {} : { lineEnding }) }, signal);
     }, signal);
     return parsePlan(result, this.original, this.binding.snapshot, query, this.client.limits);
   }

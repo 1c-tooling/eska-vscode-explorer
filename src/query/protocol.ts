@@ -5,7 +5,7 @@ export const QUERY_LIMITS = {
   maxDocuments: 16, maxRetainedEntries: 64, maxMappingPositions: 64, maxListItems: 64,
   maxXmlQueries: 1024, maxMappings: 65_536, maxSourceComments: 8192,
 } as const;
-export type QueryCapabilities = { readonly [K in keyof typeof QUERY_LIMITS]: number };
+export type QueryCapabilities = { readonly [K in keyof typeof QUERY_LIMITS]: number } & { readonly editorLineEndings: boolean };
 export interface ByteRange { start: number; end: number }
 export interface QueryPosition { line: number; character: number }
 export interface PositionRange { start: QueryPosition; end: QueryPosition }
@@ -39,8 +39,9 @@ export function queryCapabilities(hello: unknown): QueryCapabilities | undefined
     || hello.apiVersion.minor < 13 || !isRecord(value) || value.schemaVersion !== 1
     || value.planOnly !== true || value.writesOwner !== false || !Array.isArray(value.sourceKinds)
     || !["dataCompositionSchema", "form", "bsl"].every(kind => (value.sourceKinds as unknown[]).includes(kind))) invalid();
-  const limits = { ...QUERY_LIMITS } as QueryCapabilities;
-  for (const key of Object.keys(QUERY_LIMITS) as (keyof QueryCapabilities)[]) {
+  if (value.editorLineEndings !== undefined && typeof value.editorLineEndings !== "boolean") invalid();
+  const limits = { ...QUERY_LIMITS, editorLineEndings: value.editorLineEndings === true };
+  for (const key of Object.keys(QUERY_LIMITS) as (keyof typeof QUERY_LIMITS)[]) {
     if (!unsigned(value[key]) || value[key] === 0) invalid();
     Object.assign(limits, { [key]: Math.min(value[key], QUERY_LIMITS[key]) });
   }

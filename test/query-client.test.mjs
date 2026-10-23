@@ -20,7 +20,7 @@ function client(handle, limits = QUERY_LIMITS) {
 /** Independent capability data follows the published protocol, not the runtime's object identity. */
 function capabilities(overrides = {}) {
   return { apiVersion: { major: 1, minor: 13 }, capabilities: { queryEditing: {
-    schemaVersion: 1, planOnly: true, writesOwner: false, sourceKinds: ["form", "bsl", "dataCompositionSchema"],
+    schemaVersion: 1, planOnly: true, writesOwner: false, editorLineEndings: true, sourceKinds: ["form", "bsl", "dataCompositionSchema"],
     maxSnapshotBytes: 8388608, maxInlineBytes: 131072, maxRetainedBytes: 33554432, maxDocuments: 16,
     maxRetainedEntries: 64, maxMappingPositions: 64, maxListItems: 64, maxXmlQueries: 1024,
     maxMappings: 65536, maxSourceComments: 8192, ...overrides,
@@ -29,10 +29,11 @@ function capabilities(overrides = {}) {
 
 test("query capabilities require plan-only schema and cap peer resource bounds", () => {
   assert.equal(queryCapabilities({ capabilities: {} }), undefined);
-  assert.deepEqual(queryCapabilities(capabilities()), QUERY_LIMITS);
+  assert.deepEqual(queryCapabilities(capabilities()), { ...QUERY_LIMITS, editorLineEndings: true });
+  assert.equal(queryCapabilities(capabilities({ editorLineEndings: undefined })).editorLineEndings, false);
   assert.equal(queryCapabilities(capabilities({ maxInlineBytes: 262144 })).maxInlineBytes, 131072);
   for (const bad of [{ writesOwner: true }, { planOnly: false }, { schemaVersion: 2 }, { maxDocuments: -1 },
-    { maxSnapshotBytes: 1.5 }, { maxInlineBytes: 0 }, { maxMappings: Number.MAX_SAFE_INTEGER + 1 }]) {
+    { maxSnapshotBytes: 1.5 }, { maxInlineBytes: 0 }, { editorLineEndings: "true" }, { maxMappings: Number.MAX_SAFE_INTEGER + 1 }]) {
     assert.throws(() => queryCapabilities(capabilities(bad)), { code: "protocolInvalid" });
   }
 });
@@ -112,6 +113,23 @@ test("cancelled or invalidated owner opens close their exact document handle", a
     assert.equal(stand.calls.at(-1).method, "query/close");
     assert.equal(stand.calls.at(-1).params.documentId, "d1");
   }
+});
+
+test("an older API 1.13 peer cannot silently ignore requested editor line endings", async () => {
+  const text = "<Form/>";
+  const stand = client(method => {
+    if (method === "query/open") return { documentId: "d1", version: "7", snapshot: querySnapshot(text), diskSnapshot: querySnapshot(text),
+      contextFingerprint: "a".repeat(64), source: { value: "Form.xml", encoding: "utf-8" },
+      sourceKind: "form", application: null, writable: true, limitedContext: false };
+    assert.equal(method, "query/close", "no plan may be sent to a peer that would ignore the physical style");
+    return { released: true };
+  }, { ...QUERY_LIMITS, editorLineEndings: false });
+  const document = await stand.value.open({ node: { kind: "object", objectId: "form:x" },
+    source: { value: "Form.xml", encoding: "utf-8" }, version: "7", text });
+  await assert.rejects(document.plan({ kind: "dynamicList", name: "List", id: "1" }, "SELECT 1\nFROM T", [], { lineEnding: "crlf" }),
+    { code: "incompatible" });
+  await document.close();
+  assert.deepEqual(stand.calls.map(call => call.method), ["query/open", "query/close"]);
 });
 
 /** A no-op with forged replacement coordinates must not be allowed to address an editor. */
