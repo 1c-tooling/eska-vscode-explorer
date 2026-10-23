@@ -169,7 +169,44 @@ async function interruptedApply(explorer, fixture) {
   await ownerWritable(explorer, row, true);
 }
 
-/** Exercise the production API 1.16 adapter and preserve diagnostics on a failing native assertion. */
+/** The installed readonly provider uses the common retained owner, then follows the native buffer after exact release. */
+async function protectedOwnerViews(explorer, fixture) {
+  const disk = await fs.readFile(fixture.query.schemaPath);
+  const source = vscode.Uri.file(fixture.query.schemaPath);
+  const owner = await vscode.workspace.openTextDocument(source);
+  await vscode.window.showTextDocument(owner, { preview: false });
+  await replace(owner, owner.getText(), owner.getText() + "\n<!-- dirty parent before query -->");
+  await until(() => vscode.window.tabGroups.all.some(group => group.tabs.some(tab => tab.input instanceof vscode.TabInputText
+    && tab.input.uri.toString() === source.toString() && tab.isDirty)), "native dirty parent is visible");
+  const captured = owner.getText();
+  const row = await query(explorer, "common-template", "A");
+  await vscode.commands.executeCommand("eska.explorer.openQuery", row);
+  const draft = vscode.window.activeTextEditor.document;
+  const protectedUri = source.with({ scheme: "eska-protected" });
+  const view = await vscode.workspace.openTextDocument(protectedUri);
+  assert.equal(view.getText(), captured, "protected view uses the whole retained dirty owner");
+  const stat = await vscode.workspace.fs.stat(protectedUri);
+  assert.equal(stat.size, Buffer.byteLength(captured), "stat describes the snapshot rather than the disk");
+  await vscode.window.showTextDocument(view, { preview: false });
+  await vscode.commands.executeCommand("workbench.action.files.setActiveEditorWriteableInSession");
+  await vscode.commands.executeCommand("type", { text: "blocked" });
+  assert.equal(view.getText(), captured);
+  await assert.rejects(vscode.workspace.fs.writeFile(protectedUri, Buffer.from("blocked")));
+  await replace(owner, owner.getText(), owner.getText() + "\n<!-- newer native parent -->");
+  assert.notEqual(owner.getText(), captured);
+  assert.equal(Buffer.from(await vscode.workspace.fs.readFile(protectedUri)).toString("utf8"), captured,
+    "an active core owner outranks a later native buffer");
+  await closeQuery(explorer, draft);
+  await until(() => view.getText() === owner.getText(), "released view follows the current dirty native buffer");
+  assert.deepEqual(await fs.readFile(fixture.query.schemaPath), disk, "source inspection never writes disk");
+  await vscode.window.showTextDocument(owner);
+  await vscode.commands.executeCommand("workbench.action.revertAndCloseActiveEditor");
+  const tabs = vscode.window.tabGroups.all.flatMap(group => group.tabs).filter(tab => tab.input instanceof vscode.TabInputText
+    && tab.input.uri.toString() === protectedUri.toString());
+  assert.equal(await vscode.window.tabGroups.close(tabs), true);
+}
+
+/** Exercise the production session/source adapters and preserve diagnostics on a failing native assertion. */
 exports.run = async function () {
   const fixture = JSON.parse(process.env.ESKA_HOST_FIXTURE);
   const errors = [];
@@ -186,6 +223,7 @@ exports.run = async function () {
     explorer.queries.failure = error => { errors.push({ message: String(error), code: error?.code, domain: error?.domain, details: error?.details }); failure(error); };
     await newerInput(explorer, fixture);
     await interruptedApply(explorer, fixture);
+    await protectedOwnerViews(explorer, fixture);
     assert.equal(errors.length, 1);
     assert.ok(errors[0].message.includes("simulated interrupted native receipt"));
     await fs.writeFile(path.join(fixture.root, "host-result.json"), JSON.stringify({ passed: true, suite: "query-source-sessions",
@@ -193,7 +231,8 @@ exports.run = async function () {
       interruptedNativeReceipt: true, latestDraftPreserved: true, explicitReconciliation: true, cleanDraftMarkedDirty: true,
       noAutomaticReplay: true, cleanCloseReleasesCheckpoint: true, backendSourceWriteFence: true,
       backendFenceReleasedOnError: true, restoredFenceUntilClose: true, languageWritesRespectSourceOwnership: true,
-      supportDisabledDoesNotReleaseOwnership: true, staleNativeAuthorizationRejected: true, injectedErrors: errors }));
+      supportDisabledDoesNotReleaseOwnership: true, staleNativeAuthorizationRejected: true,
+      protectedViewUsesRetainedDirtyOwner: true, protectedViewFollowsRelease: true, snapshotStatExact: true, injectedErrors: errors }));
   } catch (error) {
     await fs.writeFile(path.join(fixture.root, "host-result.json"), JSON.stringify({ passed: false, error: String(error.stack ?? error), errors }));
     throw error;

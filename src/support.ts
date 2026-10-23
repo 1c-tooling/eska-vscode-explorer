@@ -7,6 +7,7 @@ import type { MetadataTree, ProjectTree, TreeEntry } from './tree.js';
 import { reconcileRules, readonlyPattern, readonlyPatterns } from './support-settings.js';
 import { ProtectedSources } from './protected-source.js';
 import { SourceAccess } from './source-access.js';
+import { nativeDirty } from './query/owner.js';
 
 type State = 'locked' | 'editableWithSupport' | 'unrestricted' | 'unknown';
 interface ObjectPolicy { objectId: string; uuid: string; state: State; reason: string }
@@ -237,6 +238,28 @@ export class SupportController implements vscode.FileDecorationProvider {
     const current = (): boolean => !this.stopped && epoch === this.epoch && enabled === this.enabled && checks.every(check => check());
     if (!current()) throw new ExplorerError('sourceChanged');
     return current;
+  }
+
+  /** ESKA selects the retained query owner or exact supplied dirty buffer; the adapter never reads source bytes from disk. */
+  async readSource(path: string): Promise<Awaited<ReturnType<SourceAccess['read']>> | undefined> {
+    const entry = this.locate(path);
+    if (!entry || this.stopped) return undefined;
+    const { tree, project } = entry, endpoint = tree.connection.sources;
+    if (!endpoint) throw new ExplorerError('incompatible');
+    const generation = project.info.generation, revision = tree.connection.sourceRevision;
+    const uri = vscode.Uri.file(path).toString();
+    const document = vscode.workspace.textDocuments.find(value => value.uri.toString() === uri && !value.isClosed);
+    const version = document?.version, dirty = document && nativeDirty(document);
+    const client = new SourceAccess(endpoint, () => ({ sessionId: tree.session.sessionId, projectId: project.info.projectId, generation }));
+    const result = await client.read({ value: entry.relative, encoding: 'utf-8' }, dirty
+      ? { version: String(version), text: document.getText(), userReadOnly: false } : undefined);
+    const current = this.locate(path);
+    const newer = vscode.workspace.textDocuments.find(value => value.uri.toString() === uri && !value.isClosed);
+    if (tree.connection.sources !== endpoint || tree.connection.sourceRevision !== revision
+      || current?.tree !== tree || current.project !== project
+      || (dirty && (document.isClosed || document.version !== version))
+      || (newer && nativeDirty(newer) && (newer !== document || newer.version !== version))) throw new ExplorerError('sourceChanged');
+    return result;
   }
 
   /** Native file opens use the same immutable provider; dirty buffers are never discarded or replaced. */

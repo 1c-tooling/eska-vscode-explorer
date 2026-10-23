@@ -24,6 +24,8 @@ function diagnostics(uri) {
 
 /** Exercise the installed analyzer on a protected document without ever displaying a native tab. */
 async function run() {
+  if (process.env.ESKA_HOST_LOCALE) assert.ok(vscode.env.language.startsWith(process.env.ESKA_HOST_LOCALE),
+    `Requested UI locale ${process.env.ESKA_HOST_LOCALE}, actual ${vscode.env.language}`);
   const fixture = JSON.parse(process.env.ESKA_HOST_FIXTURE);
   const analyzer = vscode.extensions.all.find(extension => extension.packageJSON.name === 'bsl-analyzer-lsp');
   const own = process.env.ESKA_HOST_OWN_PROTECTED === '1';
@@ -134,7 +136,7 @@ async function run() {
     let rename;
     await until(async () => {
       try { rename = await vscode.commands.executeCommand('vscode.executeDocumentRenameProvider', source, new vscode.Position(0, 12), 'ЗапрещённаяЗамена'); }
-      catch (error) { if (!['No result.', 'Canceled'].includes(error.message)) throw error; }
+      catch (error) { if (!['No result.', 'Результаты отсутствуют.', 'Canceled'].includes(error.message)) throw error; }
       return deniedByPolicy;
     }, 'native alias rename was denied by source policy');
     assert.ok(!rename?.size, 'native file alias cannot rename a locked source');
@@ -152,7 +154,7 @@ async function run() {
   assert.ok(!vscode.window.tabGroups.all.flatMap(group => group.tabs).some(tab => tab.input instanceof vscode.TabInputText
     && tab.input.uri.toString() === source.toString()), 'no writable counterpart tab was created');
   await fs.writeFile(path.join(fixture.root, 'host-result.json'), JSON.stringify({ passed: true, suite: 'protected-language',
-    vscode: vscode.version, analyzer: own ? '0.3.2 (own LSP)' : analyzer.packageJSON.version, semanticTokens: tokens.data.length / 5,
+    vscode: vscode.version, locale: vscode.env.language, analyzer: own ? '0.3.2 (own LSP)' : analyzer.packageJSON.version, semanticTokens: tokens.data.length / 5,
     outline: true, hover: true, definitions: true, references: true, folding: true, diagnostics: true, readonly: true,
     own_lsp: own, late_real_hover_rejected: own, own_restart: own, native_alias_rename_denied: own, shutdownPids: ownedPids }));
 }

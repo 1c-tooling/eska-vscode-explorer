@@ -15,6 +15,8 @@ async function until(predicate, reason) {
 
 /** Verify URI scoping, dirty buffers, late replies and provider restarts with deterministic file-only providers. */
 exports.run = async function () {
+  if (process.env.ESKA_HOST_LOCALE) assert.ok(vscode.env.language.startsWith(process.env.ESKA_HOST_LOCALE),
+    `Requested UI locale ${process.env.ESKA_HOST_LOCALE}, actual ${vscode.env.language}`);
   const fixture = JSON.parse(process.env.ESKA_HOST_FIXTURE);
   const first = vscode.Uri.file(path.join(fixture.root, 'A[1],{x}.txt'));
   const second = vscode.Uri.file(path.join(fixture.root, 'A1,x.txt'));

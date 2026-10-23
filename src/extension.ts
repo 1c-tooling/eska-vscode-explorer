@@ -23,6 +23,7 @@ import { ProjectFilters, isHiddenSection, supportsRootFilter } from "./filter.js
 import { nativePath, isCommonModule, directModuleRole, isModuleLeaf, isForm, resolveSource, resolveTreeSource, resolvePropertySource, type SourceTarget } from "./source.js";
 import { FormSources, type FormSource } from "./forms.js";
 import { QueryTabs } from "./query/tabs.js";
+import { SourceAccess } from "./source-access.js";
 import { isXmlQueryOwner } from "./query/owner.js";
 import { queryBranches, queryLabel, queryLeaf, type QueryEntry } from "./query/tree.js";
 import { WorkspaceFiles, fileName, type WorkspaceEntry } from "./workspace-files.js";
@@ -62,7 +63,9 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
   private readonly status = vscode.window.createStatusBarItem("eska.explorer.connection", vscode.StatusBarAlignment.Right, 0);
   private readonly disposables: vscode.Disposable[] = [];
   readonly support: SupportController;
-  private readonly protectedSources = new ProtectedSources();
+  private readonly protectedSources = new ProtectedSources(source => this.readProtectedSource(source), error =>
+    this.output.warn(JSON.stringify({ event: "protected_source_read_failed", code: error instanceof ExplorerError ? error.code : "requestFailed",
+      domain: error instanceof ExplorerError ? error.domain : undefined })));
   private readonly supportContexts: SupportContexts;
   private tree: MetadataTree | undefined;
   private files: WorkspaceFiles | undefined;
@@ -107,6 +110,7 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
     this.disposables.push(this.propertiesTabs);
     this.connection = new Connection(String(context.extension.packageJSON.version),
       (state) => this.update(state), (text, level) => this.output[level ?? "info"](text));
+    this.disposables.push(this.connection.onSourceChange(() => this.protectedSources.refresh()));
     this.tooling = new ToolingSetup(context, (text, level) => { if (!this.disposed) this.output[level ?? "info"](text); },
       () => this.renderProjectStatus(), async kind => { if (kind === "project") await this.disconnect(); else await this.language.stop(); },
       async kind => { if (kind === "project") await this.connect(false); else await this.language.restart(false); });
@@ -646,6 +650,32 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
     else await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(uri), { preview: true });
   }
 
+  /** Restoration waits for the existing process; unclassified views remain rooted read-only previews owned by ESKA. */
+  private async readProtectedSource(source: vscode.Uri): Promise<Awaited<ReturnType<SourceAccess['read']>>> {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      await this.connectionAttempt;
+      await this.supportContextsPending;
+      if (this.disposed) throw new ExplorerError("obsolete");
+      try {
+        const view = await this.support.readSource(source.fsPath);
+        if (view) return view;
+      } catch (error) {
+        if (error instanceof ExplorerError && error.domain === "source_view_failed" && error.details?.reason === "unknown_source") break;
+        if (!(error instanceof ExplorerError) || attempt === 2
+          || (error.domain !== "stale_generation" && error.code !== "sourceChanged")) throw error;
+        // Ordered metadata/native events can supersede a readonly capture; retry only that read under its new context.
+        await new Promise(resolve => setTimeout(resolve, 0));
+        continue;
+      }
+      break;
+    }
+    const endpoint = this.connection.sources, target = this.connection.target;
+    if (!endpoint || !target) throw new ExplorerError("incompatible");
+    const path = relativeFile(target.path, source.fsPath);
+    if (!path) throw new ExplorerError("sourceMissing");
+    return new SourceAccess(endpoint).preview({ value: path, encoding: "utf-8" });
+  }
+
   /** Invalidate preflight as well as the protocol connection so late probes cannot reconnect. */
   private async disconnect(): Promise<void> {
     this.connecting?.abort();
@@ -768,6 +798,7 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
     if (state.kind === "ready") {
       const tree = new MetadataTree(this.connection, state.session,
         (entries) => { this.support.invalidate(); this.decorations.invalidate(); this.propertiesTabs.changed(tree, entries);
+          this.protectedSources.refresh();
           void this.repaint(entries); }, (project, reopen) => this.recover(project, reopen));
       this.tree = tree;
       this.files = new WorkspaceFiles(tree.projects, state.target.path, watchDirectory, entry => {
@@ -782,6 +813,7 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
       } catch (error) { this.showError(error instanceof ExplorerError ? error : new ExplorerError("unsupportedPath")); }
     }
     this.support.setTree(this.tree, state.kind === "ready" && state.supportPolicy, state.kind === "disconnected" || state.kind === "stopping", state.kind === "ready" && state.supportFiles);
+    this.protectedSources.refresh();
     if (state.kind === "ready") {
       void this.refreshSupportContexts();
     }

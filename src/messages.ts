@@ -1,6 +1,9 @@
 import type { FailureCode } from "./protocol.js";
 
 const en = {
+  protectedSourceBackend: "Protected views require Metadata API 1.17; viewing without a project requires 1.18. Update eska-project and reconnect.",
+  protectedSourceUnavailable: "The protected source is unavailable. Connect ESKA and open it again.",
+  protectedSourceReadonly: "This is a protected ESKA view. Reopen the source from the project tree for permitted editing.",
   queryText: "Query",
   queryOpen: "Open query",
   queryResume: "Resume query draft",
@@ -202,6 +205,9 @@ const en = {
 } as const;
 
 const ru: Record<keyof typeof en, string> = {
+  protectedSourceBackend: "Для защищённых представлений нужен Metadata API 1.17, для просмотра без проекта — 1.18. Обновите eska-project и подключитесь снова.",
+  protectedSourceUnavailable: "Защищённый исходник недоступен. Подключите ESKA и откройте его снова.",
+  protectedSourceReadonly: "Это защищённое представление ESKA. Для разрешённого редактирования повторно откройте исходник из дерева проекта.",
   queryText: "Запрос",
   queryOpen: "Открыть запрос",
   queryResume: "Продолжить черновик запроса",

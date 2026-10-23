@@ -5,9 +5,11 @@ import { nativePath } from "./source.js";
 export interface SourceLimits {
   readonly maxSnapshotBytes: number; readonly maxSnapshots: number; readonly maxRetainedBytes: number;
   readonly maxChunkBytes: number; readonly maxPaths: number;
+  readonly rootedPreviews: boolean;
 }
 export type SourceMethod = "source/protection" | "source/snapshotOpen" | "source/snapshotRead" | "source/snapshotClose"
-  | "source/bufferBegin" | "source/bufferAppend" | "source/bufferClose";
+  | "source/bufferBegin" | "source/bufferAppend" | "source/bufferClose"
+  | "source/previewOpen" | "source/previewRead" | "source/previewClose";
 export interface SourceEndpoint { readonly limits: SourceLimits; request(method: SourceMethod, params: Record<string, unknown>): Promise<unknown> }
 export interface SourceContext { sessionId: string; projectId: string; generation: string }
 export interface SourceProtection {
@@ -30,9 +32,11 @@ export function sourceCapabilities(hello: unknown): SourceLimits | undefined {
   if (!isRecord(value) || value.schemaVersion !== 1 || value.writesOwner !== false || value.sessionOwnerPriority !== true
     || value.binarySnapshots !== true || value.sharedQueryBudget !== true) invalid();
   const bounds = { maxSnapshotBytes: 8_388_608, maxSnapshots: 16, maxRetainedBytes: 33_554_432, maxChunkBytes: 131_072, maxPaths: 128 };
-  return Object.fromEntries(Object.entries(bounds).map(([key, bound]) => {
+  if (value.rootedPreviews !== undefined && typeof value.rootedPreviews !== "boolean") invalid();
+  const limits = Object.fromEntries(Object.entries(bounds).map(([key, bound]) => {
     const limit = value[key]; if (!positive(limit)) invalid(); return [key, Math.min(limit, bound)];
-  })) as unknown as SourceLimits;
+  }));
+  return { ...limits, rootedPreviews: hello.apiVersion.minor >= 18 && value.rootedPreviews === true } as unknown as SourceLimits;
 }
 
 /** Transport validation never reimplements the backend's support, ownership or writable decision. */
@@ -48,12 +52,14 @@ function protection(value: unknown): SourceProtection {
 
 /** Source handles and uploads belong to one initialized process and one exact metadata member. */
 export class SourceAccess {
-  constructor(private readonly endpoint: SourceEndpoint, private readonly context: () => SourceContext) {}
+  constructor(private readonly endpoint: SourceEndpoint, private readonly context?: () => SourceContext) {}
 
   /** ESKA alone evaluates the current support switch, temporary owners and adapter-reported user restriction. */
   async protection(files: { path: WirePath; userReadOnly: boolean }[], enforceSupport: boolean): Promise<SourceProtection[]> {
     if (!files.length || files.length > this.endpoint.limits.maxPaths) throw new ExplorerError("resourceLimit");
-    const result = await this.request("source/protection", { files, enforceSupport }, this.context());
+    const context = this.context?.();
+    if (!context) throw new ExplorerError("obsolete");
+    const result = await this.request("source/protection", { files, enforceSupport }, context);
     if (!Array.isArray(result.files) || result.files.length !== files.length) invalid();
     return result.files.map((value, index) => {
       const state = protection(value);
@@ -64,24 +70,41 @@ export class SourceAccess {
 
   /** Read exact immutable bytes and release the source handle even when a later chunk is invalid. */
   async read(path: WirePath, native?: NativeSourceSnapshot): Promise<{ header: SourceView; bytes: Uint8Array }> {
-    const context = this.context();
+    const context = this.context?.();
+    if (!context) throw new ExplorerError("obsolete");
+    return this.readView(path, context, native);
+  }
+
+  /** Unclassified disk views restore within the backend's served folder without granting metadata or write authority. */
+  async preview(path: WirePath): Promise<{ header: SourceView; bytes: Uint8Array }> {
+    if (!this.endpoint.limits.rootedPreviews) throw new ExplorerError("incompatible");
+    return this.readView(path);
+  }
+
+  /** Both view namespaces enforce the same binary/hash bounds and release handles inside their original process. */
+  private async readView(path: WirePath, context?: SourceContext, native?: NativeSourceSnapshot): Promise<{ header: SourceView; bytes: Uint8Array }> {
     let handle: string | undefined;
+    const read = context ? "source/snapshotRead" : "source/previewRead";
+    const close = context ? "source/snapshotClose" : "source/previewClose";
     try {
-      const result = await this.withNative(native, context, async input => {
-        const result = await this.request("source/snapshotOpen", { path, ...input }, context);
+      /** Capture ownership before upload cleanup so a rejected close cannot orphan the newly opened view. */
+      const open = async (input: Record<string, unknown>): Promise<Record<string, unknown>> => {
+        const result = await this.request(context ? "source/snapshotOpen" : "source/previewOpen", { path, ...input }, context);
         if (typeof result.snapshotId === "string" && result.snapshotId) handle = result.snapshotId;
         return result;
-      });
+      };
+      const result = context ? await this.withNative(native, context, open) : await open({});
       if (!handle || !isWirePath(result.path) || nativePath(result.path) !== nativePath(path)
         || !nonnegative(result.bytes) || result.bytes > this.endpoint.limits.maxSnapshotBytes || !snapshot(result.snapshot)
         || !["disk", "editor", "querySession"].includes(String(result.origin))
         || !(result.version === null || (isToken(result.version) && result.version !== "0"))) invalid();
       const state = protection(result.protection);
       if (nativePath(state.path) !== nativePath(path)) invalid();
+      if (!context && (result.origin !== "disk" || result.version !== null || state.writable || !state.supportUnknown || state.objects.length)) invalid();
       const chunks: Buffer[] = [];
       let offset = 0;
       do {
-        const part = await this.request("source/snapshotRead", { snapshotId: handle, snapshot: result.snapshot,
+        const part = await this.request(read, { snapshotId: handle, snapshot: result.snapshot,
           offset, bytes: this.endpoint.limits.maxChunkBytes }, context, true);
         if (part.snapshotId !== handle || part.snapshot !== result.snapshot || part.offset !== offset || typeof part.data !== "string"
           || part.data.length > 4 * Math.ceil(this.endpoint.limits.maxChunkBytes / 3)
@@ -96,7 +119,7 @@ export class SourceAccess {
       if (digest(bytes) !== result.snapshot) invalid();
       return { header: { ...result, protection: state } as unknown as SourceView, bytes };
     } finally {
-      if (handle) await this.release("source/snapshotClose", { snapshotId: handle }, context);
+      if (handle) await this.release(close, { snapshotId: handle }, context);
     }
   }
 
@@ -127,15 +150,15 @@ export class SourceAccess {
   }
 
   /** Only immutable reads and exact cleanup omit the generation response envelope. */
-  private async request(method: SourceMethod, params: Record<string, unknown>, context: SourceContext, cleanup = false): Promise<Record<string, unknown>> {
+  private async request(method: SourceMethod, params: Record<string, unknown>, context: SourceContext | undefined, cleanup = false): Promise<Record<string, unknown>> {
     const value = await this.endpoint.request(method, { ...context, ...params });
-    if (!isRecord(value) || (!cleanup && (value.sessionId !== context.sessionId || value.projectId !== context.projectId
+    if (!isRecord(value) || (context && !cleanup && (value.sessionId !== context.sessionId || value.projectId !== context.projectId
       || value.generation !== context.generation))) invalid();
     return value;
   }
 
   /** A stale metadata generation may release this process's own resource but never a replacement process's handle. */
-  private async release(method: "source/snapshotClose" | "source/bufferClose", params: Record<string, unknown>, context: SourceContext): Promise<void> {
+  private async release(method: "source/snapshotClose" | "source/bufferClose" | "source/previewClose", params: Record<string, unknown>, context: SourceContext | undefined): Promise<void> {
     const result = await this.request(method, params, context, true);
     if (typeof result.released !== "boolean") invalid();
   }

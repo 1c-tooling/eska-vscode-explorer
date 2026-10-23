@@ -34,6 +34,9 @@ test("common source capability requires binary immutable snapshots and clamps ne
     maxSnapshotBytes: 8_388_608, maxSnapshots: 16, maxRetainedBytes: 33_554_432, maxChunkBytes: 131_072, maxPaths: 128 };
   const hello = { apiVersion: { major: 1, minor: 17 }, capabilities: { sourceProtection: value } };
   assert.equal(sourceCapabilities(hello).maxSnapshotBytes, 8_388_608);
+  assert.equal(sourceCapabilities(hello).rootedPreviews, false);
+  assert.equal(sourceCapabilities({ ...hello, apiVersion: { major: 1, minor: 18 },
+    capabilities: { sourceProtection: { ...value, rootedPreviews: true } } }).rootedPreviews, true);
   assert.equal(sourceCapabilities({ ...hello, apiVersion: { major: 1, minor: 16 } }), undefined);
   for (const changed of [{ writesOwner: true }, { binarySnapshots: false }, { sharedQueryBudget: false }, { maxChunkBytes: 0 }]) {
     assert.throws(() => sourceCapabilities({ ...hello, capabilities: { sourceProtection: { ...value, ...changed } } }), { code: "protocolInvalid" });
@@ -110,4 +113,35 @@ test("source mutation freshness changes before the backend reply", { skip: !exec
   const closing = value.connection.recovery.sessions.request("query/sessionClose", { ...value.context(), querySessionId: "missing" });
   assert.notEqual(value.connection.sourceRevision, before);
   assert.equal((await closing).released, false);
+});
+
+/** Restoration can read from a fixed served folder after metadata open fails, without an IDE file reader. */
+test("rooted preview SDK works after a manifest failure and retains no project authority", { skip: !executable }, async t => {
+  const value = await fixture(t);
+  const original = await readFile(value.formPath);
+  await rm(join(value.root, "eska.toml"));
+  await value.connection.connect(value.target);
+  assert.equal(value.connection.state.kind, "error");
+  assert.equal(value.connection.state.error.code, "manifestMissing");
+  assert.ok(value.connection.sources?.limits.rootedPreviews);
+  const client = new SourceAccess(value.connection.sources);
+  const view = await client.preview({ value: relative(value.root, value.formPath), encoding: "utf-8" });
+  assert.deepEqual(Buffer.from(view.bytes), original);
+  assert.equal(view.header.protection.writable, false);
+  assert.equal(view.header.protection.supportUnknown, true);
+  assert.deepEqual(view.header.protection.objects, []);
+  await assert.rejects(client.preview({ value: "../outside.txt", encoding: "utf-8" }));
+});
+
+/** A preview response cannot silently become a project source or confer write permission. */
+test("rooted preview SDK rejects writable responses and releases the real handle", { skip: !executable }, async t => {
+  const value = await fixture(t), endpoint = value.connection.sources;
+  const methods = [];
+  const client = new SourceAccess({ limits: endpoint.limits, async request(method, params) {
+    methods.push(method);
+    const result = await endpoint.request(method, params);
+    return method === "source/previewOpen" ? { ...result, protection: { ...result.protection, writable: true } } : result;
+  } });
+  await assert.rejects(client.preview({ value: relative(value.root, value.formPath), encoding: "utf-8" }), { code: "protocolInvalid" });
+  assert.deepEqual(methods, ["source/previewOpen", "source/previewClose"]);
 });

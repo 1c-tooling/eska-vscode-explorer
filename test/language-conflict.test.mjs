@@ -55,7 +55,9 @@ function fixture({ available = false, enabled = true, hold, outside = false, sta
       onDidChangeTextDocument(callback) { changed = callback; return { dispose() { changed = undefined; } }; },
       createFileSystemWatcher() { const callbacks = new Set(), watcher = {
         onDidCreate(callback) { callbacks.add(callback); }, onDidChange(callback) { callbacks.add(callback); }, onDidDelete(callback) { callbacks.add(callback); },
-        fire(uri) { for (const callback of callbacks) callback(uri); }, dispose() { callbacks.clear(); this.disposed = true; } };
+        /** Native watcher callbacks always receive a URI and can also see virtual schemes. */
+        fire(uri = {}) { for (const callback of callbacks) callback({ scheme: "file", ...uri }); },
+        dispose() { callbacks.clear(); this.disposed = true; } };
         watchers.push(watcher); return watcher;
       } },
     extensions: { getExtension(id) { assert.equal(id, ID); return conflict ? { id, isActive: false, activate() { assert.fail("foreign activation"); } } : undefined; },
@@ -415,4 +417,18 @@ test("application sources outside metadata selection receive scoped observers wi
   f.watchers[2].fire(); await configurationSettled(f.service);
   assert.equal(f.owners.length, 2); assert.equal(f.owners[0].stopped, true);
   assert.ok(f.watchers.slice(0, 3).every(watcher => watcher.disposed), "old session observers are all released");
+});
+
+/** Virtual file providers must not trigger configuration reloads or native source invalidation through matching fsPath values. */
+test("protected view events cannot invalidate analyzer configuration or uncovered sources", async t => {
+  const f = fixture({ outside: true }); t.after(() => f.service.shutdown()); f.connect(); await settled(f.service);
+  const model = f.service.modelRevision, checks = f.calls.filter(value => value === "analyzer/configStatus").length;
+  f.watchers[0].fire({ scheme: "eska-protected", fsPath: join(f.root, "bsl-analyzer.toml") });
+  f.watchers[1].fire({ scheme: "eska-protected", fsPath: join(f.sourceRoot, "src", "Catalogs", "Item.xml") });
+  f.watchers[2].fire({ scheme: "eska-protected", fsPath: join(f.sourceRoot, "eska.toml") });
+  await configurationSettled(f.service);
+  assert.equal(f.service.modelRevision, model);
+  assert.equal(f.service.configurationPending, false);
+  assert.equal(f.calls.filter(value => value === "analyzer/configStatus").length, checks);
+  assert.equal(f.owners.length, 1);
 });

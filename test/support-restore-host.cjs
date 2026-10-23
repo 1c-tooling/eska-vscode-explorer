@@ -16,6 +16,8 @@ async function restored(uri) {
 
 /** Save a protected tab, then validate it in a fresh IDE process using the same profile. */
 exports.run = async function () {
+  if (process.env.ESKA_HOST_LOCALE) assert.ok(vscode.env.language.startsWith(process.env.ESKA_HOST_LOCALE),
+    `Requested UI locale ${process.env.ESKA_HOST_LOCALE}, actual ${vscode.env.language}`);
   assert.ok(process.env.ESKA_HOST_RESTART, 'run with ESKA_HOST_RESTART=1');
   const fixture = JSON.parse(process.env.ESKA_HOST_FIXTURE);
   const uri = vscode.Uri.file(fixture.module).with({ scheme: 'eska-protected' });

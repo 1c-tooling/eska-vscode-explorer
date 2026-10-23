@@ -1,7 +1,7 @@
 import { isAbsolute } from "node:path";
 import { diagnostic, errorContext, type DiagnosticLog } from "./diagnostics.js";
 import { BackendProcess, type ProcessOptions } from "./process.js";
-import { API_VERSION, BASE_API_VERSION, QUERY_API_VERSION, RECOVERY_API_VERSION, SESSION_API_VERSION, LEGACY_API_VERSION, ExplorerError, isRecord, parseHandshake, parseWorkspace, type BackendKind, type WorkspaceSession } from "./protocol.js";
+import { API_VERSION, BASE_API_VERSION, QUERY_API_VERSION, RECOVERY_API_VERSION, SESSION_API_VERSION, SOURCE_API_VERSION, LEGACY_API_VERSION, ExplorerError, isRecord, parseHandshake, parseWorkspace, type BackendKind, type WorkspaceSession } from "./protocol.js";
 import { queryCapabilities, type QueryCapabilities } from "./query/protocol.js";
 import { recoveryCapabilities, type RecoveryEndpoint } from "./query/recovery-protocol.js";
 import { querySessionCapabilities } from "./query/session-protocol.js";
@@ -23,6 +23,7 @@ export class Connection {
   private lastTarget: ConnectionTarget | undefined;
   private structuralRequest: Promise<unknown> | undefined;
   private readonly listeners = new Set<(method: string, params: unknown) => void>();
+  private readonly sourceListeners = new Set<() => void>();
   private recoveryEndpoint: RecoveryEndpoint | undefined;
   private sourceEndpoint: SourceEndpoint | undefined;
   private sourceEra: object = {};
@@ -63,7 +64,7 @@ export class Connection {
       if (signal?.aborted) throw new ExplorerError("cancelled");
     }
     const child = this.sessionChild(sessionId);
-    this.sourceMutation(method);
+    const sourceMutation = this.sourceMutation(method);
     const structural = ["metadata/renamePreview", "metadata/renameApply", "metadata/undoProperty"].includes(method)
       || (method === "metadata/updateProperty" && typeof params?.contextSnapshot === "string");
     // Backend scans cannot stop midway. Keep the barrier until their actual reply, even if a tab closes.
@@ -71,7 +72,10 @@ export class Connection {
     if (structural) this.structuralRequest = pending;
     let result: unknown;
     try { result = await pending; }
-    finally { if (this.structuralRequest === pending) this.structuralRequest = undefined; }
+    finally {
+      if (this.structuralRequest === pending) this.structuralRequest = undefined;
+      if (sourceMutation && this.child === child) for (const listener of this.sourceListeners) listener();
+    }
     if (signal?.aborted) throw new ExplorerError("cancelled");
     if (child !== this.sessionChild(sessionId)) throw new ExplorerError("obsolete");
     return result;
@@ -86,6 +90,12 @@ export class Connection {
   onNotification(listener: (method: string, params: unknown) => void): { dispose(): void } {
     this.listeners.add(listener);
     return { dispose: () => { this.listeners.delete(listener); } };
+  }
+
+  /** Protected native views refresh only after the backend has completed its source ownership change. */
+  onSourceChange(listener: () => void): { dispose(): void } {
+    this.sourceListeners.add(listener);
+    return { dispose: () => { this.sourceListeners.delete(listener); } };
   }
 
   /** Analyzer RPCs use their own input schema and lease, without a metadata generation or injected sessionId. */
@@ -156,8 +166,8 @@ export class Connection {
           const supported = error instanceof ExplorerError ? error.details?.supported : undefined;
           if (backend !== "project" || !(error instanceof ExplorerError) || error.domain !== "unsupported_version"
             || !isRecord(supported) || supported.major !== 1
-            || typeof supported.minor !== "number" || ![12, 13, 14, 15, 16].includes(supported.minor)) throw error;
-          response = await initialize(supported.minor === 16 ? SESSION_API_VERSION : supported.minor >= 14 ? RECOVERY_API_VERSION
+            || typeof supported.minor !== "number" || ![12, 13, 14, 15, 16, 17].includes(supported.minor)) throw error;
+          response = await initialize(supported.minor === 17 ? SOURCE_API_VERSION : supported.minor === 16 ? SESSION_API_VERSION : supported.minor >= 14 ? RECOVERY_API_VERSION
             : supported.minor === QUERY_API_VERSION.minor ? QUERY_API_VERSION : BASE_API_VERSION);
         }
         const version = parseHandshake(response, backend);
@@ -169,9 +179,11 @@ export class Connection {
         if (revision !== this.revision) return;
         const request = async (method: string, params: Record<string, unknown>): Promise<unknown> => {
           if (this.child !== child) throw new ExplorerError("obsolete");
-          this.sourceMutation(method);
+          const sourceMutation = this.sourceMutation(method);
           // Metadata authority is deliberately absent; even a failed manifest can retain an inert draft.
-          const result = await child.request(method, params);
+          let result: unknown;
+          try { result = await child.request(method, params); }
+          finally { if (sourceMutation && this.child === child) for (const listener of this.sourceListeners) listener(); }
           if (this.child !== child) throw new ExplorerError("obsolete");
           return result;
         };
@@ -238,9 +250,13 @@ export class Connection {
   dispose(): Promise<void> { this.disposed = true; return this.disconnect(); }
 
   /** Native authorization snapshots expire before any queued request can change source ownership in this process. */
-  private sourceMutation(method: string): void {
+  private sourceMutation(method: string): boolean {
     if ((method.startsWith("query/session") && method !== "query/sessionGet")
-      || ["query/recoveryOpen", "query/recoveryClose", "query/recoveryRemove"].includes(method)) this.sourceEra = {};
+      || ["workspace/close", "query/recoveryOpen", "query/recoveryClose", "query/recoveryRemove"].includes(method)) {
+      this.sourceEra = {};
+      return true;
+    }
+    return false;
   }
 
   /** Retain the child reference if cleanup fails, preventing an overlapping replacement. */

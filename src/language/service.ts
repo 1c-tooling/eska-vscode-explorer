@@ -319,8 +319,8 @@ export class LanguageService implements vscode.Disposable {
       const watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(vscode.Uri.file(context.root), "bsl-analyzer.toml"));
       session.configurationWatcher = watcher;
       /** Observe managed-config changes without replacing the metadata session or parsing TOML in the editor. */
-      const changed = (): void => {
-        if (this.session !== session || !this.current(revision, signal)) return;
+      const changed = (uri: vscode.Uri): void => {
+        if (uri.scheme !== "file" || this.session !== session || !this.current(revision, signal)) return;
         this.invalidateModel(); this.holdConfiguration(); this.scheduleConfigurationCheck();
       };
       watcher.onDidCreate(changed); watcher.onDidChange(changed); watcher.onDidDelete(changed);
