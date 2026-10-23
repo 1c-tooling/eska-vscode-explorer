@@ -1,4 +1,7 @@
 {
+  "queryOpen": "Открыть запрос",
+  "queryResume": "Продолжить черновик запроса",
+  "queryCompare": "Сравнить XML владельца",
   "hideEmptyGroups": "Скрывать пустые группы",
   "showEmptyGroups": "Показывать пустые группы",
   "resetRootFilter": "Использовать фильтр по умолчанию",

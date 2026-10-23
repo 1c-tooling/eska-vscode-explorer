@@ -1,6 +1,16 @@
 import type { FailureCode } from "./protocol.js";
 
 const en = {
+  queryText: "Query",
+  queryOpen: "Open query",
+  queryResume: "Resume query draft",
+  queryCompare: "Compare query owner",
+  queryUnavailable: "Query editing requires a current eska-project build with Metadata API 1.13. The draft remains available.",
+  queryComments: "Moving XML source comments requires an explicit placement decision. The draft remains open.",
+  queryReadonly: "This query owner is read-only. The XML source cannot be changed.",
+  queryResumeRequired: "Resume this query draft to verify its owner and application before saving.",
+  querySaveFailed: "The query operation could not finish. Draft text remains in its tab; review the XML owner and connection before resuming.",
+  queryRecoveryDamaged: "A query recovery record is unavailable or damaged. It has been kept in the extension's private storage.",
   languageEditReadonly: "The language edit was rejected: a target file is read-only or its project permission could not be confirmed.",
   languageEditResource: "The language edit was rejected: file creation, deletion and renaming require project operations.",
   languageEditInvalid: "The language edit was rejected because its ranges or target files are invalid. Request the operation again.",
@@ -189,6 +199,16 @@ const en = {
 } as const;
 
 const ru: Record<keyof typeof en, string> = {
+  queryText: "Запрос",
+  queryOpen: "Открыть запрос",
+  queryResume: "Продолжить черновик запроса",
+  queryCompare: "Сравнить XML владельца",
+  queryUnavailable: "Для редактирования запросов нужна актуальная сборка eska-project с Metadata API 1.13. Черновик остаётся доступным.",
+  queryComments: "Для переноса XML-комментариев нужно явно выбрать их новое место. Черновик остаётся во вкладке.",
+  queryReadonly: "Владелец запроса доступен только для чтения. XML-исходник нельзя изменять.",
+  queryResumeRequired: "Возобновите черновик запроса, чтобы проверить владельца и приложение перед сохранением.",
+  querySaveFailed: "Не удалось завершить действие с запросом. Текст черновика остаётся во вкладке; проверьте XML владельца и подключение перед возобновлением.",
+  queryRecoveryDamaged: "Запись восстановления запроса повреждена или недоступна. Она оставлена в личном хранилище расширения.",
   languageEditReadonly: "Языковая правка отклонена: целевой файл защищён или разрешение проекта не удалось подтвердить.",
   languageEditResource: "Языковая правка отклонена: создание, удаление и переименование файлов выполняются средствами проекта.",
   languageEditInvalid: "Языковая правка отклонена из-за неверных диапазонов или целевых файлов. Запросите операцию заново.",

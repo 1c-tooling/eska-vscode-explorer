@@ -20,6 +20,7 @@
     "workspace"
   ],
   "activationEvents": [
+    "onFileSystem:eska-query",
     "onFileSystem:eska-protected",
     "onView:eska.explorer.projects",
     "workspaceContains:**/eska.toml",
@@ -184,6 +185,23 @@
         "command": "eska.explorer.selectAnalysisContext",
         "title": "%selectAnalysisContext%",
         "category": "ESKA Explorer"
+      },
+      {
+        "command": "eska.explorer.openQuery",
+        "title": "%queryOpen%",
+        "category": "ESKA Explorer"
+      },
+      {
+        "command": "eska.explorer.resumeQuery",
+        "title": "%queryResume%",
+        "category": "ESKA Explorer",
+        "icon": "$(debug-continue)"
+      },
+      {
+        "command": "eska.explorer.compareQueryOwner",
+        "title": "%queryCompare%",
+        "category": "ESKA Explorer",
+        "icon": "$(diff)"
       }
     ],
     "views": {
@@ -197,6 +215,18 @@
       ]
     },
     "menus": {
+      "editor/title": [
+        {
+          "command": "eska.explorer.resumeQuery",
+          "when": "resourceScheme == eska-query",
+          "group": "navigation@1"
+        },
+        {
+          "command": "eska.explorer.compareQueryOwner",
+          "when": "resourceScheme == eska-query",
+          "group": "navigation@2"
+        }
+      ],
       "view/title": [
         {
           "command": "eska.explorer.connect",
@@ -277,6 +307,18 @@
         }
       ],
       "commandPalette": [
+        {
+          "command": "eska.explorer.openQuery",
+          "when": "false"
+        },
+        {
+          "command": "eska.explorer.resumeQuery",
+          "when": "resourceScheme == eska-query"
+        },
+        {
+          "command": "eska.explorer.compareQueryOwner",
+          "when": "resourceScheme == eska-query"
+        },
         {
           "command": "eska.explorer.properties",
           "when": "false"

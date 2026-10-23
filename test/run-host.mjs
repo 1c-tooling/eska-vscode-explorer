@@ -11,6 +11,8 @@ const binary = process.env.ESKA_TEST_BINARY;
 if (!binary || !isAbsolute(binary)) throw new Error("Set ESKA_TEST_BINARY to an absolute path to an IDE-enabled backend.");
 const globalBinary = process.env.ESKA_HOST_GLOBAL_BINARY ?? binary;
 const backend = process.env.ESKA_TEST_BACKEND ?? "project";
+const locale = process.env.ESKA_HOST_LOCALE;
+if (locale && !["ru", "en"].includes(locale)) throw new Error("ESKA_HOST_LOCALE must be ru or en.");
 if (!["project", "legacy"].includes(backend)) throw new Error("ESKA_TEST_BACKEND must be project or legacy.");
 if (!isAbsolute(globalBinary)) throw new Error("ESKA_HOST_GLOBAL_BINARY must be absolute.");
 const playground = process.env.ESKA_TEST_ROOT ?? resolve(repository, "../eska-playground");
@@ -18,6 +20,7 @@ if (!isAbsolute(playground)) throw new Error("ESKA_TEST_ROOT must be absolute.")
 const root = await mkdtemp(join(playground, "explorer-host-"));
 try {
   const fixture = await createTreeProject(join(root, "project"), process.env.ESKA_HOST_PROJECT_TYPE ?? "configuration");
+  if (basename(suite) === "query-tabs-host.cjs") fixture.query = await (await import("./query-fixture.mjs")).createQuerySource(fixture);
   // These scenarios exercise language lifecycle, not concurrent mutation of XML during workspace/open.
   if (["language-host.cjs", "language-cancellation-host.cjs"].includes(basename(suite))) {
     fixture.languageSource = await (await import("./language-fixture.mjs")).createLanguageSource(fixture);
@@ -36,10 +39,18 @@ try {
   else await symlink(globalBinary, join(bin, executableName));
   await mkdir(join(fixture.root, ".vscode"), { recursive: true });
   await writeFile(join(fixture.root, ".vscode/settings.json"), JSON.stringify({ "eska.explorer.checkForUpdates": false, "eska.explorer.checkForAnalyzerUpdates": false, "eska.explorer.languageFeatures": process.env.ESKA_TEST_LANGUAGE === "1", "eska.explorer.analyzerExecutable": process.env.ESKA_TEST_ANALYZER_BINARY ?? join(root, "missing-analyzer"), "eska.explorer.backend": backend,
-    ...(process.env.ESKA_HOST_GLOBAL_BINARY ? { "eska.explorer.executable": binary } : {}),
+    ...(process.env.ESKA_HOST_GLOBAL_BINARY || fixture.query ? { "eska.explorer.executable": binary } : {}),
     ...(process.env.ESKA_HOST_SUPPORT_DISABLED ? { "eska.explorer.supportPolicy": false } : {}) }));
   const executable = process.env.VSCODE_EXECUTABLE ?? "code";
   let extensionPath = repository;
+  if (process.env.ESKA_HOST_LANGUAGE_PACK_VSIX) {
+    const languagePack = process.env.ESKA_HOST_LANGUAGE_PACK_VSIX;
+    if (!isAbsolute(languagePack)) throw new Error("ESKA_HOST_LANGUAGE_PACK_VSIX must be absolute.");
+    const { promisify } = await import("node:util");
+    const { execFile } = await import("node:child_process");
+    await promisify(execFile)(executable, [`--user-data-dir=${join(root, "profile")}`, `--extensions-dir=${join(root, "extensions")}`,
+      "--install-extension", languagePack, "--force"], { timeout: 60000 });
+  }
   const conflictFixture = process.env.ESKA_HOST_CONFLICT_FIXTURE ? await (await import("./conflict-fixture.mjs")).createConflictFixture(root) : undefined;
   if (conflictFixture && process.env.ESKA_HOST_CONFLICT_FIXTURE === "initial") {
     await cp(conflictFixture.folder, join(root, "extensions", "elishevkirill.bsl-analyzer-lsp-0.0.1"), { recursive: true });
@@ -87,6 +98,21 @@ try {
   }
   // A second process reuses the same profile and workspace to test restored editors.
   const hostArguments = [`--extensionTestsPath=${suite}`];
+  let languageWarmup;
+  if (process.env.ESKA_HOST_LANGUAGE_PACK_VSIX) {
+    // A fresh profile registers installed language packs during its first normal startup.
+    // Passing --locale before that registration still resolves to English.
+    languageWarmup = join(root, "language-pack-registration");
+    await mkdir(languageWarmup);
+    await writeFile(join(languageWarmup, "package.json"), JSON.stringify({ name: "language-pack-registration", publisher: "eska-test",
+      version: "0.0.1", engines: { vscode: "^1.109.0" }, main: "./extension.cjs", activationEvents: ["onStartupFinished"] }));
+    await writeFile(join(languageWarmup, "extension.cjs"), `const vscode = require('vscode');
+exports.activate = async function () {
+  await require('node:fs/promises').writeFile(${JSON.stringify(join(fixture.root, "host-result.json"))},
+    JSON.stringify({ passed: true, suite: 'language-pack-registration', locale: vscode.env.language }));
+  await vscode.commands.executeCommand('workbench.action.closeWindow');
+};\n`);
+  }
   if (process.env.ESKA_HOST_RESTART) {
     // VS Code deliberately skips editor restoration in extension-test mode. Run the
     // same assertions from a disposable startup extension in a normal development host.
@@ -105,13 +131,13 @@ exports.activate = async function () {
 };\n`);
     hostArguments.splice(0, 1, `--extensionDevelopmentPath=${probe}`);
   }
-  const runs = process.env.ESKA_HOST_CONFLICT_RELOAD ? 3 : process.env.ESKA_HOST_RESTART ? 2 : 1;
-  for (let run = 0; run < runs; run++) {
+  const runs = process.env.ESKA_HOST_CONFLICT_RELOAD ? 3 : process.env.ESKA_HOST_RESTART || process.env.ESKA_HOST_QUERY_RESTART ? 2 : 1;
+  for (let run = languageWarmup ? -1 : 0; run < runs; run++) {
     await rm(join(fixture.root, "host-result.json"), { force: true });
-    const child = spawn(executable, ["--verbose", "--wait", ...(process.env.ESKA_HOST_DEBUG_PORT ? [`--remote-debugging-port=${process.env.ESKA_HOST_DEBUG_PORT}`] : []),
-      `--extensionDevelopmentPath=${extensionPath}`, ...hostArguments,
+    const child = spawn(executable, ["--verbose", "--wait", ...(locale ? [`--locale=${locale}`] : []), ...(process.env.ESKA_HOST_DEBUG_PORT ? [`--remote-debugging-port=${process.env.ESKA_HOST_DEBUG_PORT}`] : []),
+      `--extensionDevelopmentPath=${extensionPath}`, ...(run === -1 ? [`--extensionDevelopmentPath=${languageWarmup}`] : hostArguments),
       `--user-data-dir=${join(root, "profile")}`, `--extensions-dir=${join(root, "extensions")}`,
-      "--disable-workspace-trust", ...(process.env.ESKA_BSL_EXTENSION || process.env.ESKA_HOST_ENABLE_EXTENSIONS ? [] : ["--disable-extensions"]),
+      "--disable-workspace-trust", ...(process.env.ESKA_BSL_EXTENSION || process.env.ESKA_HOST_ENABLE_EXTENSIONS || languageWarmup ? [] : ["--disable-extensions"]),
       ...(process.env.ESKA_BSL_DISABLED || process.env.ESKA_HOST_CONFLICT_RELOAD && run === 1 ? ["--disable-extension=elishevkirill.bsl-analyzer-lsp"] : []), "--disable-gpu", "--new-window", workspace],
     { env: { ...process.env, PATH: bin + (process.platform === "win32" ? ";" : ":") + (process.env.PATH ?? ""), ESKA_HOST_RUN: String(run),
       ...(conflictFixture ? { ESKA_HOST_CONFLICT_VSIX: conflictFixture.vsix } : {}),

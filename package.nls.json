@@ -1,4 +1,7 @@
 {
+  "queryOpen": "Open query",
+  "queryResume": "Resume query draft",
+  "queryCompare": "Compare query owner",
   "hideEmptyGroups": "Hide Empty Groups",
   "showEmptyGroups": "Show Empty Groups",
   "resetRootFilter": "Use Default Filter",

@@ -73,6 +73,12 @@ export class LanguageService implements vscode.Disposable {
   /** Translate only presentation strings; protocol identifiers and backend error categories stay stable. */
   private text(key: MessageKey, ...values: string[]): string { return message(vscode.env.language, key, ...values); }
 
+  /** Query views reuse the window's checked application selection without preparing analyzer configuration. */
+  get selectedApplication(): string | undefined {
+    const state = this.connection.state;
+    return state.kind === "ready" ? this.context.workspaceState.get<string>(this.selectionKey(state)) || undefined : undefined;
+  }
+
   /** Reuse the metadata watcher's immediate observation; the upstream server owns incremental XML/BSL indexing. */
   sourceChanged(path: string): void {
     const session = this.session;
