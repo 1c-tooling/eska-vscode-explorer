@@ -1,5 +1,6 @@
 /** The public IDE API is versioned independently from the eska executable. */
-export const API_VERSION = { major: 1, minor: 12 } as const;
+export const API_VERSION = { major: 1, minor: 13 } as const;
+export const BASE_API_VERSION = { major: 1, minor: 12 } as const;
 export const LEGACY_API_VERSION = { major: 1, minor: 11 } as const;
 export type BackendKind = "project" | "legacy";
 export const MAX_HEADER = 8192;
@@ -51,7 +52,7 @@ export function parseHandshake(value: unknown, backend: BackendKind = "project")
   }
   const { apiVersion, server, capabilities, limits } = value;
   if (backend === "project" && server.name === "eska") throw new ExplorerError("legacyBackend");
-  const expected = backend === "legacy" ? LEGACY_API_VERSION : API_VERSION;
+  const expected = backend === "legacy" ? LEGACY_API_VERSION : BASE_API_VERSION;
   if (apiVersion.major !== expected.major || !Number.isSafeInteger(apiVersion.minor)
     || (apiVersion.minor as number) < expected.minor || server.name !== (backend === "legacy" ? "eska" : "eska-project")
     || (backend === "project" && capabilities.analyzerConfiguration !== true)
@@ -107,7 +108,10 @@ export function parseWorkspace(value: unknown): WorkspaceSession {
 /** Convert structured server errors, never localized stderr, into UI categories. */
 export function responseError(value: Record<string, unknown>): ExplorerError {
   const data = value.data;
-  if (value.code === -32601 || (isRecord(data) && data.kind === "unsupported_version")) {
+  if (isRecord(data) && data.kind === "unsupported_version") {
+    return new ExplorerError("incompatible", data.kind, isRecord(data.details) ? data.details : undefined);
+  }
+  if (value.code === -32601) {
     return new ExplorerError("incompatible");
   }
   if (isRecord(data) && data.kind === "project_open_failed" && isRecord(data.details)) {

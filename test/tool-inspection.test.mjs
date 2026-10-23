@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, mkdir, writeFile, chmod, rm, realpath } from "node:fs/promises";
 import { join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { projectContract, analyzerContract, nativeTarget, analyzerAsset, ToolFailure } from "../out/tooling/contracts.js";
 import { findTool, inspectProject, inspectAnalyzer, inspectProjectContract } from "../out/tooling/inspect.js";
 
@@ -79,6 +80,17 @@ test("real project inspection negotiates its API and validates the installed con
   const expected = projectContract(JSON.parse((await runProbe(path, ["__tool-contract"], root, 10_000, 65536)).stdout));
   assert.deepEqual(await inspectProjectContract(path, root, expected, () => {}), info);
   await assert.rejects(inspectProject(path, root, () => {}, AbortSignal.abort()), { code: "cancelled" });
+});
+
+/** Discovery must not reject a usable API 1.12 executable before Connection can negotiate its optional features. */
+test("project preflight accepts the minimum tree API without query support", { skip: process.platform === "win32" }, async t => {
+  const root = await mkdtemp(join(process.env.ESKA_TEST_ROOT ?? resolve("../eska-playground"), "explorer-tool-api12-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const path = join(root, "eska-project");
+  const peer = fileURLToPath(new URL("fake-backend.mjs", import.meta.url));
+  await writeFile(path, `#!${process.execPath}\nprocess.argv[2] = "api12"; import(${JSON.stringify(peer)});\n`);
+  await chmod(path, 0o755);
+  assert.deepEqual(await inspectProject(path, root, () => {}), { kind: "project", path, version: "test" });
 });
 
 test("real analyzer inspection verifies both bounded processes against the pinned CLI contract", {

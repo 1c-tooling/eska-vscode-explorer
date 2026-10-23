@@ -127,6 +127,17 @@ test("incompatible API is rejected before workspace/open", async (t) => {
   exited(children[0].pid);
 });
 
+/** Retry only an explicit compatible minor rejection, retaining the same process and project transport. */
+test("API 1.12 keeps the tree without claiming query editing", async t => {
+  const { value, children, starts } = connection(t, "api12");
+  await value.connect(target);
+  assert.equal(value.state.kind, "ready", JSON.stringify(value.state));
+  assert.equal(value.state.analyzerConfiguration, true);
+  assert.equal(value.state.queryEditing, undefined);
+  assert.equal(children.length, 1);
+  assert.deepEqual(starts, [["serve", "--stdio"]]);
+});
+
 test("structured manifest error reaches UI category without server text", async (t) => {
   const { value } = connection(t, "missing-manifest");
   await value.connect(target);

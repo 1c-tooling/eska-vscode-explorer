@@ -35,8 +35,13 @@ function handle(request) {
   if (mode === "crash") process.exit(7);
   if (mode === "garbage") { process.stdout.write("ordinary command help\r\n\r\n"); return; }
   if (request.method === "initialize") {
+    if (mode === "api12" && request.params.apiVersion.minor > 12) {
+      send({ jsonrpc: "2.0", id: request.id, error: { code: -32000, message: "Request failed",
+        data: { kind: "unsupported_version", details: { requested: request.params.apiVersion, supported: { major: 1, minor: 12 } } } } });
+      return;
+    }
     initialized = true;
-    const result = { apiVersion: mode === "incompatible" ? { major: 2, minor: 0 } : mode === "legacy" ? LEGACY_API_VERSION : API_VERSION,
+    const result = { apiVersion: mode === "incompatible" ? { major: 2, minor: 0 } : mode === "api12" ? { major: 1, minor: 12 } : mode === "legacy" ? LEGACY_API_VERSION : API_VERSION,
       server: { name: mode === "legacy" ? "eska" : "eska-project", version: "test" },
       capabilities: { analyzerConfiguration: mode !== "legacy", search: true, clientFileEvents: true, designerXml: true, readOnly: false, propertyEditing: true, metadataRename: true, linkedPropertyEdits: true, unsignedIntegerProperties: true, multiContext: false },
       limits: { maxHeaderBytes: MAX_HEADER, maxRequestBytes: MAX_REQUEST, maxResponseBytes: MAX_RESPONSE } };

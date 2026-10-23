@@ -1,0 +1,81 @@
+{
+  "schemaVersion": 1,
+  "task": "T101",
+  "part": "query-client",
+  "status": "in-progress",
+  "date": "2026-10-23",
+  "scope": "Metadata API 1.13 client and public save prototype; production query tabs, recovery and acceptance remain pending",
+  "environment": {
+    "os": "Linux",
+    "node": "22.23.1",
+    "bun": "1.4.2",
+    "native": {
+      "vscodium": "1.109.5",
+      "node": "22.21.1"
+    }
+  },
+  "stand": "/home/akalsin/Documents/Projects/eska-playground/t101-query-w5biaxqj",
+  "checks": {
+    "typescript": {
+      "command": "npm run check",
+      "passed": true
+    },
+    "node": {
+      "command": "ESKA_TEST_BINARY=\"$(realpath ../eska/target/debug/eska-project)\" ESKA_TEST_ROOT=\"$(realpath ../eska/../eska-playground)\" npm run test:node",
+      "passed": 222,
+      "failed": 0,
+      "skipped": 3,
+      "log": "/home/akalsin/Documents/Projects/eska-playground/t101-query-w5biaxqj/client-node-final.log"
+    },
+    "bun": {
+      "command": "ESKA_TEST_BINARY=\"$(realpath ../eska/target/debug/eska-project)\" ESKA_TEST_ROOT=\"$(realpath ../eska/../eska-playground)\" ../eska-playground/t88-tooling-yvc9vbiz/bun test",
+      "passed": 222,
+      "failed": 0,
+      "skipped": 3,
+      "log": "/home/akalsin/Documents/Projects/eska-playground/t101-query-w5biaxqj/client-bun.log"
+    },
+    "nativeSavePrototype": {
+      "passed": true,
+      "source": "/home/akalsin/Documents/Projects/eska-playground/t101-query-w5biaxqj/query-save-prototype.cjs",
+      "result": "/home/akalsin/Documents/Projects/eska-playground/t101-query-w5biaxqj/save-prototype-result.log",
+      "log": "/home/akalsin/Documents/Projects/eska-playground/t101-query-w5biaxqj/save-prototype-native.log",
+      "proves": [
+        "sdbl language on virtual file",
+        "clean XML save retains BOM and CRLF",
+        "dirty XML is not saved",
+        "owner Undo retains earlier unrelated unsaved changes",
+        "owner Redo",
+        "clean draft save does not call provider"
+      ],
+      "doesNotProve": [
+        "production query session",
+        "recovery across restart",
+        "query ownership locking",
+        "platform XML load"
+      ]
+    }
+  },
+  "limitations": [
+    "No production query tree entries or tabs in this commit",
+    "No platform loading performed in this part",
+    "Windows, macOS, VS Code and Remote unverified",
+    "Three optional binary scenarios skipped: legacy backend and two Analyzer artifact probes"
+  ],
+  "testedFiles": {
+    "src/query/protocol.ts": "4e51877e63053e417f01e78b924a1b1c2be0a3a2dda1c8595651db389211c654",
+    "src/query/client.ts": "ec63a1f24c493614c58ce4a1979b34c5b4b7d38cf1a6fbbe2d5d331f6cbb0b3b",
+    "src/query/plan.ts": "f7f85cc5a2853ebc7bba28747082727e0e8f33ee6b2aea2906101de891504933",
+    "src/connection.ts": "eb3d55a1256941ac0880a2ebed2fe4ea503c5e0beaeaa69c549273eb1bfcb2df",
+    "src/protocol.ts": "dd8fe782f1b43bf403307db9adb42a0c12ecd969a789d244908b7ed21743b9e1",
+    "src/tooling/inspect.ts": "c7c2c1e284b36fedae94a2cedf743fc837578e79bad0e87c6de3aa6c472cb9f9",
+    "test/query-client.test.mjs": "1c3217a6e56627bc7b4dfef4a17d30fb777b5d0752cab6faaecc42a79220b30d",
+    "test/query-integration.test.mjs": "6869aac50e20fec69003c7f3357fe93a327e1cb82cbf4c241c6e435875a78d43",
+    "test/transport.test.mjs": "ae1532bc8bbe746a5c31b6b97ad7f1ae9d127ceadc1c13e236e73ee2f0005b0a",
+    "test/tool-inspection.test.mjs": "d4e46e61603321362f2e1d34dd47ea8cbc060ded805d87f02ef97bfdb63fb601",
+    "test/fake-backend.mjs": "6c08eec8c3fe19fccf3ae2ee632b66383a3a17790c971a8731b1ae06f2e4fb16"
+  },
+  "backend": {
+    "commit": "2a9a2f9724eca220501115c40c83564b163f8354",
+    "binarySha256": "e06ce3b6707664d4ad21bfdc560a74867b6cdafe9d1815c17ed6ba16008048e0"
+  }
+}
