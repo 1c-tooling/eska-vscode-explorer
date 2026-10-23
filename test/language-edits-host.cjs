@@ -19,6 +19,8 @@ async function replace(editor, text) {
 
 /** Real upstream providers use fresh project permissions; injected applyEdit payloads use the public middleware and native editor. */
 async function run() {
+  if (process.env.ESKA_HOST_LOCALE) assert.ok(vscode.env.language.startsWith(process.env.ESKA_HOST_LOCALE),
+    `Requested UI locale ${process.env.ESKA_HOST_LOCALE}, actual ${vscode.env.language}`);
   const fixture = JSON.parse(process.env.ESKA_HOST_FIXTURE), { LANGUAGE_TEXT } = await import("./language-fixture.mjs");
   assert.equal(process.env.ESKA_HOST_LANGUAGE_EDITS, "1");
   const explorer = await vscode.extensions.all.find(value => value.packageJSON.name === "eska-explorer").activate();
@@ -119,13 +121,14 @@ async function run() {
   const priorTrace = trace.length;
   let denied;
   try { denied = await vscode.commands.executeCommand("vscode.executeDocumentRenameProvider", uri, new vscode.Position(5, 15), "ЗапрещённоеИмя"); }
-  catch (error) { assert.equal(error.message, "No result.", "the public rename command rejects an empty provider result"); }
+  catch (error) { assert.equal(error.message, vscode.env.language.startsWith("ru") ? "Результаты отсутствуют." : "No result.",
+    "the public rename command rejects an empty provider result"); }
   assert.ok(!denied?.size); assert.ok(!document.getText().includes("ЗапрещённоеИмя"));
   assert.ok(trace.slice(priorTrace).some(value => typeof value === "string" && value.includes('"reason":"readonly"')));
   assert.equal(vscode.workspace.getConfiguration("files", uri).get("readonlyInclude")["**/*.bsl"], true);
   await settings.update("readonlyInclude", baseline, vscode.ConfigurationTarget.Workspace);
   assert.deepEqual(await fs.readFile(file), sourceBytes); assert.deepEqual(await fs.readFile(fixture.descriptor), xmlBytes);
-  await fs.writeFile(path.join(fixture.root, "host-result.json"), JSON.stringify({ passed: true, suite: "language-edits", vscode: vscode.version,
+  await fs.writeFile(path.join(fixture.root, "host-result.json"), JSON.stringify({ passed: true, suite: "language-edits", vscode: vscode.version, locale: vscode.env.language,
     real_backend_policy: true, mixed_xml_atomic_rejection: true, protected_uri_rejected: true, stale_version_rejected: true,
     unversioned_server_edit_rejected: true, resource_edit_rejected: true, versioned_server_text_edit_applied: true,
     server_apply_payloads: "injected through public middleware; native editor transaction", rename: true, formatter_edits: formatting.length,

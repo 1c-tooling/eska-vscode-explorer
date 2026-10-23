@@ -80,12 +80,17 @@ async function ownerWritable(explorer, row, expected) {
   const owner = row.owner;
   const editing = await explorer.tree.request(owner.project, "metadata/propertyEditing", { objectId: owner.node.id.objectId });
   assert.equal(editing.writable, expected, "backend descriptor writes follow the source-session lifetime");
+  const file = path.join(owner.project.info.sourcePath.value, editing.source.value);
+  if (expected) assert.equal((await explorer.support.languageWriteAccess([file]))(), true);
+  else await assert.rejects(explorer.support.languageWriteAccess([file]), { code: "sourceChanged" });
 }
 
 /** New input during an already acknowledged source application must retain its own dirty native revision. */
 async function newerInput(explorer, fixture) {
   const row = await query(explorer, "common-template", "A");
+  const previousAccess = await explorer.support.languageWriteAccess([fixture.query.schemaPath]);
   await vscode.commands.executeCommand("eska.explorer.openQuery", row);
+  assert.equal(previousAccess(), false, "a native authorization from before source ownership cannot be reused");
   await ownerWritable(explorer, row, false);
   const draft = vscode.window.activeTextEditor.document;
   await replace(draft, "SELECT 1", "SELECT 7");
@@ -173,6 +178,9 @@ exports.run = async function () {
     const explorer = await extension.activate();
     await until(() => explorer.tree && explorer.connection.state.kind === "ready" && !explorer.support.loading, "source backend ready");
     assert.ok(explorer.connection.recovery.sessions);
+    assert.ok(explorer.connection.sources);
+    await vscode.workspace.getConfiguration("eska.explorer").update("supportPolicy", false, vscode.ConfigurationTarget.Workspace);
+    await until(() => !explorer.support.enabled && !explorer.support.loading, "ordinary support opt-out is visible");
     if (process.env.ESKA_HOST_LOCALE) assert.ok(vscode.env.language.startsWith(process.env.ESKA_HOST_LOCALE));
     const failure = explorer.queries.failure.bind(explorer.queries);
     explorer.queries.failure = error => { errors.push({ message: String(error), code: error?.code, domain: error?.domain, details: error?.details }); failure(error); };
@@ -184,7 +192,8 @@ exports.run = async function () {
       vscode: vscode.version, locale: vscode.env.language, backendSourceSessions: true, newerInputDuringReceipt: true,
       interruptedNativeReceipt: true, latestDraftPreserved: true, explicitReconciliation: true, cleanDraftMarkedDirty: true,
       noAutomaticReplay: true, cleanCloseReleasesCheckpoint: true, backendSourceWriteFence: true,
-      backendFenceReleasedOnError: true, restoredFenceUntilClose: true, injectedErrors: errors }));
+      backendFenceReleasedOnError: true, restoredFenceUntilClose: true, languageWritesRespectSourceOwnership: true,
+      supportDisabledDoesNotReleaseOwnership: true, staleNativeAuthorizationRejected: true, injectedErrors: errors }));
   } catch (error) {
     await fs.writeFile(path.join(fixture.root, "host-result.json"), JSON.stringify({ passed: false, error: String(error.stack ?? error), errors }));
     throw error;

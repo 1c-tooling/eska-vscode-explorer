@@ -9,7 +9,7 @@ import { message, type MessageKey } from "../messages.js";
 import { isRecord } from "../protocol.js";
 import type { AnalysisContext } from "./context.js";
 
-type Reason = "readonly" | "stale" | "resource" | "invalid" | "command";
+type Reason = "readonly" | "stale" | "resource" | "invalid" | "command" | "backend";
 interface Origin { documents: Map<string, { document: vscode.TextDocument; version: number }>; model: number; token?: vscode.CancellationToken }
 interface Target { document: vscode.TextDocument; version: number; path: string; stamp: string }
 interface Prepared { edit: ProtocolEdit; targets: Target[]; valid: () => boolean }
@@ -157,7 +157,7 @@ export class LanguageEdits implements vscode.Disposable {
     const document = await vscode.workspace.openTextDocument(uri);
     if (this.configuredReadonly(document)) throw new Rejected("readonly");
     const metadata = await stat(canonical, { bigint: true });
-    if (!metadata.isFile() || (metadata.mode & 0o222n) === 0n) throw new Rejected("readonly");
+    if (!metadata.isFile()) throw new Rejected("readonly");
     return { document, version: document.version, path: canonical,
       stamp: `${metadata.dev}:${metadata.ino}:${metadata.size}:${metadata.mtimeNs}:${metadata.ctimeNs}` };
   }
@@ -193,7 +193,7 @@ export class LanguageEdits implements vscode.Disposable {
     }
     let valid: () => boolean;
     try { valid = await this.support.languageWriteAccess(targets.map(target => target.path)); }
-    catch { throw new Rejected("readonly"); }
+    catch (error) { throw new Rejected(isRecord(error) && error.code === "incompatible" ? "backend" : "readonly"); }
     const prepared = { edit, targets, valid };
     await this.recheck(prepared, origin);
     return prepared;
@@ -264,7 +264,7 @@ export class LanguageEdits implements vscode.Disposable {
   /** Translate policy categories without exposing internal DTOs or file contents in user flows. */
   private reasonText(reason: Reason): string {
     const keys: Record<Reason, MessageKey> = { readonly: "languageEditReadonly", stale: "sourceChanged", resource: "languageEditResource",
-      invalid: "languageEditInvalid", command: "languageEditCommand" };
+      invalid: "languageEditInvalid", command: "languageEditCommand", backend: "languageEditBackend" };
     return message(vscode.env.language, keys[reason]);
   }
 

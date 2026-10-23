@@ -160,11 +160,21 @@ for (const minor of [14, 15]) {
     const { value, children, versions } = connection(t, `api${minor}`);
     await value.connect(target);
     assert.equal(value.state.kind, "ready", JSON.stringify(value.state));
-    assert.deepEqual(versions, [16, 14]);
+    assert.deepEqual(versions, [17, 14]);
     assert.equal(value.recovery?.sessions, undefined);
     assert.equal(children.length, 1);
   });
 }
+
+/** The durable XML lifecycle remains available without claiming the newer protected-source contract. */
+test("API 1.16 is retained on the same process without claiming source snapshots", async t => {
+  const { value, children, versions } = connection(t, "api16");
+  await value.connect(target);
+  assert.equal(value.state.kind, "ready", JSON.stringify(value.state));
+  assert.deepEqual(versions, [17, 16]);
+  assert.equal(value.sources, undefined);
+  assert.equal(children.length, 1);
+});
 
 test("structured manifest error reaches UI category without server text", async (t) => {
   const { value } = connection(t, "missing-manifest");

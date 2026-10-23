@@ -17,11 +17,11 @@ export class SupportContexts {
     private readonly invalidate: () => void, private readonly log: (text: string) => void) {}
 
   /** Recreate folder-scoped sessions; identical UUIDs never share an object map. */
-  async start(targets: ConnectionTarget[]): Promise<void> {
+  async start(targets: ConnectionTarget[], nativeWritePolicy = false): Promise<void> {
     const cleanup = this.stop();
     const revision = this.revision;
     await cleanup;
-    if (revision !== this.revision || !vscode.workspace.getConfiguration('eska.explorer').get<boolean>('supportPolicy', true)) return;
+    if (revision !== this.revision || (!nativeWritePolicy && !vscode.workspace.getConfiguration('eska.explorer').get<boolean>('supportPolicy', true))) return;
     this.pending = new Set(targets.map(target => target.path));
     this.publish([...this.trees], [...this.pending]);
     for (const target of targets) {

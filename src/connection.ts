@@ -1,10 +1,11 @@
 import { isAbsolute } from "node:path";
 import { diagnostic, errorContext, type DiagnosticLog } from "./diagnostics.js";
 import { BackendProcess, type ProcessOptions } from "./process.js";
-import { API_VERSION, BASE_API_VERSION, QUERY_API_VERSION, RECOVERY_API_VERSION, LEGACY_API_VERSION, ExplorerError, isRecord, parseHandshake, parseWorkspace, type BackendKind, type WorkspaceSession } from "./protocol.js";
+import { API_VERSION, BASE_API_VERSION, QUERY_API_VERSION, RECOVERY_API_VERSION, SESSION_API_VERSION, LEGACY_API_VERSION, ExplorerError, isRecord, parseHandshake, parseWorkspace, type BackendKind, type WorkspaceSession } from "./protocol.js";
 import { queryCapabilities, type QueryCapabilities } from "./query/protocol.js";
 import { recoveryCapabilities, type RecoveryEndpoint } from "./query/recovery-protocol.js";
 import { querySessionCapabilities } from "./query/session-protocol.js";
+import { sourceCapabilities, type SourceEndpoint } from "./source-access.js";
 
 export interface ConnectionTarget { executable: string; path: string; name: string; locale: "ru-RU" | "en-US"; backend?: BackendKind }
 export type ConnectionState =
@@ -23,6 +24,8 @@ export class Connection {
   private structuralRequest: Promise<unknown> | undefined;
   private readonly listeners = new Set<(method: string, params: unknown) => void>();
   private recoveryEndpoint: RecoveryEndpoint | undefined;
+  private sourceEndpoint: SourceEndpoint | undefined;
+  private sourceEra: object = {};
   private readonly recoveryListeners = new Set<(endpoint: RecoveryEndpoint | undefined) => void>();
   private readonly stopListeners = new Set<() => Promise<void>>();
   private stoppingChild: { child: BackendProcess; pending: Promise<void> } | undefined;
@@ -38,6 +41,8 @@ export class Connection {
   get state(): ConnectionState { return this.current; }
   get target(): ConnectionTarget | undefined { return this.lastTarget; }
   get recovery(): RecoveryEndpoint | undefined { return this.recoveryEndpoint; }
+  get sources(): SourceEndpoint | undefined { return this.sourceEndpoint; }
+  get sourceRevision(): object { return this.sourceEra; }
 
   /** Recovery follows the initialized process, including a process whose metadata workspace failed to open. */
   onRecovery(listener: (endpoint: RecoveryEndpoint | undefined) => void): { dispose(): void } {
@@ -58,6 +63,7 @@ export class Connection {
       if (signal?.aborted) throw new ExplorerError("cancelled");
     }
     const child = this.sessionChild(sessionId);
+    this.sourceMutation(method);
     const structural = ["metadata/renamePreview", "metadata/renameApply", "metadata/undoProperty"].includes(method)
       || (method === "metadata/updateProperty" && typeof params?.contextSnapshot === "string");
     // Backend scans cannot stop midway. Keep the barrier until their actual reply, even if a tab closes.
@@ -109,6 +115,8 @@ export class Connection {
     this.lastTarget = target;
     diagnostic(this.log, "connection_connect", { clientVersion: this.version, executable: target.executable, cwd: target.path, locale: target.locale });
     this.recoveryEndpoint = undefined;
+    this.sourceEndpoint = undefined;
+    this.sourceEra = {};
     this.set({ kind: "connecting" });
     // Interrupt a slow open instead of waiting its full timeout before switching folders.
     void this.stopChild("restart").catch(() => this.log("process_cleanup_failed"));
@@ -132,6 +140,8 @@ export class Connection {
           failed: (error) => {
             if (negotiated && revision === this.revision) {
               this.recoveryEndpoint = undefined;
+              this.sourceEndpoint = undefined;
+              this.sourceEra = {};
               this.set({ kind: "error", error });
             }
           },
@@ -146,24 +156,27 @@ export class Connection {
           const supported = error instanceof ExplorerError ? error.details?.supported : undefined;
           if (backend !== "project" || !(error instanceof ExplorerError) || error.domain !== "unsupported_version"
             || !isRecord(supported) || supported.major !== 1
-            || typeof supported.minor !== "number" || ![12, 13, 14, 15].includes(supported.minor)) throw error;
-          response = await initialize(supported.minor >= 14 ? RECOVERY_API_VERSION
+            || typeof supported.minor !== "number" || ![12, 13, 14, 15, 16].includes(supported.minor)) throw error;
+          response = await initialize(supported.minor === 16 ? SESSION_API_VERSION : supported.minor >= 14 ? RECOVERY_API_VERSION
             : supported.minor === QUERY_API_VERSION.minor ? QUERY_API_VERSION : BASE_API_VERSION);
         }
         const version = parseHandshake(response, backend);
         const queries = backend === "project" ? queryCapabilities(response) : undefined;
         const recovery = backend === "project" ? recoveryCapabilities(response) : undefined;
         const sessions = backend === "project" ? querySessionCapabilities(response) : undefined;
+        const sources = backend === "project" ? sourceCapabilities(response) : undefined;
         negotiated = true;
         if (revision !== this.revision) return;
+        const request = async (method: string, params: Record<string, unknown>): Promise<unknown> => {
+          if (this.child !== child) throw new ExplorerError("obsolete");
+          this.sourceMutation(method);
+          // Metadata authority is deliberately absent; even a failed manifest can retain an inert draft.
+          const result = await child.request(method, params);
+          if (this.child !== child) throw new ExplorerError("obsolete");
+          return result;
+        };
+        if (sources) this.sourceEndpoint = { limits: sources, request };
         if (recovery) {
-          const request = async (method: string, params: Record<string, unknown>): Promise<unknown> => {
-            if (this.child !== child) throw new ExplorerError("obsolete");
-            // Metadata authority is deliberately absent; even a failed manifest can retain an inert draft.
-            const result = await child.request(method, params);
-            if (this.child !== child) throw new ExplorerError("obsolete");
-            return result;
-          };
           const endpoint: RecoveryEndpoint = { capabilities: recovery, request,
             ...(sessions ? { sessions: { capabilities: sessions, request } } : {}) };
           this.recoveryEndpoint = endpoint;
@@ -190,6 +203,7 @@ export class Connection {
           && ["manifestMissing", "manifestInvalid", "selectionInvalid", "sourceInvalid", "rootInvalid"].includes(error.code);
         if (!keepRecovery) {
           this.recoveryEndpoint = undefined;
+          this.sourceEndpoint = undefined;
           try { await this.stopChild(); }
           catch { error = new ExplorerError("cleanupFailed"); }
         }
@@ -205,6 +219,8 @@ export class Connection {
   disconnect(): Promise<void> {
     const revision = ++this.revision;
     this.recoveryEndpoint = undefined;
+    this.sourceEndpoint = undefined;
+    this.sourceEra = {};
     this.set({ kind: "stopping" });
     void this.stopChild("disconnect").catch(() => this.log("process_cleanup_failed"));
     this.queue = this.queue.then(async () => {
@@ -220,6 +236,12 @@ export class Connection {
 
   /** Deactivation awaits cleanup; no child is detached or unref'ed. */
   dispose(): Promise<void> { this.disposed = true; return this.disconnect(); }
+
+  /** Native authorization snapshots expire before any queued request can change source ownership in this process. */
+  private sourceMutation(method: string): void {
+    if ((method.startsWith("query/session") && method !== "query/sessionGet")
+      || ["query/recoveryOpen", "query/recoveryClose", "query/recoveryRemove"].includes(method)) this.sourceEra = {};
+  }
 
   /** Retain the child reference if cleanup fails, preventing an overlapping replacement. */
   private async stopChild(reason?: string): Promise<void> {

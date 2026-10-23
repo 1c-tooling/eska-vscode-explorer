@@ -6,6 +6,7 @@ import { nativePath } from './source.js';
 import type { MetadataTree, ProjectTree, TreeEntry } from './tree.js';
 import { reconcileRules, readonlyPattern, readonlyPatterns } from './support-settings.js';
 import { ProtectedSources } from './protected-source.js';
+import { SourceAccess } from './source-access.js';
 
 type State = 'locked' | 'editableWithSupport' | 'unrestricted' | 'unknown';
 interface ObjectPolicy { objectId: string; uuid: string; state: State; reason: string }
@@ -209,20 +210,31 @@ export class SupportController implements vscode.FileDecorationProvider {
   /** Authorize the entire language edit against fresh backend policy, then expose a synchronous freshness check. */
   async languageWriteAccess(paths: readonly string[]): Promise<() => boolean> {
     const epoch = this.epoch;
-    if (!this.enabled) return () => !this.stopped && epoch === this.epoch && !this.enabled;
-    if (!paths.length || !this.targeted || !this.available || !this.tree || paths.some(path => !this.locate(path))) {
-      throw new ExplorerError('sourceChanged');
+    const enabled = this.enabled;
+    if (!paths.length || this.stopped || !this.tree) throw new ExplorerError('sourceChanged');
+    const groups = new Map<ProjectTree, { tree: MetadataTree; relative: string[] }>();
+    for (const path of new Set(paths)) {
+      const entry = this.locate(path);
+      if (!entry) throw new ExplorerError('sourceChanged');
+      const group = groups.get(entry.project) ?? { tree: entry.tree, relative: [] };
+      group.relative.push(entry.relative); groups.set(entry.project, group);
     }
-    let checked = false;
-    this.serial = this.serial.then(async () => { await this.queryFiles([...paths], epoch); checked = true; })
-      .catch(error => this.log(`support_language_edit_failed ${String(error)}`));
-    await this.serial;
-    const current = (): boolean => checked && !this.stopped && this.enabled && epoch === this.epoch && paths.every(path => {
-      const entry = this.locate(path), policy = this.fileIndex.get(vscode.Uri.file(path).toString());
-      return !!entry && !!policy && !policy.file.readOnly && !policy.file.unknown
-        && entry.project.info.generation === policy.snapshot.generation
-        && entry.project.info.eventSequence === policy.snapshot.eventSequence;
-    });
+    const checks: (() => boolean)[] = [];
+    for (const [project, group] of groups) {
+      const connection = group.tree.connection, endpoint = connection.sources;
+      if (!endpoint) throw new ExplorerError('incompatible');
+      const generation = project.info.generation, sequence = project.info.eventSequence, revision = connection.sourceRevision;
+      if (project.info.requiresRefresh || project.info.requiresReopen) throw new ExplorerError('sourceChanged');
+      const client = new SourceAccess(endpoint, () => ({ sessionId: group.tree.session.sessionId, projectId: project.info.projectId, generation }));
+      for (let offset = 0; offset < group.relative.length; offset += endpoint.limits.maxPaths) {
+        const files = group.relative.slice(offset, offset + endpoint.limits.maxPaths).map(value => ({ path: { value, encoding: 'utf-8' as const }, userReadOnly: false }));
+        if ((await client.protection(files, enabled)).some(state => !state.writable)) throw new ExplorerError('sourceChanged');
+      }
+      checks.push(() => connection.sources === endpoint && connection.sourceRevision === revision
+        && project.info.generation === generation && project.info.eventSequence === sequence
+        && !project.info.requiresRefresh && !project.info.requiresReopen);
+    }
+    const current = (): boolean => !this.stopped && epoch === this.epoch && enabled === this.enabled && checks.every(check => check());
     if (!current()) throw new ExplorerError('sourceChanged');
     return current;
   }

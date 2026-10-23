@@ -733,10 +733,11 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
       });
       if (!covered && !targets.has(root)) targets.set(root, { ...state.target, path: root, name: basename(root) });
     }
+    if (!this.support.enabled) for (const path of targets.keys()) if (!this.languagePolicyRoots.includes(path)) targets.delete(path);
     const key = JSON.stringify([state.session.sessionId, this.support.enabled, [...targets.keys()].sort()]);
     if (this.supportContextsKey === key) return this.supportContextsPending;
     this.supportContextsKey = key;
-    this.supportContextsPending = this.supportContexts.start([...targets.values()]).catch(error => {
+    this.supportContextsPending = this.supportContexts.start([...targets.values()], this.languagePolicyRoots.length > 0).catch(error => {
       if (!this.disposed) this.output.warn(JSON.stringify({ event: "support_context_failed", code: error instanceof ExplorerError ? error.code : "requestFailed" }));
     });
     return this.supportContextsPending;
