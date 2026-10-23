@@ -75,9 +75,18 @@ function receiptGate(explorer, after) {
   return { ready, release, restore() { peer.request = original; } };
 }
 
+/** The native query UI and every metadata writer observe the same backend source ownership. */
+async function ownerWritable(explorer, row, expected) {
+  const owner = row.owner;
+  const editing = await explorer.tree.request(owner.project, "metadata/propertyEditing", { objectId: owner.node.id.objectId });
+  assert.equal(editing.writable, expected, "backend descriptor writes follow the source-session lifetime");
+}
+
 /** New input during an already acknowledged source application must retain its own dirty native revision. */
 async function newerInput(explorer, fixture) {
-  await vscode.commands.executeCommand("eska.explorer.openQuery", await query(explorer, "common-template", "A"));
+  const row = await query(explorer, "common-template", "A");
+  await vscode.commands.executeCommand("eska.explorer.openQuery", row);
+  await ownerWritable(explorer, row, false);
   const draft = vscode.window.activeTextEditor.document;
   await replace(draft, "SELECT 1", "SELECT 7");
   const sync = sourceEvent(explorer, fixture.query.schemaPath);
@@ -103,11 +112,14 @@ async function newerInput(explorer, fixture) {
   await nextSync();
   assert.ok((await fs.readFile(fixture.query.schemaPath, "utf8")).includes("SELECT 8"));
   await closeQuery(explorer, draft);
+  await ownerWritable(explorer, row, true);
 }
 
 /** A clean native query can still represent an unapplied draft after its recovered source baseline advances. */
 async function interruptedApply(explorer, fixture) {
-  await vscode.commands.executeCommand("eska.explorer.openQuery", await query(explorer, "common-form", "List"));
+  const row = await query(explorer, "common-form", "List");
+  await vscode.commands.executeCommand("eska.explorer.openQuery", row);
+  await ownerWritable(explorer, row, false);
   let draft = vscode.window.activeTextEditor.document;
   const uri = draft.uri;
   await replace(draft, "SELECT 1", "SELECT 10");
@@ -123,6 +135,7 @@ async function interruptedApply(explorer, fixture) {
   held.restore();
   await sync();
   await explorer.queries.recovery.settled();
+  await ownerWritable(explorer, row, true);
   await vscode.commands.executeCommand("workbench.action.files.revert");
   draft = await vscode.workspace.openTextDocument(uri);
   await vscode.window.showTextDocument(draft, { preview: false });
@@ -135,6 +148,7 @@ async function interruptedApply(explorer, fixture) {
   assert.equal(Buffer.from(pending.draft, "base64").toString("utf8"), "SELECT 1");
   assert.ok((await fs.readFile(fixture.query.formPath, "utf8")).includes("SELECT 10"));
   await vscode.commands.executeCommand("eska.explorer.resumeQuery");
+  await ownerWritable(explorer, row, false);
   assert.equal(draft.getText(), "SELECT 1", "resume does not replace the latest native draft");
   assert.equal(draft.isDirty, true, "the unapplied draft is saveable under the recovered baseline");
   const cleared = JSON.parse(await fs.readFile(checkpoint, "utf8"));
@@ -147,6 +161,7 @@ async function interruptedApply(explorer, fixture) {
   assert.equal(form.includes("SELECT 10"), false);
   assert.ok(form.includes("SELECT 1"));
   await closeQuery(explorer, draft);
+  await ownerWritable(explorer, row, true);
 }
 
 /** Exercise the production API 1.16 adapter and preserve diagnostics on a failing native assertion. */
@@ -168,7 +183,8 @@ exports.run = async function () {
     await fs.writeFile(path.join(fixture.root, "host-result.json"), JSON.stringify({ passed: true, suite: "query-source-sessions",
       vscode: vscode.version, locale: vscode.env.language, backendSourceSessions: true, newerInputDuringReceipt: true,
       interruptedNativeReceipt: true, latestDraftPreserved: true, explicitReconciliation: true, cleanDraftMarkedDirty: true,
-      noAutomaticReplay: true, cleanCloseReleasesCheckpoint: true, injectedErrors: errors }));
+      noAutomaticReplay: true, cleanCloseReleasesCheckpoint: true, backendSourceWriteFence: true,
+      backendFenceReleasedOnError: true, restoredFenceUntilClose: true, injectedErrors: errors }));
   } catch (error) {
     await fs.writeFile(path.join(fixture.root, "host-result.json"), JSON.stringify({ passed: false, error: String(error.stack ?? error), errors }));
     throw error;
