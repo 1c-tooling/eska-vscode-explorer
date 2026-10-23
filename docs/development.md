@@ -95,6 +95,30 @@ node test/run-host.mjs test/query-tabs-host.cjs
 `ESKA_TEST_VSIX` включает тот же сценарий на установленном пакете;
 скрытые модули checkout ему не нужны.
 
+Прототип T102 проверяет публичные команды session-readonly на clean/dirty,
+split и повторно открытом native-документе. Это наблюдение API, а не приёмка
+готового BSL-редактора:
+
+```sh
+ESKA_TEST_BINARY="$(realpath ../eska/target/debug/eska-project)" \
+ESKA_HOST_GLOBAL_BINARY="$(realpath ../eska/target/debug/eska-project)" \
+ESKA_HOST_SUPPORT_DISABLED=1 VSCODE_EXECUTABLE=codium \
+node test/run-host.mjs test/query-lock-host.cjs
+```
+
+`query-lock-restart-host.cjs` с `ESKA_HOST_RESTART=1` запускается в обычном
+development host, внутри первого запуска перезапускает настоящий Extension Host,
+затем наблюдает отдельный запуск окна. `passed` означает завершённое наблюдение;
+значения `builtinWritableBypassesSessionLock`, `resetClearsPreexistingSessionReadonly`
+и `nativeHotExitRetainedOwner` нужно оценивать отдельно. Проверенные способы
+ещё не обеспечивают снятие только собственной блокировки с сохранением прежнего
+session override пользователя. Пустой `TextEditor.edit`, native `FileStat`
+и `isWritableFileSystem` прежний режим не определяют. После перезапуска host
+session-readonly сохраняется; автоматическая очистка не является свойством
+самой команды. В быстром закрытии development host native hot exit не сохранил
+dirty-буфер: будущая сессия должна удерживать собственный проверенный снимок.
+Применяемый BSL-черновик этими прототипами не включается; T102 остаётся открытой.
+
 Интеграционная проверка использует существующий бинарник CLI и создаёт только
 собственный временный каталог внутри соседнего `eska-playground`:
 
