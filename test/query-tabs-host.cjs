@@ -86,7 +86,15 @@ async function run() {
   const explorer = await extension.activate();
   observeQueries(explorer);
   await until(() => explorer.tree && explorer.connection.state.kind === "ready" && !explorer.support.loading, "query backend ready");
-  assert.ok(explorer.connection.state.queryEditing, "the private profile uses the specified API 1.13 backend");
+  assert.ok(explorer.connection.state.queryEditing, "the private profile uses the specified query backend");
+  assert.ok(explorer.connection.recovery, "the installed adapter negotiates API 1.14 recovery");
+  const recoveryMethods = new Set();
+  const peer = explorer.connection.child;
+  const request = peer.request.bind(peer);
+  peer.request = async (method, ...args) => {
+    if (method.startsWith("query/recovery")) recoveryMethods.add(method);
+    return request(method, ...args);
+  };
   const [template] = await objects(explorer, "common-template");
   const branches = (await explorer.getChildren(template)).filter(row => row.queryKind === "branch");
   assert.deepEqual(branches.map(row => explorer.getTreeItem(row).label), ["A", "B"]);
@@ -171,9 +179,10 @@ async function run() {
   assert.equal(records.find(record => record.identity.kind === "dataSet").ownerText, owner.getText());
   const storage = explorer.context.globalStorageUri.fsPath;
   assert.equal(storage.startsWith(fixture.root), false);
+  const manifest = path.join(fixture.root, "eska.toml");
   const state = { schemaPath, schemaDisk: await fs.readFile(schemaPath, "utf8"), ownerText: owner.getText(),
     draftUri: draft.uri.toString(), draftText: draft.getText(), listUri: listDraft.uri.toString(),
-    formPath, formDisk: await fs.readFile(formPath, "utf8"), storage };
+    formPath, formDisk: await fs.readFile(formPath, "utf8"), storage, manifest: await fs.readFile(manifest, "utf8") };
   await fs.writeFile(path.join(fixture.root, "query-tabs-state.json"), JSON.stringify(state));
   const storedDraft = records.find(record => record.identity.kind === "dataSet");
   const stored = JSON.parse(await fs.readFile(path.join(storage, "query-drafts-v1", storedDraft.id + ".json"), "utf8"));
@@ -189,10 +198,17 @@ async function run() {
     await new Promise(resolve => setTimeout(resolve, 150));
     assert.equal(explorer.connection.state.kind, "ready", "metadata stays alive until query saves and storage settle");
   } finally { release(); await closing; }
+  assert.ok(recoveryMethods.has("query/recoveryBegin"));
+  assert.ok(recoveryMethods.has("query/recoveryAppend"));
+  assert.ok(recoveryMethods.has("query/recoveryCommit"));
+  assert.ok(recoveryMethods.has("query/recoveryClose"));
+  // The next real process must restore private data before a metadata workspace can be opened.
+  await fs.writeFile(manifest, "[project\ninvalid manifest");
   await fs.writeFile(path.join(fixture.root, "host-result.json"), JSON.stringify({ passed: true, suite: "query-tabs",
     vscode: vscode.version, locale: vscode.env.language, node: process.version, cleanXmlSave: true, dirtyXmlSave: true, wholePackage: true,
     ownerUndoRedo: true, noExtraXmlDiff: true, repeatedOpen: true, manualLists: 2, automaticListInvented: false,
-    privateRecoveryRecords: records.length, externalConflictRetainsDraft: true, analyzerRequired: false, shutdownWaitsForQueries: true }));
+    privateRecoveryRecords: records.length, externalConflictRetainsDraft: true, analyzerRequired: false, shutdownWaitsForQueries: true,
+    backendRecovery: true, recoveryMethods: [...recoveryMethods].sort() }));
 }
 
 /** A fresh extension host must revalidate source snapshots and must never autosave a restored draft. */
@@ -202,7 +218,8 @@ async function restoreRun(fixture) {
   const explorer = await extension.activate();
   observeQueries(explorer);
   await vscode.commands.executeCommand("eska.explorer.restart");
-  await until(() => explorer.tree && explorer.connection.state.kind === "ready" && !explorer.support.loading, "recovered query backend ready");
+  await until(() => explorer.connection.state.kind === "error" && explorer.connection.state.error.code === "manifestInvalid"
+    && explorer.connection.recovery, "private recovery stays available despite the broken manifest");
   const conflict = await vscode.workspace.openTextDocument(vscode.Uri.parse(state.draftUri));
   await vscode.window.showTextDocument(conflict, { preview: false });
   await until(() => conflict.isDirty && conflict.getText() === state.draftText, "query recovered as a real dirty document");
@@ -213,6 +230,10 @@ async function restoreRun(fixture) {
   assert.equal(Buffer.from(await vscode.workspace.fs.readFile(snapshot)).toString("utf8"), state.ownerText);
   assert.equal((await vscode.workspace.fs.stat(snapshot)).permissions, vscode.FilePermission.Readonly);
   await assert.rejects(vscode.workspace.fs.writeFile(snapshot, Buffer.from("forbidden")));
+  assert.equal(explorer.tree, undefined, "owner snapshots and dirty drafts do not depend on metadata readiness");
+  await fs.writeFile(path.join(fixture.root, "eska.toml"), state.manifest);
+  await vscode.commands.executeCommand("eska.explorer.restart");
+  await until(() => explorer.tree && explorer.connection.state.kind === "ready" && !explorer.support.loading, "repaired query backend ready");
   await vscode.commands.executeCommand("eska.explorer.compareQueryOwner");
   const comparison = vscode.window.tabGroups.all.flatMap(group => group.tabs).find(tab => tab.input instanceof vscode.TabInputTextDiff
     && tab.input.original.toString() === snapshot.toString());
@@ -232,7 +253,25 @@ async function restoreRun(fixture) {
   assert.equal(await resumed.save(), true, "matching owner snapshots can resume under new process-local editor versions");
   assert.equal(await fs.readFile(state.formPath, "utf8"), state.formDisk.replace("SELECT 9", "SELECT 10"));
   assert.equal(await fs.readFile(state.schemaPath, "utf8"), state.schemaDisk);
+  await vscode.commands.executeCommand("eska.explorer.disconnect");
+  assert.equal(explorer.connection.state.kind, "disconnected");
+  const offlineText = conflict.getText() + "\n// offline draft 😀";
+  const offlineEdit = new vscode.WorkspaceEdit();
+  offlineEdit.insert(conflict.uri, conflict.positionAt(conflict.getText().length), "\n// offline draft 😀");
+  assert.equal(await vscode.workspace.applyEdit(offlineEdit), true);
+  const cleanTabs = vscode.window.tabGroups.all.flatMap(group => group.tabs).filter(tab => tab.input instanceof vscode.TabInputText
+    && tab.input.uri.toString() === resumed.uri.toString());
+  assert.ok(cleanTabs.length, "the clean list remains open across disconnect");
+  assert.equal(await vscode.window.tabGroups.close(cleanTabs), true);
+  await vscode.commands.executeCommand("eska.explorer.restart");
+  await until(() => explorer.tree && explorer.connection.state.kind === "ready" && !explorer.support.loading, "backend ready after offline close");
+  await explorer.queries.ready;
+  const remaining = await explorer.queries.recovery.records();
+  assert.equal(remaining.length, 1, "offline clean close is removed after reconnect, without resurrection");
+  assert.equal(remaining[0].draft, offlineText, "offline input is reconciled without losing the independent draft");
   await fs.writeFile(path.join(fixture.root, "host-result.json"), JSON.stringify({ passed: true, suite: "query-tabs-cold-recovery",
     vscode: vscode.version, locale: vscode.env.language, dirtyDraftRecovered: true, originalDirtyXmlSnapshotRetained: true, automaticApply: false,
-    conflictRetainsDraft: true, explicitResumeUnderFreshEditorVersion: true, independentOwnerSave: true }));
+    conflictRetainsDraft: true, explicitResumeUnderFreshEditorVersion: true, independentOwnerSave: true,
+    backendRecovery: true, recoveryWithBrokenManifest: true, offlineInputReconciled: true,
+    offlineCleanCloseRetainedUntilAcknowledged: true }));
 }

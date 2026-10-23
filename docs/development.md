@@ -24,9 +24,11 @@ ESKA_TEST_ROOT="$(realpath ../eska-playground)" bun test
 node --test test/*.test.mjs
 ```
 
-Клиент query RPC находится в `src/query/` и использует Metadata API 1.13.
-Подключение повторяет `initialize` с 1.12 только после явного ответа о поддержке
-именно 1.12; дерево и BSL продолжают работать, query capability остаётся недоступной.
+Клиент query RPC находится в `src/query/`: планы исходников используют API 1.13,
+общее восстановление — API 1.14. Рабочий адаптер запрашивает 1.14. Подключение
+повторяет `initialize` с 1.13 или 1.12 только после явного ответа о поддержке
+именно этой версии; дерево и BSL продолжают работать. Редактор запросов требует
+capability `queryRecovery`, клиентского файлового fallback нет.
 Предварительная проверка executable требует минимальный контракт дерева 1.12.
 `query/open` всегда получает точный текст и версию редактора: дисковый BOM
 не добавляется к `TextDocument.getText()`. Снимок приложения и снимок generated
@@ -39,10 +41,27 @@ analyzer config — разные контракты.
 результата до передачи редактору. Клиент не записывает XML/BSL и не запускает
 анализатор. Вкладки, сохранение и восстановление T101 проверяются отдельно.
 
+`QueryRecovery` передаёт четыре компонента checkpoint в общий backend:
+metadata, полный owner, исходный запрос и черновик. Неизменённые owner/base
+переиспользуются по подтверждённым длинам и hashes. Запросы сериализованы в один
+upload; быстрая серия правок заменяет pending-текст, сохраняя последний.
+Формат файла, квоты, atomic replace, сравнение revision и проверка private
+каталога принадлежат Rust. `create` отделён от `save`: запоздалое обновление
+закрытой сессии не создаёт checkpoint заново.
+
+Recovery endpoint привязан к экземпляру процесса, без `sessionId` и generation.
+Он появляется после initialize и остаётся доступным при ошибке открытия manifest.
+Перед остановкой процесса `Connection.beforeStop` дожидается записей. Замена
+backend сохраняет прежние подтверждённые revisions: новое окно не выдаёт себе
+право перезаписать чужой checkpoint. Закрытия чистых вкладок при отключении
+удаляются после подключения с той же проверкой revision. Нативная модель
+документа остаётся в адаптере; доменная модель сессии и временной защиты T102
+ещё переносится, BSL Apply не включён.
+
 ```sh
 ESKA_TEST_BINARY="$(realpath ../eska/target/debug/eska-project)" \
 ESKA_TEST_ROOT="$(realpath ../eska/../eska-playground)" \
-node --test test/query-client.test.mjs test/query-integration.test.mjs
+node --test test/query-client.test.mjs test/query-integration.test.mjs test/query-recovery.test.mjs
 ```
 
 Процессные проверки включают совместимость 1.12, отмену после выделения handle,

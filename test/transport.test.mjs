@@ -138,6 +138,16 @@ test("API 1.12 keeps the tree without claiming query editing", async t => {
   assert.deepEqual(starts, [["serve", "--stdio"]]);
 });
 
+/** Recovery absence is not a reason to disable an otherwise compatible project tree. */
+test("API 1.13 is negotiated on the same process without claiming common recovery", async t => {
+  const { value, children, starts } = connection(t, "api13");
+  await value.connect(target);
+  assert.equal(value.state.kind, "ready", JSON.stringify(value.state));
+  assert.equal(value.recovery, undefined);
+  assert.equal(children.length, 1);
+  assert.deepEqual(starts, [["serve", "--stdio"]]);
+});
+
 test("structured manifest error reaches UI category without server text", async (t) => {
   const { value } = connection(t, "missing-manifest");
   await value.connect(target);

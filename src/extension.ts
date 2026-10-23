@@ -114,7 +114,7 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
     this.language = new LanguageService(context, this.connection, this.tooling, this.output, (text, level) => this.output[level ?? "info"](text),
       this.support, roots => this.registerLanguagePolicyRoots(roots));
     this.disposables.push(this.language);
-    this.queries = new QueryTabs(context, () => this.tree, () => this.language.selectedApplication,
+    this.queries = new QueryTabs(context, this.connection, () => this.tree, () => this.language.selectedApplication,
       entry => { if (!this.disposed) this.changed.fire(entry); }, value => this.output.warn(value));
     this.setup = new BackendSetup(context, (text, level) => { if (!this.disposed) this.output[level ?? "info"](text); },
       () => this.connection.disconnect(), () => this.connect(false));
