@@ -90,14 +90,20 @@ function connection(t, mode = "ok") {
   const children = [];
   const states = [];
   const starts = [];
+  const versions = [];
   const value = new Connection("0", (state) => states.push(state), () => {}, (options) => {
     starts.push(options.args);
     const peer = new BackendProcess({ ...options, executable: process.execPath, args: [fixture, mode] });
+    const request = peer.request.bind(peer);
+    peer.request = (method, params, ...rest) => {
+      if (method === "initialize") versions.push(params.apiVersion.minor);
+      return request(method, params, ...rest);
+    };
     children.push(peer);
     return peer;
   });
   t.after(() => value.dispose());
-  return { value, children, states, starts };
+  return { value, children, states, starts, versions };
 }
 
 const target = { executable: process.execPath, path: process.cwd(), name: "test", locale: "ru-RU" };
@@ -147,6 +153,18 @@ test("API 1.13 is negotiated on the same process without claiming common recover
   assert.equal(children.length, 1);
   assert.deepEqual(starts, [["serve", "--stdio"]]);
 });
+
+// Older durable-storage backends keep their tree without admitting a memory-only source session.
+for (const minor of [14, 15]) {
+  test(`API 1.${minor} falls back to 1.14 on the same process`, async t => {
+    const { value, children, versions } = connection(t, `api${minor}`);
+    await value.connect(target);
+    assert.equal(value.state.kind, "ready", JSON.stringify(value.state));
+    assert.deepEqual(versions, [16, 14]);
+    assert.equal(value.recovery?.sessions, undefined);
+    assert.equal(children.length, 1);
+  });
+}
 
 test("structured manifest error reaches UI category without server text", async (t) => {
   const { value } = connection(t, "missing-manifest");

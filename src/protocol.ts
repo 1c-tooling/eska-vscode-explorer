@@ -1,5 +1,6 @@
 /** The public IDE API is versioned independently from the eska executable. */
-export const API_VERSION = { major: 1, minor: 14 } as const;
+export const API_VERSION = { major: 1, minor: 16 } as const;
+export const RECOVERY_API_VERSION = { major: 1, minor: 14 } as const;
 export const QUERY_API_VERSION = { major: 1, minor: 13 } as const;
 export const BASE_API_VERSION = { major: 1, minor: 12 } as const;
 export const LEGACY_API_VERSION = { major: 1, minor: 11 } as const;

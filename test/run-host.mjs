@@ -20,7 +20,7 @@ if (!isAbsolute(playground)) throw new Error("ESKA_TEST_ROOT must be absolute.")
 const root = await mkdtemp(join(playground, "explorer-host-"));
 try {
   const fixture = await createTreeProject(join(root, "project"), process.env.ESKA_HOST_PROJECT_TYPE ?? "configuration");
-  if (basename(suite) === "query-tabs-host.cjs") fixture.query = await (await import("./query-fixture.mjs")).createQuerySource(fixture);
+  if (["query-tabs-host.cjs", "query-session-host.cjs"].includes(basename(suite))) fixture.query = await (await import("./query-fixture.mjs")).createQuerySource(fixture);
   // These scenarios exercise language lifecycle, not concurrent mutation of XML during workspace/open.
   if (["language-host.cjs", "language-cancellation-host.cjs"].includes(basename(suite))) {
     fixture.languageSource = await (await import("./language-fixture.mjs")).createLanguageSource(fixture);

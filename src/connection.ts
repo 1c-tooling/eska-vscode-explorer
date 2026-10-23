@@ -1,9 +1,10 @@
 import { isAbsolute } from "node:path";
 import { diagnostic, errorContext, type DiagnosticLog } from "./diagnostics.js";
 import { BackendProcess, type ProcessOptions } from "./process.js";
-import { API_VERSION, BASE_API_VERSION, QUERY_API_VERSION, LEGACY_API_VERSION, ExplorerError, isRecord, parseHandshake, parseWorkspace, type BackendKind, type WorkspaceSession } from "./protocol.js";
+import { API_VERSION, BASE_API_VERSION, QUERY_API_VERSION, RECOVERY_API_VERSION, LEGACY_API_VERSION, ExplorerError, isRecord, parseHandshake, parseWorkspace, type BackendKind, type WorkspaceSession } from "./protocol.js";
 import { queryCapabilities, type QueryCapabilities } from "./query/protocol.js";
 import { recoveryCapabilities, type RecoveryEndpoint } from "./query/recovery-protocol.js";
+import { querySessionCapabilities } from "./query/session-protocol.js";
 
 export interface ConnectionTarget { executable: string; path: string; name: string; locale: "ru-RU" | "en-US"; backend?: BackendKind }
 export type ConnectionState =
@@ -145,22 +146,26 @@ export class Connection {
           const supported = error instanceof ExplorerError ? error.details?.supported : undefined;
           if (backend !== "project" || !(error instanceof ExplorerError) || error.domain !== "unsupported_version"
             || !isRecord(supported) || supported.major !== 1
-            || (supported.minor !== BASE_API_VERSION.minor && supported.minor !== QUERY_API_VERSION.minor)) throw error;
-          response = await initialize(supported.minor === QUERY_API_VERSION.minor ? QUERY_API_VERSION : BASE_API_VERSION);
+            || typeof supported.minor !== "number" || ![12, 13, 14, 15].includes(supported.minor)) throw error;
+          response = await initialize(supported.minor >= 14 ? RECOVERY_API_VERSION
+            : supported.minor === QUERY_API_VERSION.minor ? QUERY_API_VERSION : BASE_API_VERSION);
         }
         const version = parseHandshake(response, backend);
         const queries = backend === "project" ? queryCapabilities(response) : undefined;
         const recovery = backend === "project" ? recoveryCapabilities(response) : undefined;
+        const sessions = backend === "project" ? querySessionCapabilities(response) : undefined;
         negotiated = true;
         if (revision !== this.revision) return;
         if (recovery) {
-          const endpoint: RecoveryEndpoint = { capabilities: recovery, request: async (method, params) => {
+          const request = async (method: string, params: Record<string, unknown>): Promise<unknown> => {
             if (this.child !== child) throw new ExplorerError("obsolete");
             // Metadata authority is deliberately absent; even a failed manifest can retain an inert draft.
             const result = await child.request(method, params);
             if (this.child !== child) throw new ExplorerError("obsolete");
             return result;
-          } };
+          };
+          const endpoint: RecoveryEndpoint = { capabilities: recovery, request,
+            ...(sessions ? { sessions: { capabilities: sessions, request } } : {}) };
           this.recoveryEndpoint = endpoint;
           this.publishRecovery();
         }

@@ -88,11 +88,16 @@ async function run() {
   await until(() => explorer.tree && explorer.connection.state.kind === "ready" && !explorer.support.loading, "query backend ready");
   assert.ok(explorer.connection.state.queryEditing, "the private profile uses the specified query backend");
   assert.ok(explorer.connection.recovery, "the installed adapter negotiates API 1.14 recovery");
+  assert.ok(explorer.connection.recovery.sessions, "the installed adapter negotiates API 1.16 source sessions");
   const recoveryMethods = new Set();
+  const sourceSessionMethods = new Set();
+  let legacyQueryPlans = 0;
   const peer = explorer.connection.child;
   const request = peer.request.bind(peer);
   peer.request = async (method, ...args) => {
     if (method.startsWith("query/recovery")) recoveryMethods.add(method);
+    if (method.startsWith("query/session")) sourceSessionMethods.add(method);
+    if (method === "query/plan") legacyQueryPlans++;
     return request(method, ...args);
   };
   const [template] = await objects(explorer, "common-template");
@@ -202,13 +207,18 @@ async function run() {
   assert.ok(recoveryMethods.has("query/recoveryAppend"));
   assert.ok(recoveryMethods.has("query/recoveryCommit"));
   assert.ok(recoveryMethods.has("query/recoveryClose"));
+  for (const method of ["query/sessionOpen", "query/sessionPrepare", "query/sessionApplied", "query/sessionResume", "query/sessionClose"]) {
+    assert.ok(sourceSessionMethods.has(method), method);
+  }
+  assert.equal(legacyQueryPlans, 0, "production saves use the common source-session lifecycle");
   // The next real process must restore private data before a metadata workspace can be opened.
   await fs.writeFile(manifest, "[project\ninvalid manifest");
   await fs.writeFile(path.join(fixture.root, "host-result.json"), JSON.stringify({ passed: true, suite: "query-tabs",
     vscode: vscode.version, locale: vscode.env.language, node: process.version, cleanXmlSave: true, dirtyXmlSave: true, wholePackage: true,
     ownerUndoRedo: true, noExtraXmlDiff: true, repeatedOpen: true, manualLists: 2, automaticListInvented: false,
     privateRecoveryRecords: records.length, externalConflictRetainsDraft: true, analyzerRequired: false, shutdownWaitsForQueries: true,
-    backendRecovery: true, recoveryMethods: [...recoveryMethods].sort() }));
+    backendRecovery: true, recoveryMethods: [...recoveryMethods].sort(), backendSourceSessions: true,
+    sourceSessionMethods: [...sourceSessionMethods].sort(), legacyQueryPlans }));
 }
 
 /** A fresh extension host must revalidate source snapshots and must never autosave a restored draft. */

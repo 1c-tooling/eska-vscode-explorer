@@ -1,7 +1,4 @@
 import * as vscode from "vscode";
-import { createHash } from "node:crypto";
-import { createReadStream } from "node:fs";
-import { open } from "node:fs/promises";
 import { ExplorerError, isRecord, isWirePath, type WirePath } from "../protocol.js";
 import { existingSource, nativePath, isForm } from "../source.js";
 import { nodeKey, type MetadataTree, type TreeEntry } from "../tree.js";
@@ -9,11 +6,8 @@ import { nodeKey, type MetadataTree, type TreeEntry } from "../tree.js";
 export interface XmlQueryOwner {
   entry: TreeEntry;
   source: WirePath;
-  descriptor: WirePath;
   path: string;
-  descriptorPath: string;
-  descriptorSnapshot: string;
-  bom: boolean;
+  userReadOnly: boolean;
   document: vscode.TextDocument;
 }
 
@@ -22,7 +16,7 @@ export function isXmlQueryOwner(entry: TreeEntry): boolean {
   return entry.node.id.kind === "object" && ["common-template", "template", "common-form", "form"].includes(entry.node.metadataKind ?? "");
 }
 
-/** Resolve both the exact payload and a descriptor seal without parsing XML again in TypeScript. */
+/** Locate the native view from backend source roles; ESKA owns descriptor, disk and permission checks. */
 export async function xmlQueryOwner(tree: MetadataTree, entry: TreeEntry): Promise<XmlQueryOwner | undefined> {
   if (!isXmlQueryOwner(entry)) return undefined;
   const result = await tree.request(entry.project, "metadata/source", { node: entry.node.id });
@@ -31,37 +25,24 @@ export async function xmlQueryOwner(tree: MetadataTree, entry: TreeEntry): Promi
   const payloads = result.sources.filter(value => isRecord(value) && isRecord(value.role) && value.role.kind === "payload"
     && isWirePath(value.path) && nativePath(value.path).replaceAll("\\", "/").split("/").at(-1) === payloadName);
   if (payloads.length === 0) return undefined;
-  const descriptors = result.sources.filter(value => isRecord(value) && isRecord(value.role) && value.role.kind === "descriptor" && isWirePath(value.path));
-  if (payloads.length !== 1 || descriptors.length !== 1) throw new ExplorerError("protocolInvalid");
-  const source = payloads[0]!.path as WirePath, descriptor = descriptors[0]!.path as WirePath;
+  if (payloads.length !== 1) throw new ExplorerError("protocolInvalid");
+  const source = payloads[0]!.path as WirePath;
   const path = await existingSource(entry.project.info.sourcePath, source);
-  const descriptorPath = await existingSource(entry.project.info.sourcePath, descriptor);
-  const descriptorSnapshot = await sourceHash(descriptorPath);
-  const bom = await sourceBom(path);
   const document = await vscode.workspace.openTextDocument(vscode.Uri.file(path));
+  const userReadOnly = await nativeReadOnly(document);
   if (entry.project.nodes.get(nodeKey(entry.node.id)) !== entry || document.isClosed) throw new ExplorerError("sourceChanged");
-  return { entry, source, descriptor, path, descriptorPath, descriptorSnapshot, bom, document };
+  return { entry, source, path, userReadOnly, document };
 }
 
-/** The editor strips an encoding signature; later saves must retain the exact original disk representation. */
-async function sourceBom(path: string): Promise<boolean> {
-  const file = await open(path, "r");
-  try {
-    const prefix = Buffer.alloc(3);
-    const { bytesRead } = await file.read(prefix, 0, prefix.length, 0);
-    return bytesRead === 3 && prefix.equals(Buffer.from([0xef, 0xbb, 0xbf]));
-  } finally { await file.close(); }
+/** XML editing reports provider restrictions and never changes the user's native session-readonly override. */
+export async function nativeReadOnly(document: vscode.TextDocument): Promise<boolean> {
+  const stat = await vscode.workspace.fs.stat(document.uri);
+  return stat.permissions === vscode.FilePermission.Readonly;
 }
 
-/** Hash bounded fresh disk bytes independently from the owner's BOM-stripped editor buffer. */
-export async function sourceHash(path: string): Promise<string> {
-  const hash = createHash("sha256");
-  let bytes = 0;
-  for await (const chunk of createReadStream(path, { start: 0, end: 64 * 1024 * 1024 })) {
-    const buffer = chunk as Buffer;
-    bytes += buffer.length;
-    if (bytes > 64 * 1024 * 1024) throw new ExplorerError("resourceLimit");
-    hash.update(buffer);
-  }
-  return hash.digest("hex");
+/** Native tabs retain dirty state when a concurrent save notification clears the extension-host document flag. */
+export function nativeDirty(document: vscode.TextDocument): boolean {
+  const tabs = vscode.window.tabGroups.all.flatMap(group => group.tabs).filter(tab => tab.input instanceof vscode.TabInputText
+    && tab.input.uri.toString() === document.uri.toString());
+  return tabs.length ? tabs.some(tab => tab.isDirty) : document.isDirty;
 }

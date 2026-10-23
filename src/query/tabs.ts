@@ -5,14 +5,15 @@ import { isDeepStrictEqual } from "node:util";
 import type { Connection } from "../connection.js";
 import { ExplorerError } from "../protocol.js";
 import { existingSource } from "../source.js";
-import { revealFile } from "../reveal.js";
-import { nodeKey, type MetadataTree, type TreeEntry } from "../tree.js";
+import { nodeKey, type MetadataTree, type ProjectTree, type TreeEntry } from "../tree.js";
 import { message, type MessageKey } from "../messages.js";
 import { QueryClient, queryKey, querySnapshot, type QueryDocument } from "./client.js";
-import { xmlQueryOwner, sourceHash, type XmlQueryOwner } from "./owner.js";
+import { xmlQueryOwner, nativeReadOnly, nativeDirty, type XmlQueryOwner } from "./owner.js";
 import { QueryRecovery, type QueryDraftRecord } from "./recovery.js";
 import type { QueryHeader, QueryIdentity } from "./protocol.js";
 import type { RecoveryEndpoint } from "./recovery-protocol.js";
+import { QuerySessions, type QuerySourceSession } from "./sessions.js";
+import type { QueryOwnerFacts } from "./session-protocol.js";
 
 export const QUERY_SCHEME = "eska-query";
 interface Session {
@@ -20,6 +21,10 @@ interface Session {
   resumed: boolean;
   mtime: number;
   saving?: Promise<void>;
+  source?: QuerySourceSession;
+  endpoint?: RecoveryEndpoint;
+  pending?: boolean;
+  ownerMtime?: number;
 }
 
 /** Editable SDBL views own private drafts; only a freshly checked backend plan can change XML. */
@@ -59,7 +64,11 @@ export class QueryTabs implements vscode.FileSystemProvider {
       }), vscode.window.tabGroups.onDidChangeTabs(event => {
         for (const tab of event.closed) if (tab.input instanceof vscode.TabInputText) this.closeView(tab.input.uri);
       }), connection.onRecovery(endpoint => this.connected(endpoint)), connection.beforeStop(async () => {
-        try { await this.recovery?.settled(); }
+        try {
+          await Promise.allSettled([...this.sessions.values()].map(session => session.saving));
+          await this.recovery?.settled();
+          await Promise.allSettled([...this.sessions.values()].map(session => this.closeSource(session)));
+        }
         catch (error) { this.failure(error); }
       })];
     if (connection.recovery) this.connected(connection.recovery);
@@ -67,7 +76,7 @@ export class QueryTabs implements vscode.FileSystemProvider {
 
   /** XML discovery is lazy, uses the current editor buffer, and releases every transient backend document. */
   async discover(tree: MetadataTree, entry: TreeEntry): Promise<QueryHeader[]> {
-    if (!tree.connection.recovery) return [];
+    if (!tree.connection.recovery?.sessions) return [];
     return this.serial(entry.key, async () => {
       const owner = await xmlQueryOwner(tree, entry);
       if (!owner) return [];
@@ -85,26 +94,26 @@ export class QueryTabs implements vscode.FileSystemProvider {
         && nodeKey(session.record.node) === nodeKey(entry.node.id));
       if (existing) {
         if (queryKey(existing.record.identity) === queryKey(identity)) { await this.focus(existing); return; }
+        if (existing.pending || existing.source?.header.applyPending) {
+          await this.focus(existing);
+          throw new ExplorerError("requestFailed", "query_failed", { reason: "pending_apply" });
+        }
         if (existing.record.draft !== existing.record.base) await this.focus(existing);
         const tabs = vscode.window.tabGroups.all.flatMap(group => group.tabs).filter(tab => tab.input instanceof vscode.TabInputText
           && tab.input.uri.toString() === this.uri(existing.record).toString());
         if (tabs.length && !await vscode.window.tabGroups.close(tabs)) return;
         this.sessions.delete(existing.record.id);
+        await this.closeSource(existing);
         await this.requiredRecovery().remove(existing.record.id);
         this.removals.delete(existing.record.id);
       }
-      const session = await this.withDocument(tree, owner, async document => {
-        const query = await document.read({ query: identity });
-        if (canonical(query.text) !== query.text) throw new ExplorerError("requestFailed", "query_failed", { reason: "unsupported_structure" });
-        return { resumed: true, mtime: Date.now(), record: {
-          schemaVersion: 1 as const, id: randomUUID(), projectKey: entry.project.key, node: entry.node.id,
-          source: owner.source, descriptor: owner.descriptor, descriptorSnapshot: owner.descriptorSnapshot,
-          diskSnapshot: document.diskSnapshot, ownerSnapshot: document.binding.snapshot, ownerText: document.original,
-          ownerVersion: document.binding.version, contextFingerprint: document.binding.contextFingerprint,
-          application: document.application, identity, base: query.text, draft: query.text, writable: document.writable,
-        } };
-      });
-      await this.requiredRecovery().create(session.record);
+      const endpoint = this.recoveryEndpoint;
+      const source = await this.withDocument(tree, owner, document => this.client(tree, entry.project).open(document, randomUUID(), identity, owner.userReadOnly));
+      if (!endpoint || this.disposed || tree !== this.currentTree() || endpoint !== this.recoveryEndpoint) {
+        await source.close().catch(() => {});
+        throw new ExplorerError("obsolete");
+      }
+      const session: Session = { resumed: source.header.resumed, mtime: Date.now(), record: source.record, source, endpoint };
       this.sessions.set(session.record.id, session);
       await this.focus(session);
     });
@@ -115,16 +124,14 @@ export class QueryTabs implements vscode.FileSystemProvider {
     await this.ready;
     const session = uri && this.session(uri);
     if (!session) return;
+    if (session.saving) await session.saving.catch(() => {});
+    session.resumed = false;
     const tree = this.currentTree();
     if (!tree) throw new ExplorerError("obsolete");
-    const selection = this.application();
-    const owner = await this.checkedOwner(tree, session, true);
-    await this.withDocument(tree, owner, async document => this.checkBinding(session, document, owner.diskSnapshot));
-    if (tree !== this.currentTree() || selection !== this.application()
-      || querySnapshot(owner.document.getText()) !== session.record.ownerSnapshot) throw new ExplorerError("sourceChanged");
-    session.record = { ...session.record, ownerVersion: String(owner.document.version), diskSnapshot: owner.diskSnapshot };
-    session.resumed = true;
-    await this.requiredRecovery().save(session.record);
+    const source = await this.source(session, tree);
+    const owner = await this.owner(session, tree);
+    await source.resume(this.ownerFacts(owner.document, owner.userReadOnly));
+    this.accept(session, source);
     await this.focus(session);
   }
 
@@ -159,16 +166,16 @@ export class QueryTabs implements vscode.FileSystemProvider {
   async stat(uri: vscode.Uri): Promise<vscode.FileStat> {
     await this.ready;
     const session = this.required(uri);
-    return { type: vscode.FileType.File, ctime: 1, mtime: session.mtime,
+    return { type: vscode.FileType.File, ctime: 1, mtime: this.isOwnerSnapshot(uri) ? session.ownerMtime ?? session.mtime : session.mtime,
       size: Buffer.byteLength(this.isOwnerSnapshot(uri) ? session.record.ownerText : session.record.base),
-      ...(!session.record.writable || this.isOwnerSnapshot(uri) ? { permissions: vscode.FilePermission.Readonly } : {}) };
+      ...(!(session.source?.header.draftWritable ?? session.record.writable) || this.isOwnerSnapshot(uri) ? { permissions: vscode.FilePermission.Readonly } : {}) };
   }
 
   /** Save changes only the selected query; an already dirty owner remains unsaved. */
   async writeFile(uri: vscode.Uri, content: Uint8Array): Promise<void> {
     await this.ready;
     const session = this.required(uri);
-    if (this.isOwnerSnapshot(uri) || !session.record.writable) throw vscode.FileSystemError.NoPermissions(this.text("queryReadonly"));
+    if (this.isOwnerSnapshot(uri) || !(session.source?.header.draftWritable ?? session.record.writable)) throw vscode.FileSystemError.NoPermissions(this.text("queryReadonly"));
     if (!session.resumed) throw vscode.FileSystemError.Unavailable(this.text("queryResumeRequired"));
     const draft = canonical(new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(content));
     if (session.saving) await session.saving;
@@ -203,6 +210,7 @@ export class QueryTabs implements vscode.FileSystemProvider {
       await this.ready;
       await Promise.allSettled([...this.sessions.values()].map(session => session.saving));
       await this.recovery.settled();
+      await Promise.allSettled([...this.sessions.values()].map(session => this.closeSource(session)));
       if (this.recoveryAvailable) await this.recovery.close();
     } finally {
       for (const subscription of this.subscriptions) subscription.dispose();
@@ -223,9 +231,13 @@ export class QueryTabs implements vscode.FileSystemProvider {
       if (this.requiredRecovery() !== recovery) throw new ExplorerError("obsolete");
       if (this.removals.has(record.id)) continue;
       const session = this.sessions.get(record.id);
-      if (!session) this.sessions.set(record.id, { record, resumed: false, mtime: Date.now() });
+      if (!session) this.sessions.set(record.id, { record, resumed: false, mtime: Date.now(), pending: recovery.hasPrepared(record.id) });
       else if (!isDeepStrictEqual(session.record, record)) {
-        try { await recovery.save(session.record); }
+        try {
+          await recovery.saveDraft(record.id, session.record.draft);
+          session.record = recovery.record(record.id);
+          session.pending = recovery.hasPrepared(record.id);
+        }
         catch (error) { this.failure(error); }
       }
     }
@@ -261,7 +273,7 @@ export class QueryTabs implements vscode.FileSystemProvider {
 
   /** Disconnected input remains in its native model and is reconciled against disk revisions on reconnect. */
   private persist(session: Session): void {
-    if (this.recoveryAvailable) void this.recovery?.save(session.record).catch(error => this.failure(error));
+    if (this.recoveryAvailable) void this.recovery?.saveDraft(session.record.id, session.record.draft).catch(error => this.failure(error));
     else if (!this.warnedOffline && !this.disposed) {
       this.warnedOffline = true;
       void vscode.window.showWarningMessage(this.text("queryRecoveryOffline"));
@@ -280,15 +292,20 @@ export class QueryTabs implements vscode.FileSystemProvider {
     const session = this.session(uri);
     if (!session || vscode.window.tabGroups.all.some(group => group.tabs.some(tab => tab.input instanceof vscode.TabInputText
       && tab.input.uri.toString() === uri.toString()))) return;
-    if (session.record.draft !== session.record.base) {
+    if (session.saving) {
+      void session.saving.then(() => this.closeView(uri), () => this.closeView(uri));
+      return;
+    }
+    if (session.record.draft !== session.record.base || session.pending || session.source?.header.applyPending) {
       session.resumed = false;
       this.persist(session);
+      void this.closeSource(session).catch(error => this.failure(error));
       return;
     }
     this.sessions.delete(session.record.id);
     this.events.fire([{ type: vscode.FileChangeType.Deleted, uri }]);
     this.removals.add(session.record.id);
-    if (this.recoveryAvailable) void this.recovery?.remove(session.record.id).then(
+    if (this.recoveryAvailable) void this.closeSource(session).then(() => this.recovery?.remove(session.record.id)).then(
       () => this.removals.delete(session.record.id), error => this.failure(error));
   }
 
@@ -301,88 +318,138 @@ export class QueryTabs implements vscode.FileSystemProvider {
   private async restoreOnce(document: vscode.TextDocument): Promise<void> {
     await this.ready;
     const session = this.session(document.uri);
-    if (this.disposed || !session || this.isOwnerSnapshot(document.uri) || document.isClosed || canonical(document.getText()) !== session.record.base
-      || session.record.draft === session.record.base) return;
+    if (this.disposed || !session || this.isOwnerSnapshot(document.uri) || document.isClosed) return;
+    const text = canonical(document.getText());
+    if (nativeDirty(document) && text !== session.record.base && text !== session.record.draft) {
+      session.record = { ...session.record, draft: text };
+      this.persist(session);
+      return;
+    }
+    if ((text !== session.record.base && text !== session.record.draft) || session.record.draft === session.record.base
+      || (text === session.record.draft && nativeDirty(document))) return;
+    const editor = vscode.window.visibleTextEditors.find(editor => editor.document === document);
+    if (text === session.record.draft && editor) {
+      const range = new vscode.Range(document.positionAt(0), document.positionAt(document.getText().length));
+      if (!await editor.edit(edit => edit.replace(range, session.record.draft))) throw new ExplorerError("sourceChanged");
+      return;
+    }
     const edit = new vscode.WorkspaceEdit();
     edit.replace(document.uri, new vscode.Range(document.positionAt(0), document.positionAt(document.getText().length)), session.record.draft);
     if (!await vscode.workspace.applyEdit(edit)) throw new ExplorerError("sourceChanged");
   }
 
-  /** The byte plan and projected map must describe exactly the resulting live owner model. */
+  /** Native CAS, Undo/Redo and optional disk save implement a plan whose lifecycle is owned by ESKA. */
   private async save(session: Session, draft: string): Promise<void> {
     const tree = this.currentTree();
     if (!tree || this.disposed) throw new ExplorerError("obsolete");
     const selection = this.application();
-    const owner = await this.checkedOwner(tree, session);
-    await this.withDocument(tree, owner, async document => {
-      await this.checkBinding(session, document);
-      const plan = await document.plan(session.record.identity, draft, [],
-        { lineEnding: owner.document.eol === vscode.EndOfLine.CRLF ? "crlf" : "lf" });
-      if (await sourceHash(owner.path) !== session.record.diskSnapshot
-        || await sourceHash(owner.descriptorPath) !== session.record.descriptorSnapshot) throw new ExplorerError("sourceChanged");
-      this.assertOwner(session, owner);
+    const source = await this.source(session, tree);
+    const owner = await this.owner(session, tree);
+    const facts = this.ownerFacts(owner.document, owner.userReadOnly);
+    let attempted = false;
+    try {
+      if (session.record.draft !== draft) throw new ExplorerError("requestFailed", "query_failed", { reason: "stale_draft" });
+      await this.requiredRecovery().saveDraft(session.record.id, draft);
+      const plan = await source.prepare(facts, draft, [], owner.document.eol === vscode.EndOfLine.CRLF ? "crlf" : "lf");
+      session.pending = true;
       if (this.disposed || tree !== this.currentTree() || !session.resumed || selection !== this.application()) throw new ExplorerError("obsolete");
-      const wasDirty = owner.document.isDirty;
+      this.assertOwner(owner.document, facts);
       if (!plan.noOp) {
         const edit = new vscode.WorkspaceEdit();
         for (const replacement of plan.replacements) edit.replace(owner.document.uri,
           new vscode.Range(replacement.rangeUtf16.start.line, replacement.rangeUtf16.start.character,
             replacement.rangeUtf16.end.line, replacement.rangeUtf16.end.character), replacement.text);
+        attempted = true;
         if (!await vscode.workspace.applyEdit(edit)) throw new ExplorerError("sourceChanged");
         if (querySnapshot(owner.document.getText()) !== plan.outputSnapshot) throw new ExplorerError("sourceChanged");
-        if (!wasDirty && !await owner.document.save()) throw new ExplorerError("sourceChanged");
+        if (plan.saveOwner && !await owner.document.save()) throw new ExplorerError("sourceChanged");
       }
       if (querySnapshot(owner.document.getText()) !== plan.outputSnapshot) throw new ExplorerError("sourceChanged");
-      const output = owner.document.getText();
-      const version = String(owner.document.version);
-      const diskSnapshot = wasDirty || plan.noOp ? session.record.diskSnapshot : await sourceHash(owner.path);
-      if (!wasDirty && !plan.noOp && diskSnapshot !== querySnapshot((owner.bom ? "\ufeff" : "") + output)) {
-        throw new ExplorerError("sourceChanged");
+      await source.applied(plan.applyToken, this.ownerFacts(owner.document, await nativeReadOnly(owner.document)));
+      this.accept(session, source, true);
+      const entry = owner.project.nodes.get(nodeKey(session.record.node));
+      if (entry) this.changed(entry);
+    } catch (error) {
+      session.pending = true;
+      const token = source.header.record.prepared?.applyToken;
+      if (!attempted && token) {
+        try { await source.abort(token); this.accept(session, source); }
+        catch { /* An unacknowledged cleanup keeps its durable intent for explicit recovery. */ }
       }
-      session.record = { ...session.record, base: draft, ownerText: output,
-        ownerSnapshot: plan.outputSnapshot, ownerVersion: version, diskSnapshot };
-      session.mtime++;
-      await this.requiredRecovery().save(session.record);
-      this.changed(owner.entry);
-    });
+      await this.closeSource(session).catch(() => {});
+      throw error;
+    }
   }
 
-  /** A new backend document never replaces a previous owner, disk, descriptor or application snapshot silently. */
-  private async checkedOwner(tree: MetadataTree, session: Session, restart = false): Promise<XmlQueryOwner & { diskSnapshot: string }> {
-    const record = session.record;
-    const project = tree.projects.find(project => project.key === record.projectKey);
+  /** Only a checked backend source handle can provide the binding used for native application. */
+  private async source(session: Session, tree: MetadataTree): Promise<QuerySourceSession> {
+    if (session.source && session.endpoint === this.recoveryEndpoint) return session.source;
+    const project = tree.projects.find(project => project.key === session.record.projectKey);
     if (!project) throw new ExplorerError("sourceChanged");
-    const path = await existingSource(project.info.sourcePath, record.source);
-    const found = await revealFile(tree, path);
-    const entry = found && ("owner" in found ? found.owner : found);
-    if (!entry || nodeKey(entry.node.id) !== nodeKey(record.node)) throw new ExplorerError("sourceChanged");
-    const owner = await xmlQueryOwner(tree, entry);
-    const diskSnapshot = await sourceHash(path);
-    if (!owner || owner.path !== path || owner.descriptorSnapshot !== record.descriptorSnapshot
-      || querySnapshot(owner.document.getText()) !== record.ownerSnapshot) {
+    const endpoint = this.recoveryEndpoint;
+    const source = await this.client(tree, project).restore(session.record.id);
+    if (!endpoint || this.disposed || tree !== this.currentTree() || endpoint !== this.recoveryEndpoint) {
+      await source.close().catch(() => {});
+      throw new ExplorerError("obsolete");
+    }
+    session.source = source;
+    session.endpoint = endpoint;
+    this.accept(session, source);
+    return source;
+  }
+
+  /** ESKA has already resolved the source/member; the adapter opens only its native document view. */
+  private async owner(session: Session, tree: MetadataTree): Promise<{ project: ProjectTree; document: vscode.TextDocument; userReadOnly: boolean }> {
+    const project = tree.projects.find(project => project.key === session.record.projectKey);
+    if (!project) throw new ExplorerError("sourceChanged");
+    const path = await existingSource(project.info.sourcePath, session.record.source);
+    const document = await vscode.workspace.openTextDocument(vscode.Uri.file(path));
+    return { project, document, userReadOnly: await nativeReadOnly(document) };
+  }
+
+  /** These are exact native facts; disk, descriptor, source policy and context are checked by the core. */
+  private ownerFacts(document: vscode.TextDocument, userReadOnly: boolean): QueryOwnerFacts {
+    if (document.isClosed) throw new ExplorerError("sourceChanged");
+    return { version: String(document.version), snapshot: querySnapshot(document.getText()), isDirty: nativeDirty(document),
+      userReadOnly, application: this.application() ?? null };
+  }
+
+  /** A text plan can touch only the native version that supplied its preflight facts. */
+  private assertOwner(document: vscode.TextDocument, facts: QueryOwnerFacts): void {
+    if (document.isClosed || String(document.version) !== facts.version || querySnapshot(document.getText()) !== facts.snapshot) {
       throw new ExplorerError("sourceChanged");
     }
-    // Explicit resumption can acknowledge a manual XML save only when every current disk byte
-    // matches the already checked owner buffer. Unrelated external edits still stop the session.
-    if (diskSnapshot !== record.diskSnapshot && (!restart || owner.document.isDirty
-      || diskSnapshot !== querySnapshot((owner.bom ? "\ufeff" : "") + record.ownerText))) throw new ExplorerError("sourceChanged");
-    if (!restart) this.assertOwner(session, owner);
-    return { ...owner, diskSnapshot };
   }
 
-  /** Check the live editor again after every asynchronous source or context operation. */
-  private assertOwner(session: Session, owner: XmlQueryOwner): void {
-    if (owner.document.isClosed || String(owner.document.version) !== session.record.ownerVersion
-      || owner.document.getText() !== session.record.ownerText) throw new ExplorerError("sourceChanged");
+  /** Cached presentation follows acknowledged backend state and the queue's rebased native draft. */
+  private accept(session: Session, source: QuerySourceSession, saved = false): void {
+    if (session.endpoint !== this.recoveryEndpoint || session.source !== source) throw new ExplorerError("obsolete");
+    const oldOwner = session.record.ownerText;
+    session.record = source.record;
+    session.resumed = source.header.resumed;
+    session.pending = source.header.applyPending;
+    if (saved) session.mtime++;
+    if (oldOwner !== session.record.ownerText) {
+      session.ownerMtime = (session.ownerMtime ?? session.mtime) + 1;
+      this.events.fire([{ type: vscode.FileChangeType.Changed, uri: this.uri(session.record).with({ path: `/${session.record.id}/owner.xml` }) }]);
+    }
   }
 
-  /** Both independent backend bindings must still identify the original checked session. */
-  private async checkBinding(session: Session, document: QueryDocument, diskSnapshot = session.record.diskSnapshot): Promise<void> {
-    if (document.binding.contextFingerprint !== session.record.contextFingerprint
-      || document.diskSnapshot !== diskSnapshot || document.binding.snapshot !== session.record.ownerSnapshot
-      || !document.writable || !session.record.writable) throw new ExplorerError("sourceChanged");
-    const selected = await document.read({ query: session.record.identity });
-    if (selected.text !== session.record.base) throw new ExplorerError("sourceChanged");
+  /** A client is bound to the initialized process and one metadata member, not a VS Code URI. */
+  private client(tree: MetadataTree, project: ProjectTree): QuerySessions {
+    const state = tree.connection.state;
+    const recovery = this.requiredRecovery();
+    if (tree !== this.currentTree() || state.kind !== "ready" || !state.queryEditing || !this.recoveryEndpoint) throw new ExplorerError("incompatible");
+    return new QuerySessions(this.recoveryEndpoint, recovery, () => ({ sessionId: tree.session.sessionId,
+      projectId: project.info.projectId, generation: project.info.generation }), state.queryEditing);
+  }
+
+  /** Native views may close independently; releasing a handle never deletes its retained checkpoint. */
+  private async closeSource(session: Session): Promise<void> {
+    const source = session.source;
+    delete session.source;
+    delete session.endpoint;
+    await source?.close();
   }
 
   /** No document handle survives discovery, save, cancellation or a thrown callback. */
@@ -395,9 +462,7 @@ export class QueryTabs implements vscode.FileSystemProvider {
     const document = await client.open({ node: owner.entry.node.id, source: owner.source,
       version: String(owner.document.version), text: owner.document.getText(), ...(application ? { application } : {}) });
     try {
-      if (!owner.document.isDirty && document.diskSnapshot !== querySnapshot((owner.bom ? "\ufeff" : "") + document.original)) {
-        throw new ExplorerError("sourceChanged");
-      }
+      if (this.disposed || tree !== this.currentTree() || !this.recoveryAvailable) throw new ExplorerError("obsolete");
       return await action(document);
     }
     finally { await document.close(); }

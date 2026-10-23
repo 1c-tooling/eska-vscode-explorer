@@ -26,8 +26,10 @@ export function querySnapshot(text: string): string { return createHash("sha256"
 
 /** Query RPCs never retry a request under a different metadata generation. */
 export class QueryClient {
+  private readonly endpoint;
+
   constructor(private readonly connection: Connection, readonly sessionId: string,
-    private readonly project: ProjectTree, readonly limits: QueryCapabilities) {}
+    private readonly project: ProjectTree, readonly limits: QueryCapabilities) { this.endpoint = connection.recovery; }
 
   /** Retain the exact owner buffer; disk bytes are an independent external-change guard. */
   async open(owner: QueryOwner, signal?: AbortSignal): Promise<QueryDocument> {
@@ -76,6 +78,7 @@ export class QueryClient {
 
   /** Cleanup remains legal after a generation change and does not depend on a successful refresh. */
   async release(method: "query/close" | "query/bufferClose", field: "documentId" | "bufferId", id: string, generation: string): Promise<void> {
+    if (this.endpoint && this.connection.recovery !== this.endpoint) throw new ExplorerError("obsolete");
     const value = await this.connection.request(this.sessionId, method,
       { [field]: id, projectId: this.project.info.projectId, generation });
     if (!isRecord(value) || typeof value.released !== "boolean") invalid();
@@ -112,6 +115,7 @@ export class QueryClient {
 
   /** A changed member or permission refresh requires reopening from a preserved draft. */
   private checkGeneration(generation: string): void {
+    if (this.endpoint && this.connection.recovery !== this.endpoint) throw new ExplorerError("obsolete");
     if (this.project.info.generation !== generation || this.project.info.requiresReopen || this.project.info.requiresRefresh) {
       throw new ExplorerError("sourceChanged");
     }

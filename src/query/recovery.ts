@@ -47,6 +47,7 @@ export function parseDraftRecord(value: unknown): QueryDraftRecord {
 interface Entry {
   value: QueryDraftRecord;
   revision: string | null;
+  header?: RecoveryHeader;
   pending?: QueryDraftRecord;
   closing: boolean;
   conflict: boolean;
@@ -57,7 +58,7 @@ export class QueryRecovery {
   private readonly values = new Map<string, Entry>();
   private readonly writing = new Map<string, Promise<void>>();
   private readonly removing = new Map<string, Promise<void>>();
-  private readonly operations = new Set<Promise<void>>();
+  private readonly operations = new Set<Promise<unknown>>();
   private queue: Promise<void> = Promise.resolve();
   private readonly loaded: Promise<void>;
   private storeId: string | undefined;
@@ -73,6 +74,56 @@ export class QueryRecovery {
   async records(): Promise<readonly QueryDraftRecord[]> {
     await this.loaded;
     return [...this.values.values()].map(entry => entry.value);
+  }
+
+  /** Native input may replace only the draft; source binding and baseline come from ESKA replies. */
+  async saveDraft(id: string, draft: string): Promise<void> {
+    await this.loaded;
+    const entry = this.values.get(id);
+    if (!entry) throw new ExplorerError("obsolete");
+    await this.saveValue({ ...entry.value, draft });
+  }
+
+  /** UI caches can read the latest draft without manufacturing a new source binding. */
+  record(id: string): QueryDraftRecord {
+    const entry = this.values.get(id);
+    if (!entry) throw new ExplorerError("obsolete");
+    return entry.value;
+  }
+
+  /** An unfinished backend intent remains visible even when its source handle has been released. */
+  hasPrepared(id: string): boolean { return this.values.get(id)?.header?.prepared !== undefined; }
+
+  /** Source transitions share the upload queue and rebase pending native input onto acknowledged owner/base data. */
+  async withCheckpoint<T extends { record: RecoveryHeader }>(id: string,
+    action: (storeId: string, header: RecoveryHeader | undefined) => Promise<T>, create = false): Promise<T> {
+    await this.loaded;
+    this.active();
+    return this.enqueue(async () => {
+      this.active();
+      const entry = this.values.get(id);
+      if (create ? entry !== undefined : !entry || entry.closing) throw new ExplorerError("obsolete");
+      if (create && this.values.size >= this.endpoint.capabilities.maxRecords) throw new ExplorerError("resourceLimit");
+      if (entry?.conflict) throw new ExplorerError("sourceChanged");
+      if (!this.storeId) throw new ExplorerError("obsolete");
+      const result = await action(this.storeId, entry?.header);
+      const header = recoveryHeader(result.record, this.endpoint.capabilities);
+      if (header.id !== id) invalid();
+      let retained = header.parts.ownerText.bytes + header.parts.base.bytes + header.parts.draft.bytes;
+      for (const [otherId, other] of this.values) if (otherId !== id) {
+        retained += Buffer.byteLength(other.value.ownerText) + Buffer.byteLength(other.value.base) + Buffer.byteLength(other.value.draft);
+      }
+      if (retained > this.endpoint.capabilities.maxRetainedBytes) throw new ExplorerError("resourceLimit");
+      const record = await this.readRecord(header, entry?.value);
+      if (entry) {
+        const pending = entry.pending;
+        entry.value = pending ? { ...record, draft: pending.draft } : record;
+        if (pending) entry.pending = entry.value;
+        entry.revision = header.revision;
+        entry.header = header;
+      } else this.values.set(id, { value: record, revision: header.revision, header, closing: false, conflict: false });
+      return result;
+    });
   }
 
   /** Carry acknowledged revisions across backend replacement without accepting another window's overwrite. */
@@ -94,6 +145,11 @@ export class QueryRecovery {
   /** Coalesce input while a single acknowledged upload uses the connection's staging slot. */
   async save(record: QueryDraftRecord): Promise<void> {
     await this.loaded;
+    await this.saveValue(record);
+  }
+
+  /** Scheduling is synchronous after loading so a source acknowledgement cannot interleave between lookup and input. */
+  private saveValue(record: QueryDraftRecord): Promise<void> {
     this.active();
     const entry = this.values.get(record.id);
     if (!entry || entry.closing) throw new ExplorerError("obsolete");
@@ -105,11 +161,11 @@ export class QueryRecovery {
       job = this.enqueue(() => this.flush(record.id, entry));
       this.writing.set(record.id, job);
     }
-    await job;
+    return job;
   }
 
   /** A close drains its upload before removing only the exact last acknowledged checkpoint. */
-  async remove(id: string): Promise<void> {
+  async remove(id: string, discardPrepared = false): Promise<void> {
     await this.loaded;
     this.active();
     if (!isRecoveryId(id)) throw new ExplorerError("sourceChanged");
@@ -122,7 +178,8 @@ export class QueryRecovery {
     const job = this.enqueue(async () => {
       try {
         if (entry.revision) {
-          const result = await this.request("query/recoveryRemove", { id, revision: entry.revision });
+          const result = await this.request("query/recoveryRemove", { id, revision: entry.revision,
+            ...(discardPrepared ? { discardPrepared: true } : {}) });
           if (typeof result.released !== "boolean") invalid();
         }
         this.values.delete(id);
@@ -153,9 +210,9 @@ export class QueryRecovery {
   }
 
   /** All writes share one staging slot; failed work does not prevent an unrelated record from being saved. */
-  private enqueue(action: () => Promise<void>): Promise<void> {
+  private enqueue<T>(action: () => Promise<T>): Promise<T> {
     const job = this.queue.then(action);
-    this.queue = job.catch(() => {});
+    this.queue = job.then(() => {}, () => {});
     this.operations.add(job);
     void job.finally(() => this.operations.delete(job)).catch(() => {});
     return job;
@@ -174,16 +231,32 @@ export class QueryRecovery {
       if (this.values.has(header.id)) invalid();
       bytes += header.parts.ownerText.bytes + header.parts.base.bytes + header.parts.draft.bytes;
       if (bytes > this.endpoint.capabilities.maxRetainedBytes) invalid();
-      const metadata = JSON.parse(await this.read(header, "metadata")) as unknown;
-      if (!isRecord(metadata) || !isDeepStrictEqual(metadata, header.metadata)) invalid();
-      const record = parseDraftRecord({ ...metadata, ownerText: await this.read(header, "ownerText"),
-        base: await this.read(header, "base"), draft: await this.read(header, "draft") });
+      const record = await this.readRecord(header);
       const expected = previous.get(header.id);
-      this.values.set(record.id, { value: record, revision: expected ?? header.revision,
+      this.values.set(record.id, { value: record, revision: expected ?? header.revision, header,
         closing: false, conflict: expected !== undefined && expected !== header.revision });
     }
     for (const id of result.damaged) this.damaged(id);
     if (result.limited) throw new ExplorerError("resourceLimit");
+  }
+
+  /** Reuse unchanged components only by the backend's exact byte count/hash, including the full metadata envelope. */
+  private async readRecord(header: RecoveryHeader, previous?: QueryDraftRecord): Promise<QueryDraftRecord> {
+    const part = async (name: RecoveryPart): Promise<string> => {
+      const old = previous && (name === "metadata" ? JSON.stringify(this.metadata(previous)) : previous[name]);
+      const description = header.parts[name];
+      return old !== undefined && Buffer.byteLength(old) === description.bytes && querySnapshot(old) === description.snapshot
+        ? old : this.read(header, name);
+    };
+    const metadata = JSON.parse(await part("metadata")) as unknown;
+    if (!isRecord(metadata) || !isDeepStrictEqual(metadata, header.metadata)) invalid();
+    return parseDraftRecord({ ...metadata, ownerText: await part("ownerText"), base: await part("base"), draft: await part("draft") });
+  }
+
+  /** Binding serialization is transport validation, independent from source syntax or ownership decisions. */
+  private metadata(record: QueryDraftRecord): Record<string, unknown> {
+    const { ownerText: _owner, base: _base, draft: _draft, ...metadata } = record;
+    return metadata;
   }
 
   /** A chunk must advance on a UTF-8 boundary and identify the same immutable checkpoint revision. */
@@ -213,7 +286,9 @@ export class QueryRecovery {
       while (entry.pending && !entry.closing) {
         const record = entry.pending;
         delete entry.pending;
-        entry.revision = await this.upload(record, entry.revision);
+        const header = await this.upload(record, entry.revision);
+        entry.revision = header.revision;
+        entry.header = header;
       }
     } catch (error) {
       delete entry.pending;
@@ -223,7 +298,7 @@ export class QueryRecovery {
   }
 
   /** ESKA can reuse unchanged owner/base components; only changed acknowledged bytes cross the pipe. */
-  private async upload(record: QueryDraftRecord, expectedRevision: string | null): Promise<string> {
+  private async upload(record: QueryDraftRecord, expectedRevision: string | null): Promise<RecoveryHeader> {
     const { ownerText, base, draft, ...metadata } = record;
     const texts = { metadata: JSON.stringify(metadata), ownerText, base, draft };
     const parts = Object.fromEntries(RECOVERY_PARTS.map(part => {
@@ -255,7 +330,7 @@ export class QueryRecovery {
       if (result.id !== record.id || !isDeepStrictEqual(result.metadata, metadata)
         || !["ownerText", "base", "draft"].every(part => isDeepStrictEqual(result.parts[part as RecoveryPart], parts[part]))) invalid();
       updateId = undefined;
-      return result.revision;
+      return result;
     } finally {
       if (updateId) {
         const result = await this.request("query/recoveryCancel", { updateId });
