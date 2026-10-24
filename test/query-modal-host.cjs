@@ -119,7 +119,13 @@ exports.run = async function () {
     const reviewTabs=vscode.window.tabGroups.all.flatMap(group=>group.tabs).filter(tab=>tab.input instanceof vscode.TabInputTextDiff&&tab.input.original.toString()===review.snapshot.toString());
     assert.equal(await vscode.window.tabGroups.close(reviewTabs),true);
     draft=await until(()=>vscode.window.activeTextEditor?.document.uri.scheme==='eska-query'&&vscode.window.activeTextEditor.document.uri.path.endsWith('.sdbl')&&vscode.window.activeTextEditor.document,'review returns same query');
-    assert.equal(draft.getText(),queryBeforeReview);assert.equal(parentTabs(uri).length,0);
+    assert.equal(draft.getText(),queryBeforeReview);
+    // WorkspaceEdit may reveal a dirty owner in the background; closing it would prompt behind the child.
+    const dirtyOwnerText=currentOwner.getText();await vscode.window.showTextDocument(currentOwner,{preview:false});
+    await until(()=>vscode.window.activeTextEditor?.document.uri.toString()===draft.uri.toString()&&!session.guarding,'dirty parent navigation remains modal');
+    await vscode.commands.executeCommand('type',{text:' '});assert.equal(currentOwner.getText(),dirtyOwnerText);
+    if(draft.getText()!==queryBeforeReview)await vscode.commands.executeCommand('undo');
+    assert.equal(draft.getText(),queryBeforeReview);
     await vscode.commands.executeCommand('eska.explorer.applyQuery',draft.uri);
     assert.ok((await vscode.workspace.openTextDocument(uri)).getText().includes('Other = 43'));
     await vscode.commands.executeCommand('eska.explorer.cancelQuery',draft.uri);await returned(uri);

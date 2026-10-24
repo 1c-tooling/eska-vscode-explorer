@@ -1,7 +1,7 @@
 /* This renderer owns presentation only. ESKA supplies metadata, bindings, syntax and every accepted model. */
 (() => {
   const api = acquireVsCodeApi(), root = document.getElementById("root");
-  const pages = ["tablesFields", "joins", "group", "conditions", "order"];
+  const basePages = ["tablesFields", "joins", "group", "conditions", "order"];
   let state, selected = 0, page = "tablesFields", editing, pendingEdit, search = "", chosenField = "";
   const expanded = new Set();
 
@@ -17,10 +17,17 @@
   function name(value) { return statement()?.russian ? value.russian : value.english; }
 
   /** Selection is presentation state; the model and its indices come exclusively from ESKA. */
-  function statement() { return state?.model.statements[selected]; }
+  function statement(kind) {
+    const owner = state?.model.statements[selected];
+    if (["order", "totals", "totalGroups"].includes(kind) && owner?.scope !== undefined) return state.model.statements[state.model.scopes[owner.scope].result];
+    return owner;
+  }
+
+  /** Scope edges are supplied by ESKA and keep navigation inside this one modal editor. */
+  function navigate(index) { editing = undefined; chosenField = ""; api.postMessage({ type: "select", statement: index }); }
 
   /** Eligibility reasons are supplied by the backend for this exact model revision. */
-  function unavailable(kind) { return statement()?.append.find(option => option.kind === kind)?.unavailable ?? (statement()?.unavailable || null); }
+  function unavailable(kind) { const owner = statement(kind); return owner?.append.find(option => option.kind === kind)?.unavailable ?? (owner?.unavailable || null); }
 
   /** All buttons preserve native busy/paused state, with explicit backend explanations for disabled actions. */
   function button(label, action, reason, className) {
@@ -37,11 +44,15 @@
   }
 
   /** Typed expressions are formatted and validated by ESKA, including language-specific keywords. */
-  function compose(expression, selection = null) { send({ kind: "compose", statement: selected, selection, expression }); }
+  function compose(expression, selection = null) {
+    const kind = expression.kind === "totalField" ? "totals" : ["totalGroup", "overall"].includes(expression.kind) ? "totalGroups" : expression.kind;
+    send({ kind: "compose", statement: selection?.statement ?? statement(kind).index, selection, expression });
+  }
 
   /** Free expression editing remains available for nodes outside the recognized structured subset. */
   function begin(action, expression, initial = "") {
-    editing = { action, expression, initial, raw: !state.visual || !expression }; render();
+    editing = { action, expression: expression ? structuredClone(expression) : undefined, initial, raw: !state.visual || !expression }; render();
+    if (["virtualSource", "virtualJoin"].includes(expression?.kind) && !new Map(state.metadata.details).has(expression.table)) api.postMessage({ type: "catalog", table: expression.table });
   }
 
   /** Empty forms contain values only; their corresponding query syntax is never built in the webview. */
@@ -51,13 +62,16 @@
     if (kind === "conditions") return { kind: "condition", left: expression, comparison: "equal", right: "" };
     if (kind === "group") return { kind: "group", expression };
     if (kind === "order") return { kind: "order", expression, descending: false };
+    if (kind === "totals") return { kind: "totalField", expression, alias: "", aggregate: "sum" };
+    if (kind === "totalGroups") return { kind: "totalGroup", expression, alias: "", hierarchy: "none", period: null };
     return { kind: "field", expression, alias: "", aggregate: null };
   }
 
   /** A clause row's indices are immutable until the backend returns its next revision. */
   function rows(kind) {
-    return (statement()?.clauses ?? []).filter(clause => clause.kind === kind).flatMap(clause => clause.items.map(item => ({
-      clause, item, selection: { statement: selected, clause: clause.index, item: item.index }
+    const owner = statement(kind);
+    return (owner?.clauses ?? []).filter(clause => clause.kind === kind).flatMap(clause => clause.items.map(item => ({
+      clause, item, selection: { statement: owner.index, clause: clause.index, item: item.index }
     })));
   }
 
@@ -72,22 +86,31 @@
     const { clause, item, selection } = row, l = state.labels, node = element("div", undefined, "controls");
     node.append(button(l.edit, () => begin({ kind: "replace", selection }, item.visual, item.expression ?? ""), item.unavailable.replace));
     node.append(button(l.remove, () => send({ kind: "remove", selection }), item.unavailable.remove));
-    node.append(button("↑", () => send({ kind: "move", selection, to: item.index - 1 }), item.index === 0 ? "single_item" : item.unavailable.move));
+    for (const child of item.children ?? []) node.append(button(l.editNested, () => navigate(state.model.scopes[child].branches[0]), null, "edit-nested"));
+    node.append(button("↑", () => send({ kind: "move", selection, to: item.index - 1 }), item.moveUp === false || item.index === 0 ? "single_item" : item.unavailable.move));
     node.lastChild.title = l.up;
-    node.append(button("↓", () => send({ kind: "move", selection, to: item.index + 1 }), item.index + 1 === clause.items.length ? "single_item" : item.unavailable.move));
+    node.append(button("↓", () => send({ kind: "move", selection, to: item.index + 1 }), item.moveDown === false || item.index + 1 === clause.items.length ? "single_item" : item.unavailable.move));
     node.lastChild.title = l.down; return node;
   }
 
   /** Acknowledged rows remain readable even when their syntax has no structured projection. */
   function list(kind, title, filter) {
-    const l = state.labels, node = panel(title), add = button(l.add, () => { const value = blank(kind); if (page === "group" && kind === "fields") value.aggregate = "sum"; begin({ kind: "append", statement: selected, clause: kind }, value); }, unavailable(kind), "action-add");
+    const l = state.labels, node = panel(title), add = button(l.add, () => { const value = blank(kind); if (page === "group" && kind === "fields") value.aggregate = "sum"; begin({ kind: "append", statement: statement(kind).index, clause: kind }, value); }, unavailable(kind), "action-add");
     node.dataset.section = kind; node.querySelector(".section-title").append(add);
+    if (kind === "joins" && state.features.nestedQueries) node.querySelector(".section-title").append(button(l.nested, () => begin({ kind: "append", statement: selected, clause: kind }, { kind: "subqueryJoin", alias: "", join: "left", left: chosenField, comparison: "equal", right: "" }), unavailable(kind), "add-nested"));
     const entries = rows(kind).filter(row => !filter || filter(row.item));
     for (const row of entries) {
       const item = element("div", undefined, "row"); item.append(element("pre", row.item.preview), controls(row)); node.append(item);
     }
     if (!entries.length) node.append(element("p", l.noRows, "empty"));
     return node;
+  }
+
+  /** A virtual table selection opens positional value controls; ESKA builds the eventual call. */
+  function chooseTable(table) {
+    const path = name(table);
+    if (!table.virtualTable) { compose({ kind: "source", table: path, alias: "" }); return; }
+    begin({ kind: "append", statement: selected, clause: "sources" }, { kind: "virtualSource", table: path, alias: "", parameters: [] });
   }
 
   /** Database tables are paged by ESKA; only explicitly expanded descriptors are requested. */
@@ -115,12 +138,12 @@
           else { expanded.add(path); if (!details.has(path)) api.postMessage({ type: "catalog", table: path }); else render(); }
         }); expand.title = table.name;
         const label = button(table.name, () => {}, null, "table-name"); label.title = path;
-        label.addEventListener("dblclick", () => { if (!label.disabled && !unavailable("sources")) compose({ kind: "source", table: path, alias: "" }); });
-        const add = button("+", () => compose({ kind: "source", table: path, alias: "" }), unavailable("sources"), "table-add"); add.title = l.add;
+        label.addEventListener("dblclick", () => { if (!label.disabled && !unavailable("sources")) chooseTable(table); });
+        const add = button("+", () => chooseTable(table), unavailable("sources"), "table-add"); add.title = l.add;
         row.append(expand, label, add); group.append(row);
         if (expanded.has(path)) for (const child of details.get(path)?.tables ?? []) {
-          const childButton = button(child.name, () => compose({ kind: "source", table: name(child), alias: "" }), unavailable("sources"), "tabular-section");
-          childButton.title = name(child); group.append(childButton);
+          const childButton = button(child.name, () => chooseTable(child), unavailable("sources"), "tabular-section");
+          childButton.title = name(child); childButton.dataset.table = name(child); group.append(childButton);
         }
       }
       node.append(group);
@@ -137,7 +160,7 @@
     const l = state.labels, node = panel(l.tables, "source-fields");
     for (const source of state.metadata.fields) {
       const tree = element("details", undefined, "source-tree"); tree.open = source.loaded;
-      tree.addEventListener("toggle", () => { if (tree.open && !source.loaded && !state.busy) api.postMessage({ type: "fields", table: source.table, alias: source.alias }); });
+      tree.addEventListener("toggle", () => { if (tree.open && !source.loaded && !state.busy) api.postMessage({ type: "fields", table: source.table, alias: source.alias, clause: source.clause, item: source.item }); });
       tree.append(element("summary", source.alias), element("small", source.table));
       if (choose === "fields" && source.fields.length) {
         tree.append(button(l.allFields, () => send({ kind: "appendFields", statement: selected, fields: source.fields.map(name) }),
@@ -163,13 +186,54 @@
   function sources() {
     const node = sourceFields("fields"), l = state.labels;
     node.querySelector(".section-title").append(button(l.add, () => begin({ kind: "append", statement: selected, clause: "sources" }, blank("sources")), unavailable("sources")));
+    if (state.features.nestedQueries) node.querySelector(".section-title").append(button(l.nested, () => compose({ kind: "subquerySource", alias: "" }), unavailable("sources"), "add-nested"));
     for (const row of rows("sources")) {
       const properties = element("div", undefined, "source-properties"); properties.append(element("pre", row.item.preview), controls(row)); node.append(properties);
     }
     return node;
   }
 
-  /** The five pages group existing core clauses; selecting a page never changes the query. */
+  /** Result aliases and wildcard expansion are resolved by ESKA for the scope, independently of its selected branch. */
+  function resultFields(kind) {
+    const l = state.labels, node = panel(l.selectedFields, "result-fields");
+    for (const field of state.metadata.resultFields) {
+      const value = name(field), pick = button(value, () => { chosenField = value; }, unavailable(kind), "field-choice");
+      pick.addEventListener("dblclick", () => { if (!pick.disabled) begin({ kind: "append", statement: statement(kind).index, clause: kind }, blank(kind, value)); }); node.append(pick);
+    }
+    if (!state.metadata.resultFields.length) node.append(element("p", l.noFields, "empty"));
+    return node;
+  }
+
+  /** Branch controls only pass ESKA's statement identities and an explicit duplicate policy. */
+  function unions() {
+    const l = state.labels, node = panel(l.unions, "union-branches"), scope = state.model.scopes[statement().scope];
+    node.querySelector(".section-title").append(button(l.addUnion, () => send({ kind: "addUnion", statement: selected, all: true }), statement().unavailable, "add-union"));
+    for (const [index, id] of scope.branches.entries()) {
+      const owner = state.model.statements[id], row = element("div", undefined, "row"); row.dataset.branch = String(id);
+      row.append(button(`${l.branch} ${index + 1}`, () => navigate(id)), element("pre", owner.columns.join(", ")));
+      if (index) {
+        const policy = select(row, l.unions, "all", { all: scope.unions[index - 1].all ? "yes" : "no" }, [["yes", l.unionAll], ["no", l.unionDistinct]]);
+        policy.disabled ||= state.paused || !state.model.writable || !!owner.unavailable;
+        policy.addEventListener("change", () => send({ kind: "setUnion", statement: id, all: policy.value === "yes" }));
+      }
+      if (scope.branches.length > 1) row.append(button(l.remove, () => send({ kind: "removeUnion", statement: id }), !state.model.writable ? "read_only" : owner.unavailable, "remove-union"));
+      node.append(row);
+    }
+    return node;
+  }
+
+  /** Overall totals and ordinary groups share one backend-owned section. */
+  function totals() {
+    const l = state.labels, node = element("div", undefined, "total-settings"), groups = list("totalGroups", l.totalGroups);
+    const overall = rows("totalGroups").find(row => row.item.visual?.kind === "overall");
+    groups.querySelector(".section-title").append(button(l.overall, () => overall ? send({ kind: "remove", selection: overall.selection }) : compose({ kind: "overall" }), unavailable("totalGroups"), "overall"));
+    groups.querySelector(".overall").setAttribute("aria-pressed", String(!!overall));
+    const fields = list("totals", l.aggregateFields);
+    if (statement("totals").clauses.some(clause => clause.kind === "totals" && !clause.items.length)) fields.append(element("p", l.autoTotals, "notice"));
+    node.append(fields, groups); return node;
+  }
+
+  /** Pages group domain clauses and scopes; selecting a page never changes query text. */
   function renderPage(container) {
     const l = state.labels;
     if (page === "tablesFields") {
@@ -180,8 +244,11 @@
       container.classList.add("two-panes"); container.append(list("group", l.groupFields), list("fields", l.aggregateFields, item => !!item.visual?.aggregate));
     } else if (page === "conditions") {
       container.classList.add("two-panes"); container.append(sourceFields("conditions"), list("conditions", l.conditions));
-    } else {
-      container.classList.add("two-panes"); container.append(sourceFields("order"), list("order", l.order));
+    } else if (page === "order") {
+      container.classList.add("two-panes"); container.append(state.features.totals ? resultFields("order") : sourceFields("order"), list("order", l.order));
+    } else if (page === "unions") container.append(unions());
+    else if (page === "totals") {
+      container.classList.add("two-panes"); container.append(resultFields("totalGroups"), totals());
     }
   }
 
@@ -203,12 +270,46 @@
   /** Populate datalists with core-provided choices while preserving manual expressions for complex cases. */
   function choices(form) {
     const fields = element("datalist"); fields.id = "query-fields";
-    for (const source of state.metadata.fields) for (const field of source.fields) { const option = element("option"); option.value = name(field); fields.append(option); }
+    const values = ["order", "totalField", "totalGroup"].includes(editing?.expression?.kind) ? state.metadata.resultFields : state.metadata.fields.flatMap(source => source.fields);
+    for (const field of values) { const option = element("option"); option.value = name(field); fields.append(option); }
     const tables = element("datalist"); tables.id = "query-tables";
     for (const table of state.metadata.catalog?.tables ?? []) { const option = element("option"); option.value = name(table); tables.append(option); }
+    for (const [, detail] of state.metadata.details) for (const table of detail.tables) { const option = element("option"); option.value = name(table); tables.append(option); }
     const joined = element("datalist"); joined.id = "query-join-fields";
     for (const field of new Map(state.metadata.details).get(editing?.expression?.table)?.fields ?? []) { const option = element("option"); option.value = name(field); joined.append(option); }
     form.append(fields, tables, joined);
+  }
+
+  /** Parameter descriptors and keyword spellings come from the backend; empty positional values remain distinct. */
+  function parameters(form, value) {
+    const l = state.labels, detail = new Map(state.metadata.details).get(value.table);
+    form.append(element("h3", l.parameters));
+    if (!detail) return;
+    if (!detail.parameters?.length) form.append(element("p", l.noParameters, "notice"));
+    for (const [index, parameter] of (detail.parameters ?? []).entries()) {
+      const data = { value: value.parameters[index] ?? "" }, list = `parameter-choices-${index}`;
+      const node = input(form, l[`parameter${parameter.key[0].toUpperCase()}${parameter.key.slice(1)}`] ?? parameter.key, `parameter-${index}`, { [`parameter-${index}`]: data.value }, { required: parameter.required, list });
+      node.addEventListener("input", () => { while (value.parameters.length <= index) value.parameters.push(""); value.parameters[index] = node.value; });
+      const choices = element("datalist"); choices.id = list;
+      for (const choice of parameter.choices ?? []) { const option = element("option"); option.value = name(choice); choices.append(option); } form.append(choices);
+    }
+  }
+
+  /** Hierarchy and period options remain enum/value DTOs; ESKA enforces their mutual exclusion. */
+  function totalGroup(form, value) {
+    const l = state.labels;
+    input(form, l.alias, "alias", value, { required: false });
+    const hierarchy = select(form, l.hierarchy, "hierarchy", value, [["none", l.noHierarchy], ["hierarchy", l.hierarchy], ["onlyHierarchy", l.onlyHierarchy]]);
+    hierarchy.addEventListener("change", () => { if (value.hierarchy !== "none") value.period = null; render(); });
+    const units = ["second", "minute", "hour", "day", "week", "tenDays", "month", "quarter", "halfYear", "year"];
+    const unit = select(form, l.periods, "periodUnit", { periodUnit: value.period?.unit ?? "" }, [["", l.noPeriods], ...units.map(unit => [unit, l[unit]])]);
+    unit.disabled ||= value.hierarchy !== "none";
+    unit.addEventListener("change", () => { value.period = unit.value ? { unit: unit.value, begin: value.period?.begin ?? null, end: value.period?.end ?? null } : null; render(); });
+    if (value.period) {
+      for (const [key, label] of [["begin", l.periodBegin], ["end", l.periodEnd]]) {
+        const node = input(form, label, key, value.period, { required: false }); node.addEventListener("input", () => { value.period[key] = node.value || null; });
+      }
+    }
   }
 
   /** A condition editor separates operands and operator without assembling any SQL in JavaScript. */
@@ -223,19 +324,22 @@
   /** Structured controls edit source, field, join, condition, grouping and order values through one common backend action. */
   function visualForm(form) {
     const l = state.labels, value = editing.expression; choices(form);
-    if (["source", "join"].includes(value.kind)) {
+    if (["source", "join", "virtualSource", "virtualJoin"].includes(value.kind)) {
       const table = input(form, l.tables, "table", value, { list: "query-tables" });
       form.append(button(l.find, () => api.postMessage({ type: "catalog", search: table.value, offset: 0 })));
-      table.addEventListener("change", () => { if (value.kind === "join") api.postMessage({ type: "catalog", table: table.value }); });
-      input(form, l.alias, "alias", value, { required: false });
+      table.addEventListener("change", () => { api.postMessage({ type: "catalog", table: table.value }); });
     }
-    if (["field", "group", "order"].includes(value.kind)) input(form, l.expression, "expression", value, { list: "query-fields" });
-    if (value.kind === "field") {
+    if (["source", "join", "virtualSource", "virtualJoin", "subquerySource", "subqueryJoin"].includes(value.kind)) input(form, l.alias, "alias", value, { required: false });
+    if (["source", "join"].includes(value.kind) && new Map(state.metadata.details).get(value.table)?.parameters?.length) { value.kind = value.kind === "join" ? "virtualJoin" : "virtualSource"; value.parameters = []; }
+    if (["virtualSource", "virtualJoin"].includes(value.kind)) parameters(form, value);
+    if (["field", "group", "order", "totalField", "totalGroup"].includes(value.kind)) input(form, l.expression, "expression", value, { list: "query-fields" });
+    if (["field", "totalField"].includes(value.kind)) {
       input(form, l.alias, "alias", value, { required: false });
       select(form, l.aggregate, "aggregate", value, [["", l.noAggregate], ["sum", l.sum], ["count", l.count], ["minimum", l.minimum], ["maximum", l.maximum], ["average", l.average]]);
     }
-    if (value.kind === "join") select(form, l.joins, "join", value, [["inner", l.inner], ["left", l.left], ["right", l.right], ["full", l.full]]);
-    if (["join", "condition"].includes(value.kind)) condition(form, value, value.kind === "join");
+    if (["join", "virtualJoin", "subqueryJoin"].includes(value.kind)) select(form, l.joins, "join", value, [["inner", l.inner], ["left", l.left], ["right", l.right], ["full", l.full]]);
+    if (["join", "virtualJoin", "subqueryJoin", "condition"].includes(value.kind)) condition(form, value, value.kind !== "condition");
+    if (value.kind === "totalGroup") totalGroup(form, value);
     if (value.kind === "order") {
       const node = select(form, l.direction, "descending", { descending: value.descending ? "yes" : "no" }, [["no", l.ascending], ["yes", l.descending]]);
       node.addEventListener("change", () => { value.descending = node.value === "yes"; });
@@ -261,7 +365,7 @@
         send({ ...editing.action, text });
       } else {
         const expression = structuredClone(editing.expression);
-        if (expression.kind === "field") expression.aggregate ||= null;
+        if (["field", "totalField"].includes(expression.kind)) expression.aggregate ||= null;
         compose(expression, editing.action.selection ?? null);
       }
     });
@@ -275,13 +379,13 @@
     const active = document.activeElement, focus = active?.name, start = active?.selectionStart, end = active?.selectionEnd;
     root.replaceChildren(); if (!state) return;
     const l = state.labels, header = element("header"), actions = element("div", undefined, "header-actions");
-    actions.append(button(l.apply, () => api.postMessage({ type: "apply" }), null, "primary"));
+    actions.append(button(l.apply, () => api.postMessage({ type: "apply" }), state.model.issues?.length ? "union_field_count" : null, "primary"));
     const cancel = button(l.cancel, () => api.postMessage({ type: "cancel" })); cancel.disabled = state.busy; actions.append(cancel); header.append(actions);
     selected = Math.min(state.statement ?? selected, Math.max(0, state.model.statements.length - 1));
-    const picker = element("select"); picker.setAttribute("aria-label", l.statement); picker.disabled = state.busy;
-    for (const value of state.model.statements) { const option = element("option", `${l.statement} ${value.index + 1} · ${value.preview.slice(0, 50)}`); option.value = String(value.index); picker.append(option); }
-    picker.value = String(selected); picker.addEventListener("change", () => { selected = Number(picker.value); editing = undefined; api.postMessage({ type: "select", statement: selected }); }); header.append(picker); root.append(header);
+    navigation(header); root.append(header);
     if (state.paused) root.append(element("p", state.pausedText, "error"));
+    if (state.model.issues?.length) root.append(element("p", l.unionMismatch, "error"));
+    const pages = [...basePages, ...(state.features.unions ? ["unions"] : []), ...(state.features.totals ? ["totals"] : [])];
     const tabs = element("nav", undefined, "tabs"); tabs.setAttribute("role", "tablist");
     for (const value of pages) {
       const activate = target => { page = target; editing = undefined; render(); document.getElementById(`tab-${target}`)?.focus(); };
@@ -305,6 +409,24 @@
     if (focus) {
       const restored = [...root.querySelectorAll("input,textarea,select")].find(node => node.name === focus);
       if (restored) { restored.focus(); if (typeof start === "number" && restored.setSelectionRange && !["select-one", "select-multiple"].includes(restored.type)) restored.setSelectionRange(start, end); }
+    }
+  }
+
+  /** While a child scope is open, parent selectors are replaced with one explicit return control. */
+  function navigation(header) {
+    const l = state.labels, scope = state.model.scopes?.[statement()?.scope];
+    if (scope?.parent !== null && scope?.parent !== undefined) {
+      header.append(button(l.backParent, () => navigate(scope.parent), null, "back-parent"));
+    } else {
+      const picker = element("select"); picker.setAttribute("aria-label", l.statement); picker.disabled = state.busy || state.paused;
+      const statements = state.model.scopes ? state.model.scopes.filter(scope => scope.parent === null).map(scope => state.model.statements[scope.branches[0]]) : state.model.statements;
+      for (const value of statements) { const option = element("option", `${l.statement} ${value.index + 1} · ${value.preview.slice(0, 50)}`); option.value = String(value.index); picker.append(option); }
+      picker.value = String(scope ? scope.branches[0] : selected); picker.addEventListener("change", () => navigate(Number(picker.value))); header.append(picker);
+    }
+    if (scope?.branches.length > 1) {
+      const picker = element("select"); picker.setAttribute("aria-label", l.branch); picker.disabled = state.busy || state.paused;
+      for (const [index, id] of scope.branches.entries()) { const option = element("option", `${l.branch} ${index + 1}`); option.value = String(id); picker.append(option); }
+      picker.value = String(selected); picker.addEventListener("change", () => navigate(Number(picker.value))); header.append(picker);
     }
   }
 

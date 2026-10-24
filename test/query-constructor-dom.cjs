@@ -53,7 +53,7 @@ exports.connect = async function (until) {
 exports.exercise = async function ({ explorer, view, until, locale }) {
   const client = await exports.connect(until);
   try {
-    assert.equal(await client.evaluate('document.querySelectorAll("[role=tab]").length'), 5);
+    assert.equal(await client.evaluate('document.querySelectorAll("[role=tab]").length'), 7);
     assert.equal(await client.evaluate('document.querySelector("header button").textContent'), locale === 'ru' ? 'Применить к черновику' : 'Apply to draft');
     assert.equal(await client.evaluate('document.querySelectorAll("#root img, #root script").length'), 0);
     assert.equal(await client.evaluate('globalThis.queryExecuted === true'), false);
@@ -68,6 +68,6 @@ exports.exercise = async function ({ explorer, view, until, locale }) {
     if (stand) { await fs.mkdir(stand, { recursive: true }); await client.screenshot(path.join(stand, `constructor-${locale}.png`)); }
     await client.evaluate('document.querySelectorAll("header button")[1].click()');
     await until(() => view.ending && !explorer.queryDesigner.views.size, 'DOM cancellation returned to draft');
-    return 'installed_webview_dom_five_tabs_translated_labels_text_only_rendering_expression_submission_and_cancel';
+    return 'installed_webview_dom_seven_tabs_translated_labels_text_only_rendering_expression_submission_and_cancel';
   } finally { client.close(); }
 };

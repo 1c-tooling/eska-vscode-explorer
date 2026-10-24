@@ -2,14 +2,15 @@ import * as vscode from "vscode";
 import { randomBytes } from "node:crypto";
 import { ExplorerError, isRecord } from "../protocol.js";
 import { message, type MessageKey } from "../messages.js";
-import type { CatalogPage, CatalogField, ConstructorAction } from "./constructors.js";
+import type { CatalogPage, CatalogField, CatalogParameter, ConstructorSource, ConstructorAction } from "./constructors.js";
 import type { NativeQueryConstructor } from "./native-constructor.js";
 import { QUERY_SCHEME, type QueryTabs } from "./tabs.js";
 
 interface View {
   panel: vscode.WebviewPanel; binding: NativeQueryConstructor; busy: boolean; ending: boolean; failedApply: boolean;
   statement: number; catalog?: CatalogPage; search?: string; browsed: Map<string, CatalogPage>;
-  fieldsKey?: string; fields?: { table: string; alias: string; fields: CatalogField[]; found: boolean; loaded: boolean }[]; metadataFailed?: boolean;
+  fieldsKey?: string; fields?: (ConstructorSource & { fields: CatalogField[]; signature?: CatalogParameter[]; found: boolean; loaded: boolean })[]; metadataFailed?: boolean;
+  resultKey?: string; resultFields?: CatalogField[];
 }
 
 /** The visual adapter renders ESKA's model and sends intentions; it contains no query parser or generator. */
@@ -65,20 +66,20 @@ export class QueryDesigner implements vscode.Disposable {
     try {
       if (value.type === "ready") {
         if (view.binding.core.limits.visual) {
-          try { view.catalog = await view.binding.core.catalog({}); await this.refreshFields(view); }
+          try { view.catalog = await view.binding.core.catalog(this.virtualCatalog(view)); await this.refreshFields(view); }
           catch { view.metadataFailed = true; }
         }
       } else if (value.type === "select" && Number.isSafeInteger(value.statement) && typeof value.statement === "number"
         && value.statement >= 0 && value.statement < view.binding.core.model.statements.length) {
         view.statement = value.statement; await this.refreshFields(view);
       } else if (value.type === "fields" && view.binding.core.limits.visual) {
-        const source = view.fields?.find(source => source.table === value.table && source.alias === value.alias);
+        const source = view.fields?.find(source => source.table === value.table && source.alias === value.alias && (value.item === undefined || source.item === value.item && source.clause === value.clause));
         if (source && !source.loaded) {
-          const data = await view.binding.core.catalog({ table: source.table, qualifier: source.alias });
-          source.fields = data.fields; source.found = data.found; source.loaded = true;
+          const data = await this.sourceCatalog(view, source);
+          source.fields = data.fields; source.signature = data.parameters ?? []; source.found = data.found; source.loaded = true;
         }
       } else if (value.type === "catalog" && view.binding.core.limits.visual) {
-        const query = { ...(typeof value.search === "string" ? { search: value.search } : {}),
+        const query = { ...this.virtualCatalog(view), ...(typeof value.search === "string" ? { search: value.search } : {}),
           ...(typeof value.table === "string" ? { table: value.table } : {}),
           ...(typeof value.offset === "number" && Number.isSafeInteger(value.offset) && value.offset >= 0 ? { offset: value.offset } : {}) };
         const page = await view.binding.core.catalog(query); delete view.metadataFailed;
@@ -97,33 +98,56 @@ export class QueryDesigner implements vscode.Disposable {
         view.ending = true; view.panel.dispose();
       } else if (value.type === "action" && isRecord(value.action)) {
         const action = value.action as unknown as ConstructorAction;
-        try { await view.binding.core.action(action); await this.refreshFields(view); }
+        try { await view.binding.core.action(action); this.followStructuralFocus(view, action); await this.refreshFields(view); }
         catch (error) {
-          if (action.kind !== "remove" || !(error instanceof ExplorerError) || error.details?.reason !== "constructor_comments_require_decision") throw error;
+          if (!["remove", "removeUnion"].includes(action.kind) || !(error instanceof ExplorerError) || error.details?.reason !== "constructor_comments_require_decision") throw error;
           const decision = await this.commentDecision();
-          if (decision) await view.binding.core.action({ ...action, comments: decision });
+          if (decision && (action.kind === "remove" || action.kind === "removeUnion")) { await view.binding.core.action({ ...action, comments: decision }); this.followStructuralFocus(view, action); await this.refreshFields(view); }
         }
       }
     } finally { view.busy = false; if (!view.ending) await this.publish(view); }
   }
 
+  /** ESKA remaps the active scope after adding/removing a branch; adapters do not infer survivors from shifted indices. */
+  private followStructuralFocus(view: View, action: ConstructorAction): void {
+    if ((action.kind === "addUnion" || action.kind === "removeUnion") && view.binding.core.model.focus !== undefined && view.binding.core.model.focus !== null) view.statement = view.binding.core.model.focus;
+  }
+
   /** Bound field expressions come from ESKA; this view retains only the selected page's presentation data. */
   private async refreshFields(view: View): Promise<void> {
     if (!view.binding.core.limits.visual) return;
-    const sources = view.binding.core.model.statements[view.statement]?.sources ?? [], key = JSON.stringify(sources);
+    view.statement = Math.min(view.statement, Math.max(0, view.binding.core.model.statements.length - 1));
+    const model = view.binding.core.model, statement = model.statements[view.statement];
+    const sources = statement?.sources ?? [], key = JSON.stringify([view.statement, sources, sources.some(source => source.derived) ? model.revision : ""]);
+    if (view.binding.core.limits.totals && statement?.scope !== undefined) {
+      const resultKey = `${statement.scope}:${model.revision}`;
+      if (view.resultKey !== resultKey) {
+        try { const page = await view.binding.core.catalog({ scope: statement.scope }); view.resultFields = page.fields; view.resultKey = resultKey; }
+        catch { view.resultFields = []; delete view.resultKey; view.metadataFailed = true; }
+      }
+    }
     if (view.fieldsKey === key) return;
     const fields: NonNullable<View["fields"]> = [];
     try {
       for (const source of sources) {
-        const retained = view.fields?.find(value => value.table === source.table && value.alias === source.alias && value.loaded);
-        if (retained) { fields.push(retained); continue; }
+        const retained = !source.derived && view.fields?.find(value => value.table === source.table && value.alias === source.alias && JSON.stringify(value.parameters) === JSON.stringify(source.parameters) && value.loaded);
+        if (retained) { fields.push({ ...retained, ...source }); continue; }
         if (fields.length >= 4) { fields.push({ ...source, fields: [], found: true, loaded: false }); continue; }
-        const page = await view.binding.core.catalog({ table: source.table, qualifier: source.alias });
-        fields.push({ ...source, fields: page.fields, found: page.found, loaded: true });
+        const page = await this.sourceCatalog(view, source);
+        fields.push({ ...source, fields: page.fields, signature: page.parameters ?? [], found: page.found, loaded: true });
       }
-    } catch { view.metadataFailed = true; delete view.fieldsKey; return; }
+    } catch { view.fields = fields; view.metadataFailed = true; delete view.fieldsKey; return; }
     view.fields = fields; view.fieldsKey = key;
   }
+
+  /** Bound selectors also resolve derived projections; physical fallback is limited to older negotiated backends. */
+  private sourceCatalog(view: View, source: ConstructorSource): Promise<CatalogPage> {
+    return view.binding.core.catalog({ ...this.virtualCatalog(view), qualifier: source.alias, ...(view.binding.core.limits.nestedQueries && source.clause !== undefined && source.item !== undefined
+      ? { source: { statement: view.statement, clause: source.clause, item: source.item } } : { table: source.table }) });
+  }
+
+  /** Older servers reject unknown request keys, including a new flag set to false. */
+  private virtualCatalog(view: View): { virtualTables?: true } { return view.binding.core.limits.virtualTables ? { virtualTables: true } : {}; }
 
   /** The core requests an explicit choice before deleting a commented node. */
   private async commentDecision(): Promise<"keep" | "discard" | undefined> {
@@ -144,11 +168,15 @@ export class QueryDesigner implements vscode.Disposable {
     for (const name of ["tablesFields", "database", "tables", "selectedFields", "search", "find", "more", "allFields", "noTables", "noFields", "metadataUnavailable", "metadataFailed", "alias", "aggregate", "noAggregate", "sum", "count", "minimum", "maximum", "average", "leftField", "rightField", "rightValue", "comparison", "ascending", "descending", "direction", "rawExpression", "visualEditor", "groupFields", "aggregateFields", "noRows", "comparisonLike", "comparisonIn", "comparisonInHierarchy", "limitedContext", "categoryCatalog", "categoryDocument", "categoryEnum", "categoryInformationRegister", "categoryAccumulationRegister", "categoryAccountingRegister", "categoryCalculationRegister", "categoryChartOfAccounts", "categoryChartOfCharacteristicTypes", "categoryChartOfCalculationTypes", "categoryExchangePlan", "categoryBusinessProcess", "categoryTask", "categoryDocumentJournal"] as const) {
       labels[name] = this.text(`constructor${name[0]!.toUpperCase()}${name.slice(1)}` as MessageKey);
     }
+    for (const name of ["unions", "totals", "totalGroups", "overall", "autoTotals", "nested", "editNested", "backParent", "branch", "unionAll", "unionDistinct", "addUnion", "unionMismatch", "parameters", "noParameters", "hierarchy", "onlyHierarchy", "noHierarchy", "periods", "noPeriods", "periodBegin", "periodEnd", "second", "minute", "hour", "day", "week", "tenDays", "month", "quarter", "halfYear", "year", "parameterPeriod", "parameterBeginPeriod", "parameterEndPeriod", "parameterPeriodicity", "parameterComplementMethod", "parameterCondition", "parameterAccountCondition", "parameterExtraDimensions", "parameterCorrespondingAccountCondition", "parameterCorrespondingExtraDimensions", "parameterDebitAccountCondition", "parameterDebitExtraDimensions", "parameterCreditAccountCondition", "parameterCreditExtraDimensions", "parameterOrder", "parameterTop", "parameterMainDimensions", "parameterBaseDimensions", "parameterSlices"] as const) {
+      labels[name] = this.text(`constructor${name[0]!.toUpperCase()}${name.slice(1)}` as MessageKey);
+    }
     const reasons = Object.fromEntries(["unsupported_statement", "unsupported_construct", "invalid_syntax", "model_limit", "read_only", "required_item", "source_required",
       "join_order_dependency", "single_item", "expression_too_large", "unsupported"].map(reason => [reason, this.reason(reason)]));
+    reasons.union_field_count = this.text("constructorUnionMismatch");
     await view.panel.webview.postMessage({ type: "model", model: view.binding.core.model, labels, reasons, maxExpression: view.binding.core.limits.maxExpression,
-      visual: view.binding.core.limits.visual === true, statement: view.statement,
-      metadata: { catalog: view.catalog, details: [...view.browsed], fields: view.fields ?? [], failed: view.metadataFailed === true },
+      visual: view.binding.core.limits.visual === true, features: view.binding.core.limits, statement: view.statement,
+      metadata: { catalog: view.catalog, details: [...view.browsed], fields: view.fields ?? [], resultFields: view.resultFields ?? [], failed: view.metadataFailed === true },
       busy: view.busy, paused: !view.binding.current || view.failedApply, pausedText: this.text(view.failedApply ? "constructorReceiptFailed" : "constructorChanged") });
   }
 
