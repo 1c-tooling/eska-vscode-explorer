@@ -6,9 +6,10 @@ import { parseDraftPlan, type QueryTextPlan } from "./plan.js";
 export const BASE_CLAUSES = ["fields", "sources", "joins", "conditions", "group", "order"] as const;
 export const CLAUSES = [...BASE_CLAUSES, "totals", "totalGroups"] as const;
 export const PACKAGE_CLAUSES = [...CLAUSES, "into", "destroy", "index"] as const;
-export type ConstructorClauseKind = typeof PACKAGE_CLAUSES[number];
+export const HAVING_CLAUSES = [...PACKAGE_CLAUSES, "having"] as const;
+export type ConstructorClauseKind = typeof HAVING_CLAUSES[number];
 export type ConstructorMethod = "query/constructorOpen" | "query/constructorPlan" | "query/constructorModel" | "query/constructorAction" | "query/constructorFinish" | "query/constructorCancel" | "query/constructorCatalog";
-export interface ConstructorLimits { maxExpression: number; maxModel: number; visual?: boolean; virtualTables?: boolean; nestedQueries?: boolean; unions?: boolean; totals?: boolean; packages?: boolean }
+export interface ConstructorLimits { maxExpression: number; maxModel: number; visual?: boolean; virtualTables?: boolean; nestedQueries?: boolean; unions?: boolean; totals?: boolean; packages?: boolean; having?: boolean }
 export interface ConstructorSelection { statement: number; clause: number; item: number }
 export type Comparison = "equal" | "notEqual" | "less" | "lessOrEqual" | "greater" | "greaterOrEqual" | "like" | "in" | "inHierarchy";
 export type Aggregate = "sum" | "count" | "minimum" | "maximum" | "average" | null;
@@ -22,7 +23,7 @@ export type VisualExpression = { kind: "source"; table: string; alias: string }
   | { kind: "join"; table: string; alias: string; join: "inner" | "left" | "right" | "full"; left: string; comparison: Comparison; right: string }
   | { kind: "virtualJoin"; table: string; alias: string; parameters: string[]; join: "inner" | "left" | "right" | "full"; left: string; comparison: Comparison; right: string }
   | { kind: "subqueryJoin"; alias: string; join: "inner" | "left" | "right" | "full"; left: string; comparison: Comparison; right: string }
-  | { kind: "condition"; left: string; comparison: Comparison; right: string }
+  | { kind: "condition" | "having"; left: string; comparison: Comparison; right: string }
   | { kind: "group"; expression: string } | { kind: "order"; expression: string; descending: boolean }
   | { kind: "totalGroup"; expression: string; alias: string; hierarchy: Hierarchy; period: PeriodRange | null } | { kind: "overall" };
 export interface CatalogParameter { key: string; required: boolean; choices?: CatalogField[] }
@@ -85,7 +86,11 @@ export function constructorCapabilities(hello: unknown): ConstructorLimits | und
     if (hello.apiVersion.minor < 26 || value.packages !== true || value.temporaryTables !== true || !advanced.every(key => flags[key])) invalid();
     flags.packages = true;
   }
-  const clauses = flags.packages ? PACKAGE_CLAUSES : flags.totals ? CLAUSES : BASE_CLAUSES;
+  if (value.having !== undefined) {
+    if (hello.apiVersion.minor < 27 || value.having !== true || !flags.packages) invalid();
+    flags.having = true;
+  }
+  const clauses = flags.having ? HAVING_CLAUSES : flags.packages ? PACKAGE_CLAUSES : flags.totals ? CLAUSES : BASE_CLAUSES;
   if (value.clauses.length !== clauses.length || !value.clauses.every((kind, index) => kind === clauses[index])) invalid();
   const visual = value.visualExpressions !== undefined || value.metadataCatalog !== undefined;
   if ((Object.keys(flags).length && !visual) || (visual && (hello.apiVersion.minor < 22 || value.visualExpressions !== true || value.metadataCatalog !== true))) invalid();
@@ -100,7 +105,7 @@ export function constructorModel(raw: unknown, limits: ConstructorLimits, id?: s
     || Buffer.from(raw.text).toString() !== raw.text || typeof raw.writable !== "boolean"
     || !Array.isArray(raw.statements) || raw.statements.length > 256 || Buffer.byteLength(JSON.stringify(raw)) > limits.maxModel) invalid();
   let entries = 0;
-  const clauses = limits.packages ? PACKAGE_CLAUSES : limits.totals ? CLAUSES : BASE_CLAUSES;
+  const clauses = limits.having ? HAVING_CLAUSES : limits.packages ? PACKAGE_CLAUSES : limits.totals ? CLAUSES : BASE_CLAUSES;
   for (const [index, statement] of raw.statements.entries()) {
     if (!isRecord(statement) || statement.index !== index || !isByteRange(statement.range, raw.bytes)
       || !reason(statement.unavailable) || typeof statement.preview !== "string" || !Array.isArray(statement.clauses)
@@ -230,9 +235,9 @@ function visualExpression(value: unknown): boolean {
     case "virtualSource": return shortText(value.table) && shortText(value.alias) && parameters(value.parameters);
     case "subquerySource": return shortText(value.alias);
     case "field": case "totalField": return shortText(value.expression) && shortText(value.alias) && (value.aggregate === null || ["sum", "count", "minimum", "maximum", "average"].includes(String(value.aggregate)));
-    case "condition": case "join": case "virtualJoin": case "subqueryJoin": return shortText(value.left) && shortText(value.right)
+    case "condition": case "having": case "join": case "virtualJoin": case "subqueryJoin": return shortText(value.left) && shortText(value.right)
       && ["equal", "notEqual", "less", "lessOrEqual", "greater", "greaterOrEqual", "like", "in", "inHierarchy"].includes(String(value.comparison))
-      && (value.kind === "condition" || (shortText(value.alias) && ["inner", "left", "right", "full"].includes(String(value.join))
+      && (["condition", "having"].includes(value.kind) || (shortText(value.alias) && ["inner", "left", "right", "full"].includes(String(value.join))
         && (value.kind === "subqueryJoin" || shortText(value.table)) && (value.kind !== "virtualJoin" || parameters(value.parameters))));
     case "group": return shortText(value.expression);
     case "order": return shortText(value.expression) && typeof value.descending === "boolean";

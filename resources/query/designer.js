@@ -60,7 +60,7 @@
     if (kind === "index") return undefined;
     if (kind === "sources") return { kind: "source", table: "", alias: "" };
     if (kind === "joins") return { kind: "join", table: "", alias: "", join: "left", left: expression, comparison: "equal", right: "" };
-    if (kind === "conditions") return { kind: "condition", left: expression, comparison: "equal", right: "" };
+    if (kind === "conditions" || kind === "having") return { kind: kind === "having" ? "having" : "condition", left: expression, comparison: "equal", right: "" };
     if (kind === "group") return { kind: "group", expression };
     if (kind === "order") return { kind: "order", expression, descending: false };
     if (kind === "totals") return { kind: "totalField", expression, alias: "", aggregate: "sum" };
@@ -272,7 +272,9 @@
     } else if (page === "group") {
       container.classList.add("two-panes"); container.append(list("group", l.groupFields), list("fields", l.aggregateFields, item => !!item.visual?.aggregate));
     } else if (page === "conditions") {
-      container.classList.add("two-panes"); container.append(sourceFields("conditions"), list("conditions", l.conditions));
+      const filters = element("div", undefined, "filter-settings"); filters.append(list("conditions", l.conditions));
+      if (state.features.having) filters.append(list("having", l.having));
+      container.classList.add("two-panes"); container.append(sourceFields("conditions"), filters);
     } else if (page === "order") {
       container.classList.add("two-panes"); container.append(state.features.totals ? resultFields("order") : sourceFields("order"), list("order", l.order));
     } else if (page === "unions") container.append(unions());
@@ -367,7 +369,7 @@
       select(form, l.aggregate, "aggregate", value, [["", l.noAggregate], ["sum", l.sum], ["count", l.count], ["minimum", l.minimum], ["maximum", l.maximum], ["average", l.average]]);
     }
     if (["join", "virtualJoin", "subqueryJoin"].includes(value.kind)) select(form, l.joins, "join", value, [["inner", l.inner], ["left", l.left], ["right", l.right], ["full", l.full]]);
-    if (["join", "virtualJoin", "subqueryJoin", "condition"].includes(value.kind)) condition(form, value, value.kind !== "condition");
+    if (["join", "virtualJoin", "subqueryJoin", "condition", "having"].includes(value.kind)) condition(form, value, !(["condition", "having"].includes(value.kind)));
     if (value.kind === "totalGroup") totalGroup(form, value);
     if (value.kind === "order") {
       const node = select(form, l.direction, "descending", { descending: value.descending ? "yes" : "no" }, [["no", l.ascending], ["yes", l.descending]]);

@@ -1,6 +1,7 @@
 import type { FailureCode } from "./protocol.js";
 
 const en = {
+  constructorHaving: "Aggregate filters (HAVING)",
   constructorPackages: "Package",
   constructorTemporaryTable: "Temporary table name",
   constructorDestination: "Save into temporary table (empty for a result)",
@@ -381,6 +382,7 @@ const en = {
 } as const;
 
 const ru: Record<keyof typeof en, string> = {
+  constructorHaving: "Отбор по агрегатам (ИМЕЮЩИЕ)",
   constructorPackages: "Пакет",
   constructorTemporaryTable: "Имя временной таблицы",
   constructorDestination: "Поместить в таблицу (пусто — результат запроса)",

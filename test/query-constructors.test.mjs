@@ -9,7 +9,7 @@ import { revealFile } from "../out/reveal.js";
 import { QueryClient, querySnapshot } from "../out/query/client.js";
 import { QueryRecovery } from "../out/query/recovery.js";
 import { QuerySessions } from "../out/query/sessions.js";
-import { BASE_CLAUSES as CLAUSES, CLAUSES as ADVANCED_CLAUSES, PACKAGE_CLAUSES, QueryConstructor, constructorCapabilities, constructorModel } from "../out/query/constructors.js";
+import { BASE_CLAUSES as CLAUSES, CLAUSES as ADVANCED_CLAUSES, PACKAGE_CLAUSES, HAVING_CLAUSES, QueryConstructor, constructorCapabilities, constructorModel } from "../out/query/constructors.js";
 import { querySessionCapabilities } from "../out/query/session-protocol.js";
 import { createTreeProject } from "./fixture.mjs";
 import { addQueryRegister } from "./query-advanced-fixture.mjs";
@@ -24,6 +24,16 @@ test("package constructor capabilities require coherent negotiation and clause v
     packages: true, temporaryTables: true, clauses: [...PACKAGE_CLAUSES] };
   assert.equal(constructorCapabilities({ apiVersion: { major: 1, minor: 26 }, capabilities: { queryConstructor: value } }).packages, true);
   for (const [minor, change] of [[25, {}], [26, { temporaryTables: false }], [26, { unions: undefined }], [26, { clauses: [...ADVANCED_CLAUSES] }]]) {
+    assert.throws(() => constructorCapabilities({ apiVersion: { major: 1, minor }, capabilities: { queryConstructor: { ...value, ...change } } }), { code: "protocolInvalid" });
+  }
+});
+
+/** Aggregate filters need their own negotiated clause and cannot be mistaken for ordinary WHERE. */
+test("HAVING capabilities require minor 27 and the complete package vocabulary", () => {
+  const value = { ...capability, visualExpressions: true, metadataCatalog: true, virtualTables: true, nestedQueries: true, unions: true, totals: true,
+    packages: true, temporaryTables: true, having: true, clauses: [...HAVING_CLAUSES] };
+  assert.equal(constructorCapabilities({ apiVersion: { major: 1, minor: 27 }, capabilities: { queryConstructor: value } }).having, true);
+  for (const [minor, change] of [[26, {}], [27, { packages: undefined, temporaryTables: undefined }], [27, { having: false }]]) {
     assert.throws(() => constructorCapabilities({ apiVersion: { major: 1, minor }, capabilities: { queryConstructor: { ...value, ...change } } }), { code: "protocolInvalid" });
   }
 });
@@ -108,6 +118,20 @@ function apply(text, plan) {
 }
 
 for (const locale of ["ru-RU", "en-US"]) {
+  test(`portable aggregate filters stay typed and private (${locale})`, { skip: !executable }, async t => {
+    const f = await fixture(t, locale), original = "SELECT SUM(1) AS Total";
+    await f.store.saveDraft(f.source.record.id, original);
+    const core = await f.source.openConstructor(); assert.equal(core.limits.having, true);
+    await core.action({ kind: "compose", statement: 0, selection: null, expression: { kind: "having", left: "SUM(1)", comparison: "greater", right: "0" } });
+    const clause = core.model.statements[0].clauses.find(clause => clause.kind === "having");
+    assert.equal(clause.items[0].visual.kind, "having");
+    assert.ok(core.model.text.includes("HAVING SUM(1) > 0"));
+    const before = structuredClone(core.model);
+    await assert.rejects(core.action({ kind: "compose", statement: 0, selection: null, expression: { kind: "having", left: "1", comparison: "equal", right: "0; SELECT 9" } }), error => error.details?.reason === "constructor_invalid_expression");
+    assert.deepEqual(core.model, before);
+    assert.equal(f.source.record.draft, original);
+    await core.cancel(); assert.equal(f.source.record.draft, original);
+  });
   test(`portable package model resolves, renames and guards temporary tables (${locale})`, { skip: !executable }, async t => {
     const f = await fixture(t, locale), disk = await readFile(f.files.module), original = "SELECT 1 AS Value";
     await f.store.saveDraft(f.source.record.id, original);
