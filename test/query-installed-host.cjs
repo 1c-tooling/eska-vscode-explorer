@@ -19,10 +19,15 @@ exports.run = async function () {
     const extension = vscode.extensions.all.find(value => value.packageJSON.name === 'eska-explorer');
     assert.equal(await extension.activate(), undefined, 'normal mode does not export private acceptance APIs');
     assert.equal(vscode.env.language, process.env.ESKA_HOST_LOCALE);
-    const disk = await fs.readFile(input.module), owner = await vscode.workspace.openTextDocument(vscode.Uri.file(input.module)), original = owner.getText();
+    await vscode.commands.executeCommand('eska.explorer.restart');
+    const disk = await fs.readFile(input.module);
+    let owner = await vscode.workspace.openTextDocument(vscode.Uri.file(input.module));
+    const original = owner.getText();
     const editor = await vscode.window.showTextDocument(owner, { preview: false }), point = owner.positionAt(owner.getText().indexOf('SELECT ') + 3);
     editor.selection = new vscode.Selection(point, point); await vscode.commands.executeCommand('eska.explorer.editBslQuery');
     const draft = await until(() => vscode.window.activeTextEditor?.document.uri.scheme === 'eska-query' && vscode.window.activeTextEditor.document, 'public query command');
+    assert.ok(!vscode.window.tabGroups.all.some(group => group.tabs.some(tab => tab.input instanceof vscode.TabInputText
+      && ['file','eska-protected'].includes(tab.input.uri.scheme) && tab.input.uri.path === owner.uri.path)), 'query replaces all parent aliases');
     await until(async () => {
       const at = draft.getText().indexOf(input.prefixA), result = await vscode.commands.executeCommand('vscode.executeCompletionItemProvider', draft.uri, draft.positionAt(at + input.prefixA.length));
       return result?.items.some(item => (typeof item.label === 'string' ? item.label : item.label.label) === input.labelA);
@@ -41,11 +46,13 @@ exports.run = async function () {
     }, 'same draft acknowledged and returned');
     assert.equal(changed.uri.toString(), draft.uri.toString()); assert.ok(changed.getText().includes('99 AS InstalledField'));
     await vscode.commands.executeCommand('eska.explorer.applyQuery', changed.uri);
+    owner = await vscode.workspace.openTextDocument(vscode.Uri.file(input.module));
+    assert.equal(vscode.window.activeTextEditor?.document.uri.toString(), owner.uri.toString(), 'Apply returns the parent');
     assert.ok(owner.getText().includes('99 AS InstalledField')); assert.equal(owner.isDirty, true); assert.deepEqual(await fs.readFile(input.module), disk);
     await vscode.window.showTextDocument(owner); await vscode.commands.executeCommand('undo'); assert.equal(owner.getText(), original);
     await fs.writeFile(path.join(fixture.root, 'host-result.json'), JSON.stringify({ passed: true, suite: 'query-installed-normal', locale: vscode.env.language,
       runtime: extension.extensionPath, privateApiExported: false, actualDomActions: true, analyzerMetadataCompletion: true,
-      sameDraft: true, unsavedModuleSingleUndo: true, diskUnchanged: true }));
+      sameDraft: true, singleQueryView: true, parentReturned: true, unsavedModuleSingleUndo: true, diskUnchanged: true }));
   } catch (error) { await fs.writeFile(path.join(fixture.root, 'host-result.json'), JSON.stringify({ passed: false, suite: 'query-installed-normal', error: String(error.stack ?? error) })); throw error; }
   finally { client?.close(); }
 };

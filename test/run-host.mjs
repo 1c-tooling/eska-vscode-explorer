@@ -20,8 +20,8 @@ if (!isAbsolute(playground)) throw new Error("ESKA_TEST_ROOT must be absolute.")
 const root = await mkdtemp(join(playground, "explorer-host-"));
 try {
   const fixture = await createTreeProject(join(root, "project"), process.env.ESKA_HOST_PROJECT_TYPE ?? "configuration");
-  if (["query-tabs-host.cjs", "query-session-host.cjs", "query-bsl-host.cjs", "query-bsl-restore-host.cjs", "query-bsl-windows-host.cjs"].includes(basename(suite))) fixture.query = await (await import("./query-fixture.mjs")).createQuerySource(fixture);
-  if (["query-bsl-host.cjs", "query-bsl-restore-host.cjs", "query-bsl-windows-host.cjs"].includes(basename(suite))) {
+  if (["query-tabs-host.cjs", "query-session-host.cjs", "query-bsl-host.cjs", "query-bsl-restore-host.cjs", "query-bsl-windows-host.cjs", "query-modal-host.cjs", "query-modal-normal-host.cjs", "query-modal-restore-host.cjs"].includes(basename(suite))) fixture.query = await (await import("./query-fixture.mjs")).createQuerySource(fixture);
+  if (["query-bsl-host.cjs", "query-bsl-restore-host.cjs", "query-bsl-windows-host.cjs", "query-modal-host.cjs", "query-modal-normal-host.cjs", "query-modal-restore-host.cjs"].includes(basename(suite))) {
     await writeFile(fixture.module, '\ufeff// owner 😀\r\nQ = "SELECT 1\r\n|AS Value";\r\nOther = 42;\r\nSecond = "SELECT 9";\r\nComputed = "SELECT " + "1";\r\n');
   }
   if (basename(suite) === "query-language-context-host.cjs") fixture.applications = await (await import("./query-language-fixture.mjs")).createQueryLanguageContexts(fixture);
@@ -105,7 +105,7 @@ try {
   if (process.env.ESKA_PERF_PROJECT) {
     if (!isAbsolute(process.env.ESKA_PERF_PROJECT)) throw new Error("ESKA_PERF_PROJECT must be absolute.");
     workspace = join(root, "performance.code-workspace");
-    await writeFile(workspace, JSON.stringify({ folders: [{ path: process.env.ESKA_PERF_PROJECT }], settings: { "eska.explorer.checkForUpdates": false, "eska.explorer.checkForAnalyzerUpdates": false, "eska.explorer.languageFeatures": process.env.ESKA_TEST_LANGUAGE === "1", "eska.explorer.analyzerExecutable": process.env.ESKA_TEST_ANALYZER_BINARY ?? join(root, "missing-analyzer"), "eska.explorer.backend": backend,
+    await writeFile(workspace, JSON.stringify({ folders: [{ path: process.env.ESKA_PERF_PROJECT }], settings: { "eska.explorer.checkForUpdates": false, "eska.explorer.checkForAnalyzerUpdates": false, "eska.explorer.languageFeatures": process.env.ESKA_TEST_LANGUAGE === "1", "eska.explorer.analyzerExecutable": process.env.ESKA_TEST_ANALYZER_BINARY ?? join(root, "missing-analyzer"), "eska.explorer.backend": backend, "eska.explorer.executable": binary,
       ...(process.env.ESKA_HOST_SUPPORT_DISABLED ? { "eska.explorer.supportPolicy": false } : {}) } }));
   }
   // A second process reuses the same profile and workspace to test restored editors.

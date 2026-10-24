@@ -40,6 +40,7 @@ export class QueryDesigner implements vscode.Disposable {
     const panel = vscode.window.createWebviewPanel("eska.queryConstructor", this.text("constructorTitle"), vscode.ViewColumn.Active,
       { enableScripts: true, retainContextWhenHidden: true, localResourceRoots: roots });
     const view: View = { panel, binding, busy: false, ending: false, failedApply: false }; this.views.set(uri.toString(), view);
+    binding.onReveal(() => { if (!view.ending && !this.disposed) panel.reveal(); });
     panel.webview.html = this.html(panel.webview);
     panel.webview.onDidReceiveMessage(value => { void this.receive(view, value).catch(error => this.failure(view, error)); });
     panel.onDidDispose(() => {

@@ -3,6 +3,7 @@ import { ExplorerError } from "../protocol.js";
 import { querySnapshot } from "./client.js";
 import type { QuerySourceSession } from "./sessions.js";
 import type { QueryConstructor } from "./constructors.js";
+import { hideOwnedQuery } from "./modal-parent.js";
 
 interface Binding {
   current(): boolean;
@@ -19,6 +20,7 @@ export class NativeQueryConstructor {
   private invalid = false;
   private latest: vscode.TextDocument;
   private ending: Promise<void> | undefined;
+  private foreground: (() => void) | undefined;
   readonly before: string;
   private readonly version: number;
 
@@ -31,6 +33,15 @@ export class NativeQueryConstructor {
 
   /** A stopped source connection cannot lend its old constructor to a replacement process. */
   get current(): boolean { return !this.invalid && !this.conflicted && this.phase !== "done" && this.binding.current(); }
+
+  /** Only the visual editing phase prevents activation of the constructor's native parent. */
+  get parentLocked(): boolean { return this.phase === "design"; }
+
+  /** The renderer supplies focus without leaking a webview or IDE identity into the domain model. */
+  onReveal(action: () => void): void { this.foreground = action; }
+
+  /** A parent activation returns to the currently owning visual panel. */
+  reveal(): void { this.foreground?.(); }
 
   /** Only the owned application/restoration transaction exposes its native draft model as writable. */
   get nativeWritable(): boolean {
@@ -56,13 +67,7 @@ export class NativeQueryConstructor {
     if (!this.current || this.original.isClosed || this.original.version !== this.version) throw new ExplorerError("sourceChanged");
     this.phase = "reverting";
     try {
-      const groups = vscode.window.tabGroups.all;
-      for (const group of groups) for (const tab of [...group.tabs]) {
-        if (!(tab.input instanceof vscode.TabInputText) || tab.input.uri.toString() !== this.original.uri.toString()) continue;
-        await vscode.window.showTextDocument(this.original.uri, { viewColumn: group.viewColumn, preview: false });
-        // This is an owned virtual draft whose exact text was checkpointed; no source Save is invoked.
-        await vscode.commands.executeCommand("workbench.action.revertAndCloseActiveEditor");
-      }
+      await hideOwnedQuery(this.original.uri);
     } finally { this.phase = "design"; }
     if (!this.current || vscode.window.tabGroups.all.some(group => group.tabs.some(tab => tab.input instanceof vscode.TabInputText
       && tab.input.uri.toString() === this.original.uri.toString()))) throw new ExplorerError("sourceChanged");
@@ -117,7 +122,7 @@ export class NativeQueryConstructor {
 
   /** The provider resumes ordinary persistence only after the constructor's token has been released or its source paused. */
   private async complete(document: vscode.TextDocument): Promise<void> {
-    this.phase = "done"; this.latest = document;
+    this.phase = "done"; this.latest = document; this.foreground = undefined;
     await this.binding.complete(document);
   }
 }
