@@ -73,3 +73,28 @@ test("a rapid native close and reopen starts a new wire lifetime without losing 
   assert.equal(documents.poisoned(uri), false);
   assert.equal(sent.at(-1).contentChanges[0].text, "after reopen");
 });
+
+test("pending native open flushed by the client cannot wait on its own projection notification", async () => {
+  const uri = "file:///module.bsl", owner = {}, sent = [];
+  const document = { isClosed: false, getText: () => "native" };
+  let pendingOpen = true, projected = false;
+  const documents = new LanguageDocuments(async (method, params) => {
+    assert.equal(documents.owns(params), true);
+    if (pendingOpen) {
+      pendingOpen = false;
+      // LanguageClient.sendNotification flushes hidden native documents before sending the projected body.
+      await documents.notification("textDocument/didOpen", { textDocument: { uri, version: 1, text: "native" } },
+        async () => assert.fail("a projected URI cannot expose the stale native body"));
+    }
+    sent.push({ method, ...params });
+  }, () => document);
+  const opening = documents.project(uri, "projected", owner).then(() => { projected = true; });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(projected, true, "suppressed native traffic must not wait for the projection that triggered it");
+  await opening;
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].textDocument.text, "projected");
+  await documents.release(uri, owner);
+  assert.equal(sent.at(-1).contentChanges[0].text, "native");
+  assert.equal(document.getText(), "native");
+});

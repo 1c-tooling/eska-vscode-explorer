@@ -31,9 +31,12 @@ export class LanguageDocuments {
   async notification(method: string, params: unknown, forward: (params: unknown) => Promise<void>): Promise<void> {
     if (this.owns(params) || !["textDocument/didOpen", "textDocument/didChange", "textDocument/didClose", "textDocument/didSave"].includes(method)
       || !isRecord(params) || !isRecord(params.textDocument) || typeof params.textDocument.uri !== "string") return forward(params);
-    const uri = params.textDocument.uri, stream = this.stream(uri), document = this.native(uri), text = document?.getText(), suppressed = !!stream.owner;
+    const uri = params.textDocument.uri, stream = this.stream(uri);
+    // The client can flush a pending native open while sending this stream's projection. Suppression must not await itself.
+    if (stream.owner) return;
+    const document = this.native(uri), text = document?.getText();
     return this.enqueue(stream, async () => {
-      if (suppressed || stream.owner) return;
+      if (stream.owner) return;
       if (method === "textDocument/didClose") {
         ++this.revision;
         if (stream.opened) await this.publish("textDocument/didClose", { textDocument: { uri } });
