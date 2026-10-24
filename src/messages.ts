@@ -1,6 +1,8 @@
 import type { FailureCode } from "./protocol.js";
 
 const en = {
+  constructorTotalSection: "Totals section",
+  constructorAddTotalSection: "Add totals section",
   constructorHaving: "Aggregate filters (HAVING)",
   constructorPackages: "Package",
   constructorTemporaryTable: "Temporary table name",
@@ -382,6 +384,8 @@ const en = {
 } as const;
 
 const ru: Record<keyof typeof en, string> = {
+  constructorTotalSection: "Секция итогов",
+  constructorAddTotalSection: "Добавить секцию итогов",
   constructorHaving: "Отбор по агрегатам (ИМЕЮЩИЕ)",
   constructorPackages: "Пакет",
   constructorTemporaryTable: "Имя временной таблицы",

@@ -38,6 +38,16 @@ test("HAVING capabilities require minor 27 and the complete package vocabulary",
   }
 });
 
+/** Sequential totals are opt-in even when a client already supports one totals section. */
+test("multiple totals require explicit minor 28 and the section bound", () => {
+  const value = { ...capability, visualExpressions: true, metadataCatalog: true, virtualTables: true, nestedQueries: true, unions: true, totals: true,
+    packages: true, temporaryTables: true, having: true, multipleTotals: true, maxTotalSections: 32, clauses: [...HAVING_CLAUSES] };
+  assert.equal(constructorCapabilities({ apiVersion: { major: 1, minor: 28 }, capabilities: { queryConstructor: value } }).multipleTotals, true);
+  for (const [minor, change] of [[27, {}], [28, { having: undefined }], [28, { maxTotalSections: 0 }]]) {
+    assert.throws(() => constructorCapabilities({ apiVersion: { major: 1, minor }, capabilities: { queryConstructor: { ...value, ...change } } }), { code: "protocolInvalid" });
+  }
+});
+
 /** New clause identifiers and domain intentions require explicit minor-23 negotiation with visual support. */
 test("advanced constructor capabilities reject partial or older negotiation", () => {
   const features = { visual: true, virtualTables: true, nestedQueries: true, unions: true, totals: true };
@@ -118,6 +128,28 @@ function apply(text, plan) {
 }
 
 for (const locale of ["ru-RU", "en-US"]) {
+  test(`portable totals sections retain independent clauses and selection (${locale})`, { skip: !executable }, async t => {
+    const f = await fixture(t, locale), original = "SELECT 1 AS A, 2 AS B";
+    await f.store.saveDraft(f.source.record.id, original);
+    const core = await f.source.openConstructor(); assert.equal(core.limits.multipleTotals, true);
+    for (const name of ["A", "B"]) {
+      await core.action({ kind: "addTotals", statement: 0, after: null });
+      const section = core.model.totalFocus;
+      await core.action({ kind: "composeTotal", statement: 0, section, selection: null, expression: { kind: "totalField", expression: name, alias: "", aggregate: "sum" } });
+      await core.action({ kind: "composeTotal", statement: 0, section, selection: null, expression: { kind: "totalGroup", expression: name, alias: "", hierarchy: "none", period: null } });
+    }
+    assert.equal(core.model.statements[0].totalSections.length, 2);
+    await core.action({ kind: "moveTotals", statement: 0, section: 1, to: 0 });
+    assert.equal(core.model.totalFocus, 0);
+    assert.ok(core.model.text.indexOf("SUM(B)") < core.model.text.indexOf("SUM(A)"));
+    const malformed = structuredClone(core.model); malformed.statements[0].totalSections[0].groups = 0;
+    assert.throws(() => constructorModel(malformed, core.limits), { code: "protocolInvalid" });
+    await core.action({ kind: "removeTotals", statement: 0, section: 0 });
+    assert.equal(core.model.statements[0].totalSections.length, 1);
+    assert.ok(!core.model.text.includes("SUM(B)")); assert.ok(core.model.text.includes("SUM(A)"));
+    assert.equal(f.source.record.draft, original);
+    await core.cancel(); assert.equal(f.source.record.draft, original);
+  });
   test(`portable aggregate filters stay typed and private (${locale})`, { skip: !executable }, async t => {
     const f = await fixture(t, locale), original = "SELECT SUM(1) AS Total";
     await f.store.saveDraft(f.source.record.id, original);

@@ -9,7 +9,7 @@ export const PACKAGE_CLAUSES = [...CLAUSES, "into", "destroy", "index"] as const
 export const HAVING_CLAUSES = [...PACKAGE_CLAUSES, "having"] as const;
 export type ConstructorClauseKind = typeof HAVING_CLAUSES[number];
 export type ConstructorMethod = "query/constructorOpen" | "query/constructorPlan" | "query/constructorModel" | "query/constructorAction" | "query/constructorFinish" | "query/constructorCancel" | "query/constructorCatalog";
-export interface ConstructorLimits { maxExpression: number; maxModel: number; visual?: boolean; virtualTables?: boolean; nestedQueries?: boolean; unions?: boolean; totals?: boolean; packages?: boolean; having?: boolean }
+export interface ConstructorLimits { maxExpression: number; maxModel: number; visual?: boolean; virtualTables?: boolean; nestedQueries?: boolean; unions?: boolean; totals?: boolean; packages?: boolean; having?: boolean; multipleTotals?: boolean }
 export interface ConstructorSelection { statement: number; clause: number; item: number }
 export type Comparison = "equal" | "notEqual" | "less" | "lessOrEqual" | "greater" | "greaterOrEqual" | "like" | "in" | "inHierarchy";
 export type Aggregate = "sum" | "count" | "minimum" | "maximum" | "average" | null;
@@ -32,6 +32,11 @@ export interface CatalogField { russian: string; english: string }
 export interface CatalogPage { tables: CatalogTable[]; fields: CatalogField[]; parameters?: CatalogParameter[]; temporaryTables?: { name: string; scope: number; statement: number }[]; nextOffset: number | null; found: boolean; limitedContext: boolean; contextFingerprint: string }
 export interface CatalogQuery { search?: string; offset?: number; limit?: number; table?: string; qualifier?: string; virtualTables?: boolean; source?: ConstructorSelection; scope?: number; atStatement?: number }
 export type ConstructorAction = { kind: "compose"; statement: number; selection: ConstructorSelection | null; expression: VisualExpression }
+  | { kind: "composeTotal"; statement: number; section: number; selection: ConstructorSelection | null; expression: VisualExpression }
+  | { kind: "appendTotal"; statement: number; section: number; clause: "totals" | "totalGroups"; text: string }
+  | { kind: "addTotals"; statement: number; after: number | null }
+  | { kind: "removeTotals"; statement: number; section: number; comments?: "keep" | "discard" }
+  | { kind: "moveTotals"; statement: number; section: number; to: number }
   | { kind: "appendFields"; statement: number; fields: string[] }
   | { kind: "append"; statement: number; clause: ConstructorClauseKind; text: string; join?: "inner" | "left" | "right" | "full" }
   | { kind: "replace"; selection: ConstructorSelection; text: string }
@@ -55,7 +60,9 @@ export interface ConstructorStatement {
   russian?: boolean; sources?: ConstructorSource[];
   scope?: number; branch?: number; nested?: boolean; result?: boolean; columns?: string[];
   package?: PackageControls;
+  totalSections?: ConstructorTotalSection[]; addTotals?: boolean;
 }
+export interface ConstructorTotalSection { index: number; fields: number; groups: number; range: ByteRange; remove: boolean; moveUp: number | null; moveDown: number | null }
 export interface PackageControls { operation: "select" | "destroy" | null; position: number | null; first: number; destination: string | null; add: boolean; remove: boolean; setInto: boolean; moveUp: number | null; moveDown: number | null }
 export interface ConstructorSource { table: string; alias: string; clause?: number; item?: number; derived?: boolean; nestedScope?: number | null; parameters?: string[] }
 export interface ConstructorScope { index: number; range: ByteRange; parent: number | null; branches: number[]; result: number; unions: { all: boolean }[] }
@@ -63,6 +70,7 @@ export interface ConstructorModel {
   id: string; revision: string; snapshot: string; text: string; bytes: number; writable: boolean; statements: ConstructorStatement[];
   scopes?: ConstructorScope[]; issues?: { code: string; scope: number; table?: string; column?: string | null }[];
   focus?: number | null;
+  totalFocus?: number | null;
 }
 type Transport = (method: ConstructorMethod, params: Record<string, unknown>) => Promise<unknown>;
 
@@ -90,6 +98,10 @@ export function constructorCapabilities(hello: unknown): ConstructorLimits | und
     if (hello.apiVersion.minor < 27 || value.having !== true || !flags.packages) invalid();
     flags.having = true;
   }
+  if (value.multipleTotals !== undefined) {
+    if (hello.apiVersion.minor < 28 || value.multipleTotals !== true || value.maxTotalSections !== 32 || !flags.having) invalid();
+    flags.multipleTotals = true;
+  }
   const clauses = flags.having ? HAVING_CLAUSES : flags.packages ? PACKAGE_CLAUSES : flags.totals ? CLAUSES : BASE_CLAUSES;
   if (value.clauses.length !== clauses.length || !value.clauses.every((kind, index) => kind === clauses[index])) invalid();
   const visual = value.visualExpressions !== undefined || value.metadataCatalog !== undefined;
@@ -114,6 +126,7 @@ export function constructorModel(raw: unknown, limits: ConstructorLimits, id?: s
       || statement.sources.length > 65_536 || !statement.sources.every(source => isRecord(source) && shortText(source.table) && shortText(source.alias)
         && (source.parameters === undefined || parameters(source.parameters))))) invalid();
     if (limits.packages) validatePackage(statement.package, raw.statements.length);
+    if (limits.multipleTotals) validateTotals(statement, raw.bytes);
     for (const [index, option] of statement.append.entries()) {
       if (!isRecord(option) || option.kind !== clauses[index] || !reason(option.unavailable)) invalid();
     }
@@ -132,6 +145,7 @@ export function constructorModel(raw: unknown, limits: ConstructorLimits, id?: s
     }
   }
   if ((limits.nestedQueries || limits.unions) && raw.scopes === undefined) invalid();
+  if (limits.multipleTotals && !(raw.totalFocus === null || unsigned(raw.totalFocus) && raw.totalFocus < 32)) invalid();
   validateScopes(raw);
   return raw as unknown as ConstructorModel;
 }
@@ -182,6 +196,7 @@ export class QueryConstructor {
   /** Stale indices are rejected by ESKA, including parallel actions captured before the previous reply. */
   async action(action: ConstructorAction): Promise<void> {
     if (["setInto", "addStatement", "removeStatement", "moveStatement"].includes(action.kind) && !this.limits.packages) throw new ExplorerError("incompatible");
+    if (["addTotals", "removeTotals", "moveTotals", "composeTotal", "appendTotal"].includes(action.kind) && !this.limits.multipleTotals) throw new ExplorerError("incompatible");
     const result = await this.request("query/constructorAction", { action });
     if (!isRecord(result) || result.constructorActive !== true) invalid();
     this.current = constructorModel(result.constructor, this.limits, this.current.id);
@@ -258,6 +273,21 @@ function validatePackage(value: unknown, statements: number): void {
     || !(value.position === null || unsigned(value.position)) || !unsigned(value.first) || value.first >= statements
     || !(value.destination === null || shortText(value.destination)) || ![value.add, value.remove, value.setInto].every(v => typeof v === "boolean")
     || ![value.moveUp, value.moveDown].every(v => v === null || unsigned(v))) invalid();
+}
+
+/** The transport validates section-to-clause references; SQL pairing and edit permissions come exclusively from ESKA. */
+function validateTotals(owner: Record<string, unknown>, bytes: number): void {
+  if (!Array.isArray(owner.totalSections) || owner.totalSections.length > 32 || typeof owner.addTotals !== "boolean" || !Array.isArray(owner.clauses)) invalid();
+  let previous = 0;
+  const count = owner.totalSections.length;
+  for (const [index, section] of owner.totalSections.entries()) {
+    if (!isRecord(section) || section.index !== index || !unsigned(section.fields) || !unsigned(section.groups)
+      || !isRecord(owner.clauses[section.fields]) || owner.clauses[section.fields].kind !== "totals"
+      || !isRecord(owner.clauses[section.groups]) || owner.clauses[section.groups].kind !== "totalGroups"
+      || !isByteRange(section.range, bytes) || section.range.start < previous || typeof section.remove !== "boolean"
+      || ![section.moveUp, section.moveDown].every(to => to === null || unsigned(to) && to < count)) invalid();
+    previous = section.range.end;
+  }
 }
 
 /** Validate the backend's navigation graph without discovering scopes or source bindings in SQL text. */

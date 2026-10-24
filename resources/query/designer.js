@@ -2,7 +2,7 @@
 (() => {
   const api = acquireVsCodeApi(), root = document.getElementById("root");
   const basePages = ["tablesFields", "joins", "group", "conditions", "order"];
-  let state, selected = 0, page = "tablesFields", editing, pendingEdit, search = "", chosenField = "";
+  let state, totalSection = 0, totalScope = -1, selected = 0, page = "tablesFields", editing, pendingEdit, search = "", chosenField = "";
   const expanded = new Set();
 
   /** Untrusted names and expressions are always text nodes, never markup. */
@@ -39,6 +39,10 @@
 
   /** A user intention cannot supply a session, source path or constructor identity. */
   function send(action) {
+    if (state.features.multipleTotals && action.kind === "append" && ["totals", "totalGroups"].includes(action.clause)) {
+      const section = activeTotal();
+      if (section) action = { kind: "appendTotal", statement: action.statement, section: section.index, clause: action.clause, text: action.text };
+    }
     pendingEdit = editing ? structuredClone(editing) : undefined;
     editing = undefined; api.postMessage({ type: "action", action });
   }
@@ -46,7 +50,8 @@
   /** Typed expressions are formatted and validated by ESKA, including language-specific keywords. */
   function compose(expression, selection = null) {
     const kind = expression.kind === "totalField" ? "totals" : ["totalGroup", "overall"].includes(expression.kind) ? "totalGroups" : expression.kind;
-    send({ kind: "compose", statement: selection?.statement ?? statement(kind).index, selection, expression });
+    const section = state.features.multipleTotals && ["totals", "totalGroups"].includes(kind) ? activeTotal() : undefined;
+    send({ kind: section ? "composeTotal" : "compose", statement: selection?.statement ?? statement(kind).index, ...(section ? { section: section.index } : {}), selection, expression });
   }
 
   /** Free expression editing remains available for nodes outside the recognized structured subset. */
@@ -68,10 +73,20 @@
     return { kind: "field", expression, alias: "", aggregate: null };
   }
 
+  /** Section ownership and clause references come from ESKA; selection is presentation state only. */
+  function activeTotal() {
+    const owner = statement("totals");
+    if (!state.features.multipleTotals || !owner) return undefined;
+    if (totalScope !== owner.scope) { totalScope = owner.scope; totalSection = 0; }
+    totalSection = Math.min(totalSection, Math.max(0, owner.totalSections.length - 1));
+    return owner.totalSections[totalSection];
+  }
+
   /** A clause row's indices are immutable until the backend returns its next revision. */
   function rows(kind) {
     const owner = statement(kind);
-    return (owner?.clauses ?? []).filter(clause => clause.kind === kind).flatMap(clause => clause.items.map(item => ({
+    const section = state.features.multipleTotals && ["totals", "totalGroups"].includes(kind) ? activeTotal() : undefined;
+    return (owner?.clauses ?? []).filter(clause => clause.kind === kind && (!section || clause.index === (kind === "totals" ? section.fields : section.groups))).flatMap(clause => clause.items.map(item => ({
       clause, item, selection: { statement: owner.index, clause: clause.index, item: item.index }
     })));
   }
@@ -257,7 +272,21 @@
     groups.querySelector(".section-title").append(button(l.overall, () => overall ? send({ kind: "remove", selection: overall.selection }) : compose({ kind: "overall" }), unavailable("totalGroups"), "overall"));
     groups.querySelector(".overall").setAttribute("aria-pressed", String(!!overall));
     const fields = list("totals", l.aggregateFields);
-    if (statement("totals").clauses.some(clause => clause.kind === "totals" && !clause.items.length)) fields.append(element("p", l.autoTotals, "notice"));
+    const section = activeTotal(), owner = statement("totals"), clause = section ? owner.clauses[section.fields] : owner.clauses.find(clause => clause.kind === "totals");
+    if (clause && !clause.items.length) fields.append(element("p", l.autoTotals, "notice"));
+    if (state.features.multipleTotals) {
+      const toolbar = panel(l.totalSection, "total-sections");
+      if (owner.totalSections.length) {
+        const picker = select(toolbar, l.totalSection, "totalSection", { totalSection: String(totalSection) }, owner.totalSections.map(value => [String(value.index), `${l.totalSection} ${value.index + 1}`]));
+        picker.addEventListener("change", () => { totalSection = Number(picker.value); editing = undefined; render(); });
+      }
+      toolbar.append(button(l.addTotalSection, () => send({ kind: "addTotals", statement: owner.index, after: section?.index ?? null }), !owner.addTotals ? "unsupported" : null, "add-total-section"));
+      if (section) {
+        toolbar.append(button(l.remove, () => send({ kind: "removeTotals", statement: owner.index, section: section.index }), !section.remove ? "unsupported" : null, "remove-total-section"));
+        for (const [key, label] of [["moveUp", "↑"], ["moveDown", "↓"]]) toolbar.append(button(label, () => send({ kind: "moveTotals", statement: owner.index, section: section.index, to: section[key] }), section[key] === null ? "unsupported" : null, `total-section-${key}`));
+      }
+      node.append(toolbar);
+    }
     node.append(fields, groups); return node;
   }
 
@@ -466,7 +495,10 @@
   /** Backend errors retain pending form input and never replace the last acknowledged query text. */
   window.addEventListener("message", event => {
     if (event.data?.type === "model") {
-      if (state && state.model.revision !== event.data.model.revision) pendingEdit = undefined;
+      if (state && state.model.revision !== event.data.model.revision) {
+        pendingEdit = undefined;
+        if (event.data.model.totalFocus !== undefined && event.data.model.totalFocus !== null) totalSection = event.data.model.totalFocus;
+      }
       state = event.data; render();
     } else if (event.data?.type === "error") {
       if (pendingEdit) { editing = pendingEdit; render(); }
