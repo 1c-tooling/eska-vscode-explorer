@@ -8,13 +8,21 @@ type Pending = { value: Parameters<ProgressHandler>[1]; forward: Parameters<Prog
 export class LanguageProgress {
   private readonly pending = new Map<Token, Pending>();
   private disposed = false;
+  private readonly active = new Set<Token>();
+
+  /** Query providers cannot treat an empty report during a running index as completed analysis. */
+  get busy(): boolean { return this.active.size > 0; }
 
   /** A session generation decides whether a delayed presentation update is still relevant. */
-  constructor(private readonly current: () => boolean) {}
+  constructor(private readonly current: () => boolean, private readonly changed: () => void = () => {}) {}
 
   /** Large indexes report thousands of files; only intermediate presentation updates may be combined. */
   readonly handle: ProgressHandler = (token, value, forward) => {
     if (this.disposed || !this.current()) return;
+    const busy = this.busy;
+    if (value.kind === "begin") this.active.add(token);
+    else if (value.kind === "end") this.active.delete(token);
+    if (busy !== this.busy) this.changed();
     if (value.kind !== "report") {
       this.flush(token);
       forward(token, value);
@@ -39,5 +47,6 @@ export class LanguageProgress {
     this.disposed = true;
     for (const pending of this.pending.values()) clearTimeout(pending.timer);
     this.pending.clear();
+    this.active.clear();
   }
 }

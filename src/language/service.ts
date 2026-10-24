@@ -17,11 +17,13 @@ import type { SupportController } from "../support.js";
 import { LanguageEdits } from "./edits.js";
 import { nativePath } from "../source.js";
 import { watchSourceFiles } from "../watch.js";
+import { LanguageDocuments } from "./documents.js";
+import type { QueryLanguage } from "../query/language.js";
 
 type Ready = Extract<ConnectionState, { kind: "ready" }>;
 interface Session {
   context: AnalysisContext; configuration: AnalyzerConfiguration; lease: string; state: Ready;
-  client?: LanguageClient; owner?: LanguageProcess; edits?: LanguageEdits; progress?: LanguageProgress; configurationWatcher?: vscode.FileSystemWatcher;
+  client?: LanguageClient; owner?: LanguageProcess; edits?: LanguageEdits; progress?: LanguageProgress; documents?: LanguageDocuments; configurationWatcher?: vscode.FileSystemWatcher;
   observers: vscode.Disposable[];
 }
 const CONFLICTING_EXTENSION = "elishevkirill.bsl-analyzer-lsp";
@@ -46,6 +48,7 @@ export class LanguageService implements vscode.Disposable {
   private checkRequested = false;
   private readonly delayedDiagnostics = new Map<string, () => void>();
   private readonly subscriptions: vscode.Disposable[] = [];
+  private queryLanguage: QueryLanguage | undefined;
 
   constructor(private readonly context: vscode.ExtensionContext, private readonly connection: Connection,
     private readonly tooling: ToolingSetup, private readonly output: vscode.LogOutputChannel, private readonly log: DiagnosticLog,
@@ -77,6 +80,12 @@ export class LanguageService implements vscode.Disposable {
   get selectedApplication(): string | undefined {
     const state = this.connection.state;
     return state.kind === "ready" ? this.context.workspaceState.get<string>(this.selectionKey(state)) || undefined : undefined;
+  }
+
+  /** Query UI can attach after construction; its analysis shares this client's context, process and lifecycle. */
+  attachQueries(language: QueryLanguage): void {
+    this.queryLanguage = language;
+    this.subscriptions.push(this.queryLanguage);
   }
 
   /** Reuse the metadata watcher's immediate observation; the upstream server owns incremental XML/BSL indexing. */
@@ -296,7 +305,7 @@ export class LanguageService implements vscode.Disposable {
         || prepared.path !== lease.path || prepared.context !== context.name || lease.context !== context.name
         || prepared.fingerprint !== lease.fingerprint || prepared.body !== lease.body || prepared.token !== lease.token) throw new ExplorerError("obsolete");
       const middleware = this.readingMiddleware(revision, signal);
-      session.progress = new LanguageProgress(() => this.current(revision, signal));
+      session.progress = new LanguageProgress(() => this.current(revision, signal), () => this.queryLanguage?.changed());
       middleware.handleWorkDoneProgress = session.progress.handle;
       const client = new LanguageClient("eska-bsl", "BSL Analyzer (ESKA Explorer)", async () => {
         if (!this.current(revision, signal)) throw new ExplorerError("obsolete");
@@ -314,6 +323,8 @@ export class LanguageService implements vscode.Disposable {
         middleware,
       });
       session.client = client;
+      session.documents = new LanguageDocuments((method, params) => client.sendNotification(method, params),
+        uri => vscode.workspace.textDocuments.find(document => document.uri.toString() === uri && !document.isClosed));
       session.edits = new LanguageEdits(client, context, this.support, () => this.accepts(revision, signal), this.log, () => this.modelRevision);
       Object.assign(middleware, session.edits.middleware());
       const watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(vscode.Uri.file(context.root), "bsl-analyzer.toml"));
@@ -342,6 +353,11 @@ export class LanguageService implements vscode.Disposable {
       await this.context.workspaceState.update(this.selectionKey(state), context.name ?? undefined);
       if (!this.current(revision, signal)) return;
       started = true;
+      this.queryLanguage?.attach({ client, documents: session.documents, limited: context.limited, valid: () => this.accepts(revision, signal), epoch: () => this.modelRevision,
+        indexing: () => session.progress?.busy === true, contains: path => context.sources.some(source => {
+          const local = relative(source.source, path);
+          return local === "" || (!isAbsolute(local) && local !== ".." && !local.startsWith(`..${sep}`));
+        }) });
       this.tooling.analyzerState("ready", context.limited ? this.text("languageLimited", context.name ?? basename(context.root)) : context.name ?? basename(context.root));
       this.log(JSON.stringify({ event: "language_ready", pid: session.owner?.child.pid, root: context.root, application: context.name,
         fingerprint: lease.fingerprint, capabilities: client.initializeResult.capabilities }));
@@ -355,23 +371,31 @@ export class LanguageService implements vscode.Disposable {
     /** The generic client middleware expects a protocol cancellation, which it handles without an error notification. */
     const cancelled = () => new ResponseError(LSPErrorCodes.RequestCancelled, "request_cancelled");
     const read = async <T>(document: vscode.TextDocument, token: vscode.CancellationToken, action: () => vscode.ProviderResult<T>): Promise<T | undefined> => {
-      const version = document.version, model = this.modelRevision;
-      if (!this.accepts(revision, signal) || token.isCancellationRequested) return undefined;
+      const version = document.version, model = this.modelRevision, documents = this.session?.documents, languageEpoch = documents?.epoch;
+      if (!this.accepts(revision, signal) || token.isCancellationRequested || documents?.projected(document.uri.toString())) return undefined;
       const value = await action();
-      return this.accepts(revision, signal) && model === this.modelRevision && !document.isClosed && document.version === version && !token.isCancellationRequested ? value ?? undefined : undefined;
+      return this.accepts(revision, signal) && model === this.modelRevision && languageEpoch === documents?.epoch
+        && !document.isClosed && document.version === version && !token.isCancellationRequested ? value ?? undefined : undefined;
     };
     return {
+      sendNotification: (type, next, params) => {
+        const documents = this.session?.documents, method = typeof type === "string" ? type : type.method;
+        return documents ? documents.notification(method, params, value => next(type, value as typeof params)) : next(type, params);
+      },
       sendRequest: async (type, params, token, next) => {
         const model = this.modelRevision;
         const uri = isRecord(params) && isRecord(params.textDocument) ? params.textDocument.uri : undefined;
         const document = typeof uri === "string" ? vscode.workspace.textDocuments.find(value => value.uri.toString() === uri) : undefined;
         const version = document?.version;
+        const documents = this.session?.documents, internal = this.queryLanguage?.owns(params);
+        const languageEpoch = documents?.epoch;
+        if (!internal && typeof uri === "string" && documents?.projected(uri)) throw cancelled();
         if (!this.accepts(revision, signal) || token?.isCancellationRequested) throw cancelled();
         const cancellation = new vscode.CancellationTokenSource();
         const subscription = token?.onCancellationRequested(() => cancellation.cancel());
         this.reading.add(cancellation);
         const method = typeof type === "string" ? type : type.method;
-        const key = document && SHARED_READS.has(method) ? JSON.stringify([method, model, version, params]) : undefined;
+        const key = document && SHARED_READS.has(method) ? JSON.stringify([method, model, languageEpoch, version, params]) : undefined;
         let readers: InFlightReads | undefined;
         if (key && document) {
           readers = shared.get(document);
@@ -384,12 +408,21 @@ export class LanguageService implements vscode.Disposable {
           /** Shared callers use a common upstream token while keeping individual freshness checks. */
           const send = (requestToken: vscode.CancellationToken) => {
             if (requestToken.isCancellationRequested || !this.accepts(revision, signal)
-              || model !== this.modelRevision || document?.isClosed || document?.version !== version) throw cancelled();
+              || model !== this.modelRevision || languageEpoch !== documents?.epoch || document?.isClosed || document?.version !== version) throw cancelled();
             return next(type, params, requestToken);
           };
+          if (typeof uri === "string") await documents?.settled(uri);
+          if (!internal && typeof uri === "string" && documents?.projected(uri)) throw cancelled();
           const value = await (key && readers ? readers.read(key, cancellation.token, send) : send(cancellation.token));
-          if (!this.accepts(revision, signal) || model !== this.modelRevision || token?.isCancellationRequested
+          if (!this.accepts(revision, signal) || model !== this.modelRevision || languageEpoch !== documents?.epoch || token?.isCancellationRequested
             || document?.isClosed || document?.version !== version) throw cancelled();
+          if (!internal && ["textDocument/definition", "textDocument/typeDefinition", "textDocument/references", "textDocument/implementation"].includes(method)
+            && this.queryLanguage) {
+            const mapped = await this.queryLanguage.rewriteLocations(value);
+            if (!this.accepts(revision, signal) || model !== this.modelRevision || languageEpoch !== documents?.epoch
+              || token?.isCancellationRequested || document?.isClosed || document?.version !== version) throw cancelled();
+            return mapped as typeof value;
+          }
           return value;
         } finally {
           this.reading.delete(cancellation); subscription?.dispose(); cancellation.dispose();
@@ -405,6 +438,7 @@ export class LanguageService implements vscode.Disposable {
       provideDocumentSemanticTokens: (doc, token, next) => read(doc, token, () => next(doc, token)),
       handleDiagnostics: (uri, values, next) => {
         if (!this.current(revision, signal)) return;
+        if (this.session?.documents?.poisoned(uri.toString())) return;
         if (this.configurationPending) {
           this.bufferDiagnostics(uri, () => next(uri, values), () => this.accepts(revision, signal));
         } else next(uri, values);
@@ -416,12 +450,14 @@ export class LanguageService implements vscode.Disposable {
   private invalidateModel(): void {
     ++this.modelRevision;
     for (const request of this.reading) request.cancel();
+    this.queryLanguage?.changed();
   }
 
   /** Release resources in lease order even if the protocol peer ignores its normal shutdown request. */
   private async cleanup(): Promise<void> {
     const session = this.session;
     if (!session) return;
+    await this.queryLanguage?.detach();
     session.configurationWatcher?.dispose();
     session.progress?.dispose();
     for (const observer of session.observers) observer.dispose();

@@ -24,6 +24,8 @@ try {
   if (["query-bsl-host.cjs", "query-bsl-restore-host.cjs", "query-bsl-windows-host.cjs"].includes(basename(suite))) {
     await writeFile(fixture.module, '\ufeff// owner 😀\r\nQ = "SELECT 1\r\n|AS Value";\r\nOther = 42;\r\nSecond = "SELECT 9";\r\nComputed = "SELECT " + "1";\r\n');
   }
+  if (basename(suite) === "query-language-context-host.cjs") fixture.applications = await (await import("./query-language-fixture.mjs")).createQueryLanguageContexts(fixture);
+  if (basename(suite) === "query-language-host.cjs") fixture.languageSource = await (await import("./query-language-fixture.mjs")).createQueryLanguageSource(fixture);
   // These scenarios exercise language lifecycle, not concurrent mutation of XML during workspace/open.
   if (["language-host.cjs", "language-cancellation-host.cjs"].includes(basename(suite))) {
     fixture.languageSource = await (await import("./language-fixture.mjs")).createLanguageSource(fixture);

@@ -5,6 +5,28 @@ import { invalid, isByteRange, isPosition, isSnapshot, parseQueryValue,
 
 /** Independently verify source coordinates and output bytes before a plan reaches WorkspaceEdit. */
 export function parsePlan(value: unknown, original: string, snapshot: string, identity: QueryIdentity, limits: QueryCapabilities): QueryPlan {
+  const { output } = checkedTextPlan(value, original, snapshot, limits);
+  if (!isRecord(value)) invalid();
+  const projected = parseQueryValue(value.projectedQuery, Buffer.byteLength(output), limits);
+  // A BSL range can move in the projection, but must not replace the session's original identity.
+  if (projected.identity.kind !== identity.kind || (identity.kind === "dataSet"
+    && (projected.identity.kind !== "dataSet" || JSON.stringify(projected.identity.path) !== JSON.stringify(identity.path)))
+    || (identity.kind === "dynamicList" && (projected.identity.kind !== "dynamicList"
+      || projected.identity.id !== identity.id || projected.identity.name !== identity.name))) invalid();
+  return value as unknown as QueryPlan;
+}
+
+export type QueryTextPlan = Omit<QueryPlan, "projectedQuery">;
+type TextLimits = Pick<QueryCapabilities, "maxMappings" | "maxSnapshotBytes">;
+
+/** Draft plans use the same complete byte/UTF-16/output checks as source plans, without a fabricated source identity. */
+export function parseDraftPlan(value: unknown, original: string, snapshot: string, limits: TextLimits): QueryTextPlan {
+  if (!isRecord(value) || value.inputSnapshot !== snapshot) invalid();
+  return checkedTextPlan(value, original, snapshot, limits).plan;
+}
+
+/** Validate native edit coordinates once for every consumer of a backend text plan. */
+function checkedTextPlan(value: unknown, original: string, snapshot: string, limits: TextLimits): { plan: QueryTextPlan; output: string } {
   const bytes = Buffer.from(original, "utf8");
   if (!isRecord(value) || typeof value.noOp !== "boolean" || !isSnapshot(value.outputSnapshot)
     || !Array.isArray(value.replacements) || value.replacements.length > limits.maxMappings
@@ -29,13 +51,7 @@ export function parsePlan(value: unknown, original: string, snapshot: string, id
   const output = Buffer.concat(parts).toString("utf8");
   if (createHash("sha256").update(output, "utf8").digest("hex") !== value.outputSnapshot
     || (value.noOp && value.outputSnapshot !== snapshot)) invalid();
-  const projected = parseQueryValue(value.projectedQuery, Buffer.byteLength(output), limits);
-  // A BSL range can move in the projection, but must not replace the session's original identity.
-  if (projected.identity.kind !== identity.kind || (identity.kind === "dataSet"
-    && (projected.identity.kind !== "dataSet" || JSON.stringify(projected.identity.path) !== JSON.stringify(identity.path)))
-    || (identity.kind === "dynamicList" && (projected.identity.kind !== "dynamicList"
-      || projected.identity.id !== identity.id || projected.identity.name !== identity.name))) invalid();
-  return value as unknown as QueryPlan;
+  return { plan: value as unknown as QueryTextPlan, output };
 }
 
 /** Walk sorted boundaries once, rejecting UTF-8 and CRLF interiors without quadratic prefix scans. */

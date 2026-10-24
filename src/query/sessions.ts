@@ -1,5 +1,6 @@
 import { ExplorerError, isRecord, isToken } from "../protocol.js";
 import { querySnapshot, type QueryDocument } from "./client.js";
+import { QueryLanguageProjection } from "./projections.js";
 import { parsePlan } from "./plan.js";
 import { invalid, type CommentDecision, type QueryCapabilities, type QueryIdentity } from "./protocol.js";
 import { QueryRecovery } from "./recovery.js";
@@ -18,6 +19,9 @@ export class QuerySessions {
     if (!endpoint.sessions) throw new ExplorerError("incompatible");
     this.transport = endpoint.sessions;
   }
+
+  /** The language adapter can use only an explicitly negotiated immutable projection contract. */
+  get projectionLimits() { return this.endpoint.sessions?.capabilities.projections; }
 
   /** ESKA publishes the initial owner/base/draft and consumes the transient checked document handle. */
   async open(document: QueryDocument, id: string, query: QueryIdentity,
@@ -44,7 +48,7 @@ export class QuerySessions {
     const context = this.context();
     const value = await this.transport.request(method, { ...context, ...params });
     if (!isRecord(value)) invalid();
-    if (method !== "query/sessionClose" && method !== "query/sessionGet"
+    if (!["query/sessionClose", "query/sessionGet", "query/projectionRead", "query/projectionMap", "query/projectionEdits", "query/projectionClose"].includes(method)
       && (value.sessionId !== context.sessionId || value.projectId !== context.projectId || !isToken(value.generation)
         || (!["query/sessionApplied", "query/sessionAbort"].includes(method) && value.generation !== context.generation))) invalid();
     return value;
@@ -69,6 +73,23 @@ export class QuerySourceSession {
 
   /** Native input is transported as an independent draft, never as a replacement source binding. */
   get record(): ReturnType<QueryRecovery["record"]> { return this.client.recovery.record(this.current.id); }
+
+  /** A language view is allocated from the acknowledged draft without issuing a source application intent. */
+  async projection(owner: QueryOwnerFacts): Promise<QueryLanguageProjection> {
+    const limits = this.client.projectionLimits;
+    if (!limits) throw new ExplorerError("incompatible");
+    const result = await this.client.recovery.withCheckpoint(this.current.id, async storeId => {
+      const current = await this.call("query/sessionGet", storeId, {});
+      this.current = current;
+      const draft = this.record.draft.replaceAll("\r\n", "\n").replaceAll("\r", "\n");
+      const value = await this.client.request("query/projectionOpen", { querySessionId: current.querySessionId,
+        revision: current.revision, owner });
+      const projection = await QueryLanguageProjection.capture((method, params) => this.client.request(method, params), value, limits,
+        { owner, source: this.record.source, draft, revision: current.revision });
+      return { record: current.record, projection };
+    });
+    return result.projection;
+  }
 
   /** The core owns explicit recovery and source rebinding, including an already applied durable intent. */
   async resume(owner: QueryOwnerFacts): Promise<void> {

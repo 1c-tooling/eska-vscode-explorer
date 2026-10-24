@@ -16,6 +16,7 @@ import type { QueryHeader, QueryIdentity } from "./protocol.js";
 import type { RecoveryEndpoint } from "./recovery-protocol.js";
 import { QuerySessions, type QuerySourceSession } from "./sessions.js";
 import type { QueryOwnerFacts } from "./session-protocol.js";
+import type { QueryLanguageProjection } from "./projections.js";
 
 export const QUERY_SCHEME = "eska-query";
 interface Session {
@@ -35,6 +36,8 @@ interface Session {
 export class QueryTabs implements vscode.FileSystemProvider {
   private readonly events = new vscode.EventEmitter<vscode.FileChangeEvent[]>();
   readonly onDidChangeFile = this.events.event;
+  private readonly languageEvents = new vscode.EventEmitter<vscode.Uri | undefined>();
+  readonly onDidChangeLanguage = this.languageEvents.event;
   private readonly sessions = new Map<string, Session>();
   private readonly removals = new Set<string>();
   private readonly gates = new Map<string, Promise<unknown>>();
@@ -60,6 +63,7 @@ export class QueryTabs implements vscode.FileSystemProvider {
         if (session && !this.isOwnerSnapshot(event.document.uri) && !this.disposed) {
           session.record = { ...session.record, draft: canonical(event.document.getText()) };
           this.persist(session);
+          this.languageEvents.fire(event.document.uri);
         }
       }), vscode.workspace.onDidOpenTextDocument(document => {
         if (document.uri.scheme === QUERY_SCHEME) void this.restore(document).catch(error => this.failure(error));
@@ -176,7 +180,7 @@ export class QueryTabs implements vscode.FileSystemProvider {
       session.resumed = false;
       await this.closeSource(session).catch(() => {});
       throw error;
-    } finally { if (session.saving === saving) delete session.saving; }
+    } finally { if (session.saving === saving) delete session.saving; this.languageEvents.fire(this.uri(session.record)); }
     // Input arriving during the receipt remains a new draft on the acknowledged owner.
     if (session.record.draft === session.record.base) await this.finishBsl(session, false);
   }
@@ -211,7 +215,36 @@ export class QueryTabs implements vscode.FileSystemProvider {
   }
 
   /** A connection replacement cannot reuse an earlier owner's authority. Draft text remains available. */
-  stale(): void { for (const session of this.sessions.values()) session.resumed = false; }
+  stale(): void { for (const session of this.sessions.values()) session.resumed = false; this.languageEvents.fire(undefined); }
+
+  /** Native language providers present the backend's actual support and explicit resume state. */
+  languageState(document: vscode.TextDocument): "bsl" | "basic" | "backend" | "paused" | undefined {
+    const session = this.session(document.uri);
+    if (!session || this.isOwnerSnapshot(document.uri)) return undefined;
+    if (session.record.identity.kind !== "bslLiteral") return "basic";
+    if (this.recoveryAvailable && !this.recoveryEndpoint?.sessions?.capabilities.projections) return "backend";
+    return !this.disposed && this.recoveryAvailable
+      && session.resumed && !session.pending && !session.saving && !!session.source ? "bsl" : "paused";
+  }
+
+  /** Only ESKA constructs the immutable language input and checks its current native owner facts. */
+  async languageProjection(document: vscode.TextDocument): Promise<{ owner: vscode.TextDocument; projection: QueryLanguageProjection }> {
+    await this.ready;
+    const tree = this.currentTree(), session = this.session(document.uri), version = document.version;
+    if (!tree || !session || document.isClosed || this.languageState(document) !== "bsl") throw new ExplorerError("obsolete");
+    const draft = canonical(document.getText());
+    await this.requiredRecovery().saveDraft(session.record.id, draft);
+    const owner = await this.owner(session, tree), facts = this.ownerFacts(owner.document, owner.userReadOnly);
+    const source = session.source;
+    if (!source || this.languageState(document) !== "bsl") throw new ExplorerError("obsolete");
+    const projection = await source.projection(facts);
+    if (this.disposed || tree !== this.currentTree() || session.source !== source || this.languageState(document) !== "bsl"
+      || document.isClosed || document.version !== version || canonical(document.getText()) !== projection.draft
+      || owner.document.isClosed || String(owner.document.version) !== facts.version || querySnapshot(owner.document.getText()) !== facts.snapshot) {
+      await projection.close().catch(() => {}); throw new ExplorerError("obsolete");
+    }
+    return { owner: owner.document, projection };
+  }
 
   /** Expose the retained dirty-owner snapshot for review without making it a project source. */
   async compare(uri = vscode.window.activeTextEditor?.document.uri): Promise<void> {
@@ -264,7 +297,7 @@ export class QueryTabs implements vscode.FileSystemProvider {
       await this.closeSource(session).catch(() => {});
       this.failure(error);
       throw vscode.FileSystemError.Unavailable(this.text("querySaveFailed"));
-    } finally { if (session.saving === saving) delete session.saving; }
+    } finally { if (session.saving === saving) delete session.saving; this.languageEvents.fire(this.uri(session.record)); }
   }
 
   /** Session files are flat and cannot be moved into project sources by filesystem mutations. */
@@ -293,6 +326,7 @@ export class QueryTabs implements vscode.FileSystemProvider {
     } finally {
       for (const subscription of this.subscriptions) subscription.dispose();
       this.events.dispose();
+      this.languageEvents.dispose();
     }
   }
 
@@ -566,6 +600,7 @@ export class QueryTabs implements vscode.FileSystemProvider {
     session.record = source.record;
     session.resumed = source.header.resumed;
     session.pending = source.header.applyPending;
+    this.languageEvents.fire(this.uri(session.record));
     if (saved) session.mtime++;
     if (oldOwner !== session.record.ownerText) {
       session.ownerMtime = (session.ownerMtime ?? session.mtime) + 1;
@@ -587,6 +622,7 @@ export class QueryTabs implements vscode.FileSystemProvider {
     const source = session.source;
     delete session.source;
     delete session.endpoint;
+    this.languageEvents.fire(this.uri(session.record));
     await source?.close();
   }
 

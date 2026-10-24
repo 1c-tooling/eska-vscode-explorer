@@ -7,6 +7,7 @@ import { BackendSetup } from "./backend-setup.js";
 import { ToolingSetup } from "./tooling/setup.js";
 import { ToolFailure } from "./tooling/contracts.js";
 import { LanguageService } from "./language/service.js";
+import { QueryLanguage } from "./query/language.js";
 import { GitDecorations } from "./decorations.js";
 import { revealFile, relativeFile } from "./reveal.js";
 import { iconName } from "./icons.js";
@@ -120,6 +121,7 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
     this.disposables.push(this.language);
     this.queries = new QueryTabs(context, this.connection, () => this.tree, () => this.language.selectedApplication,
       entry => { if (!this.disposed) this.changed.fire(entry); }, value => this.output.warn(value));
+    this.language.attachQueries(new QueryLanguage(this.queries, value => this.output.warn(value)));
     this.setup = new BackendSetup(context, (text, level) => { if (!this.disposed) this.output[level ?? "info"](text); },
       () => this.connection.disconnect(), () => this.connect(false));
     this.disposables.push(this.setup);

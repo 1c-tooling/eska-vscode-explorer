@@ -1,6 +1,14 @@
 import type { FailureCode } from "./protocol.js";
 
 const en = {
+  queryAnalysisBasic: "Query: syntax highlighting; XML context analysis is unavailable",
+  queryAnalysisPaused: "Query analysis paused: check the owner, resume and language service",
+  queryAnalysisIndexing: "Query: analyzer index is building",
+  queryAnalysisReady: "Query: analysis in the BSL module context",
+  queryAnalysisUnavailable: "Query: diagnostic report is unavailable",
+  queryAnalysisCoverage: "Completion: metadata fields, aliases and temporary tables. Query parameter completion and XML owner context are currently unavailable.",
+  queryAnalysisBackend: "Query context analysis requires eska-project Metadata API 1.20",
+  queryAnalysisLimited: "Query: limited standalone BSL context",
   protectedSourceBackend: "Protected views require Metadata API 1.17; viewing without a project requires 1.18. Update eska-project and reconnect.",
   protectedSourceUnavailable: "The protected source is unavailable. Connect ESKA and open it again.",
   protectedSourceReadonly: "This is a protected ESKA view. Reopen the source from the project tree for permitted editing.",
@@ -212,6 +220,14 @@ const en = {
 } as const;
 
 const ru: Record<keyof typeof en, string> = {
+  queryAnalysisBasic: "Запрос: подсветка синтаксиса; анализ контекста XML недоступен",
+  queryAnalysisPaused: "Анализ запроса приостановлен: проверьте владельца, возобновление и языковой сервис",
+  queryAnalysisIndexing: "Запрос: строится индекс анализатора",
+  queryAnalysisReady: "Запрос: анализ в контексте BSL-модуля",
+  queryAnalysisUnavailable: "Запрос: отчёт диагностики недоступен",
+  queryAnalysisCoverage: "Подсказки: поля метаданных, псевдонимы и временные таблицы. Подсказки параметров запроса и контекст XML-владельца пока недоступны.",
+  queryAnalysisBackend: "Для контекстного анализа запроса требуется eska-project Metadata API 1.20",
+  queryAnalysisLimited: "Запрос: ограниченный контекст отдельного BSL-объекта",
   protectedSourceBackend: "Для защищённых представлений нужен Metadata API 1.17, для просмотра без проекта — 1.18. Обновите eska-project и подключитесь снова.",
   protectedSourceUnavailable: "Защищённый исходник недоступен. Подключите ESKA и откройте его снова.",
   protectedSourceReadonly: "Это защищённое представление ESKA. Для разрешённого редактирования повторно откройте исходник из дерева проекта.",

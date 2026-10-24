@@ -1,14 +1,16 @@
+import { projectionCapabilities, type ProjectionLimits, type ProjectionMethod } from "./projections.js";
 import { isRecord, isToken } from "../protocol.js";
 import { invalid, unsigned, type QueryPlan } from "./protocol.js";
 import { recoveryHeader, type RecoveryCapabilities, type RecoveryHeader } from "./recovery-protocol.js";
 
 export interface QuerySessionCapabilities {
   readonly bslEditing: boolean;
+  readonly projections?: ProjectionLimits;
   readonly maxSessions: number;
   readonly maxRetainedBytes: number;
 }
 export type QuerySessionMethod = "query/sessionOpen" | "query/sessionRestore" | "query/sessionGet"
-  | "query/sessionResume" | "query/sessionPrepare" | "query/sessionApplied" | "query/sessionAbort" | "query/sessionClose";
+  | "query/sessionResume" | "query/sessionPrepare" | "query/sessionApplied" | "query/sessionAbort" | "query/sessionClose" | ProjectionMethod;
 export interface QuerySessionTransport {
   readonly capabilities: QuerySessionCapabilities;
   request(method: QuerySessionMethod, params: Record<string, unknown>): Promise<unknown>;
@@ -52,7 +54,8 @@ export function querySessionCapabilities(hello: unknown): QuerySessionCapabiliti
   const bslEditing = value.bslEditing === true;
   if (bslEditing && (hello.apiVersion.minor < 19 || !value.sourceKinds.includes("bsl")
     || value.ownerProtection !== "protectedViewWithConflicts" || value.bslSave !== "checkpointOnly")) invalid();
-  return { bslEditing, maxSessions: Math.min(value.maxSessions, 16), maxRetainedBytes: Math.min(value.maxRetainedBytes, 33_554_432) };
+  const projections = projectionCapabilities(hello);
+  return { bslEditing, ...(projections ? { projections } : {}), maxSessions: Math.min(value.maxSessions, 16), maxRetainedBytes: Math.min(value.maxRetainedBytes, 33_554_432) };
 }
 
 /** Validate transport shape only; ESKA decides source ownership, permissions and lifecycle transitions. */
