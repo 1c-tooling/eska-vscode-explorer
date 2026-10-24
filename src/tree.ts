@@ -151,6 +151,33 @@ export class MetadataTree {
     return entry.node.parent ? entry.project.nodes.get(nodeKey(entry.node.parent)) : undefined;
   }
 
+  /** Accept a complete backend ancestry without loading sibling lists; partial links still participate in pruning. */
+  acceptAncestry(project: ProjectTree, values: unknown): TreeEntry {
+    if (this.disposed) throw new ExplorerError("obsolete");
+    if (!Array.isArray(values) || !values.length || values.length > 128) throw new ExplorerError("protocolInvalid");
+    const nodes = values.map(parseNode);
+    const keys = new Set<string>();
+    for (const [index, node] of nodes.entries()) {
+      const key = nodeKey(node.id), previous = nodes[index - 1];
+      if (keys.has(key) || (previous ? !node.parent || nodeKey(node.parent) !== nodeKey(previous.id)
+        : node.parent !== null || key !== nodeKey(project.info.root))) throw new ExplorerError("protocolInvalid");
+      keys.add(key);
+    }
+    let parent: TreeEntry | undefined;
+    for (const node of nodes) {
+      const entry = this.upsert(project, node);
+      if (parent && !parent.previousChildren.includes(entry)) {
+        // This is an incomplete child list until metadata/children supplies all siblings.
+        parent.children = undefined;
+        parent.previousChildren.push(entry);
+      }
+      parent = entry;
+    }
+    project.root = project.nodes.get(nodeKey(project.info.root));
+    project.rootDirty = false;
+    return parent!;
+  }
+
   /** Read requests may retry after an intervening change, but never loop indefinitely. */
   async request(project: ProjectTree, method: string, params: Record<string, unknown> = {}, signal?: AbortSignal): Promise<Record<string, unknown>> {
     const mutation = method === "metadata/updateProperty" || method === "metadata/undoProperty" || method === "metadata/renameApply";
