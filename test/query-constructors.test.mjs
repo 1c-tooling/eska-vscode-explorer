@@ -9,7 +9,7 @@ import { revealFile } from "../out/reveal.js";
 import { QueryClient, querySnapshot } from "../out/query/client.js";
 import { QueryRecovery } from "../out/query/recovery.js";
 import { QuerySessions } from "../out/query/sessions.js";
-import { BASE_CLAUSES as CLAUSES, CLAUSES as ADVANCED_CLAUSES, QueryConstructor, constructorCapabilities, constructorModel } from "../out/query/constructors.js";
+import { BASE_CLAUSES as CLAUSES, CLAUSES as ADVANCED_CLAUSES, PACKAGE_CLAUSES, QueryConstructor, constructorCapabilities, constructorModel } from "../out/query/constructors.js";
 import { querySessionCapabilities } from "../out/query/session-protocol.js";
 import { createTreeProject } from "./fixture.mjs";
 import { addQueryRegister } from "./query-advanced-fixture.mjs";
@@ -17,6 +17,16 @@ import { addQueryRegister } from "./query-advanced-fixture.mjs";
 const executable = process.env.ESKA_TEST_BINARY, limits = { maxExpression: 16384, maxModel: 33554432 };
 const capability = { schemaVersion: 1, writesOwner: false, writesDraft: true, explicitFinish: true, exclusiveDraft: true,
   lossless: true, nativeDraftPlan: true, sourceCommentPositions: true, sharedQueryBudget: true, maxExpressionBytes: 16384, maxModelBytes: 33554432, clauses: [...CLAUSES] };
+
+/** Package/table shape additions are accepted only as a complete explicit minor-26 capability. */
+test("package constructor capabilities require coherent negotiation and clause vocabulary", () => {
+  const value = { ...capability, visualExpressions: true, metadataCatalog: true, virtualTables: true, nestedQueries: true, unions: true, totals: true,
+    packages: true, temporaryTables: true, clauses: [...PACKAGE_CLAUSES] };
+  assert.equal(constructorCapabilities({ apiVersion: { major: 1, minor: 26 }, capabilities: { queryConstructor: value } }).packages, true);
+  for (const [minor, change] of [[25, {}], [26, { temporaryTables: false }], [26, { unions: undefined }], [26, { clauses: [...ADVANCED_CLAUSES] }]]) {
+    assert.throws(() => constructorCapabilities({ apiVersion: { major: 1, minor }, capabilities: { queryConstructor: { ...value, ...change } } }), { code: "protocolInvalid" });
+  }
+});
 
 /** New clause identifiers and domain intentions require explicit minor-23 negotiation with visual support. */
 test("advanced constructor capabilities reject partial or older negotiation", () => {
@@ -98,6 +108,31 @@ function apply(text, plan) {
 }
 
 for (const locale of ["ru-RU", "en-US"]) {
+  test(`portable package model resolves, renames and guards temporary tables (${locale})`, { skip: !executable }, async t => {
+    const f = await fixture(t, locale), disk = await readFile(f.files.module), original = "SELECT 1 AS Value";
+    await f.store.saveDraft(f.source.record.id, original);
+    const core = await f.source.openConstructor(); assert.equal(core.limits.packages, true);
+    await core.action({ kind: "setInto", statement: 0, name: "Temp" });
+    await core.action({ kind: "append", statement: 0, clause: "index", text: "Value" });
+    await core.action({ kind: "addStatement", statement: 0, operation: "select", name: null });
+    assert.equal(core.model.focus, 1);
+    const page = await core.catalog({ atStatement: 1 }); assert.equal(page.temporaryTables[0].name, "Temp");
+    await core.action({ kind: "compose", statement: 1, selection: null, expression: { kind: "source", table: "Temp", alias: "T" } });
+    await core.action({ kind: "compose", statement: 1, selection: { statement: 1, clause: 0, item: 0 }, expression: { kind: "field", expression: "T.Value", alias: "Value", aggregate: null } });
+    const source = core.model.statements[1].sources[0];
+    const fields = await core.catalog({ source: { statement: 1, clause: source.clause, item: source.item }, qualifier: "T" });
+    assert.deepEqual(fields.fields, [{ russian: "T.Value", english: "T.Value" }]);
+    await core.action({ kind: "setInto", statement: 0, name: "Renamed" });
+    assert.ok(core.model.text.includes("FROM Renamed AS T"));
+    const before = structuredClone(core.model);
+    await assert.rejects(core.action({ kind: "removeStatement", statement: 0 }), error => error.details?.reason === "constructor_invalid_expression");
+    assert.deepEqual(core.model, before);
+    await core.action({ kind: "addStatement", statement: 1, operation: "destroy", name: "Renamed" });
+    assert.equal(core.model.statements[2].package.operation, "destroy");
+    assert.deepEqual(core.model.issues, []);
+    assert.equal(f.source.record.draft, original); assert.deepEqual(await readFile(f.files.module), disk);
+    await core.cancel(); assert.equal(f.source.record.draft, original);
+  });
   test(`portable advanced constructor owns virtual arguments, nested projections, union columns and totals (${locale})`, { skip: !executable }, async t => {
     const f = await fixture(t, locale), before = f.source.record.draft, disk = await readFile(f.files.module);
     const core = await f.source.openConstructor();

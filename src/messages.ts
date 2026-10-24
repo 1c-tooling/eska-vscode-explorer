@@ -1,6 +1,15 @@
 import type { FailureCode } from "./protocol.js";
 
 const en = {
+  constructorPackages: "Package",
+  constructorTemporaryTable: "Temporary table name",
+  constructorDestination: "Save into temporary table (empty for a result)",
+  constructorSetDestination: "Set destination",
+  constructorAddStatement: "Add query",
+  constructorDestroyTable: "Destroy temporary table",
+  constructorPackageIssue: "Invalid temporary table dependency",
+  constructorIndex: "Index fields",
+  constructorCategoryTemporaryTable: "Temporary tables",
   constructorUnions: "Unions and aliases",
   constructorTotals: "Totals",
   constructorTotalGroups: "Total groups",
@@ -372,6 +381,15 @@ const en = {
 } as const;
 
 const ru: Record<keyof typeof en, string> = {
+  constructorPackages: "Пакет",
+  constructorTemporaryTable: "Имя временной таблицы",
+  constructorDestination: "Поместить в таблицу (пусто — результат запроса)",
+  constructorSetDestination: "Задать назначение",
+  constructorAddStatement: "Добавить запрос",
+  constructorDestroyTable: "Уничтожить временную таблицу",
+  constructorPackageIssue: "Нарушена зависимость временной таблицы",
+  constructorIndex: "Поля индекса",
+  constructorCategoryTemporaryTable: "Временные таблицы",
   constructorUnions: "Объединения и псевдонимы",
   constructorTotals: "Итоги",
   constructorTotalGroups: "Группировки итогов",

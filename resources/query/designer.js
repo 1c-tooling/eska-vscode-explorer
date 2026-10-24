@@ -19,7 +19,7 @@
   /** Selection is presentation state; the model and its indices come exclusively from ESKA. */
   function statement(kind) {
     const owner = state?.model.statements[selected];
-    if (["order", "totals", "totalGroups"].includes(kind) && owner?.scope !== undefined) return state.model.statements[state.model.scopes[owner.scope].result];
+    if (["order", "totals", "totalGroups", "index"].includes(kind) && owner?.scope !== undefined) return state.model.statements[state.model.scopes[owner.scope].result];
     return owner;
   }
 
@@ -57,6 +57,7 @@
 
   /** Empty forms contain values only; their corresponding query syntax is never built in the webview. */
   function blank(kind, expression = chosenField) {
+    if (kind === "index") return undefined;
     if (kind === "sources") return { kind: "source", table: "", alias: "" };
     if (kind === "joins") return { kind: "join", table: "", alias: "", join: "left", left: expression, comparison: "equal", right: "" };
     if (kind === "conditions") return { kind: "condition", left: expression, comparison: "equal", right: "" };
@@ -123,7 +124,7 @@
     if (!state.visual) { node.append(element("p", l.metadataUnavailable, "notice")); return node; }
     if (state.metadata.failed) node.append(element("p", l.metadataFailed, "error"));
     const catalog = state.metadata.catalog, groups = new Map();
-    for (const table of catalog?.tables ?? []) {
+    for (const table of [...catalog?.tables ?? [], ...(catalog?.temporaryTables ?? []).map(table => ({ ...table, category: "TemporaryTable", russian: table.name, english: table.name, alias: table.name }))]) {
       if (!groups.has(table.category)) groups.set(table.category, []);
       groups.get(table.category).push(table);
     }
@@ -148,7 +149,7 @@
       }
       node.append(group);
     }
-    if (!catalog?.tables.length && !state.busy) node.append(element("p", l.noTables, "empty"));
+    if (!catalog?.tables.length && !catalog?.temporaryTables?.length && !state.busy) node.append(element("p", l.noTables, "empty"));
     if (catalog?.nextOffset !== null && catalog?.nextOffset !== undefined) node.append(button(l.more,
       () => api.postMessage({ type: "catalog", search, offset: catalog.nextOffset })));
     if (catalog?.limitedContext) node.append(element("p", l.limitedContext, "notice"));
@@ -222,6 +223,33 @@
     return node;
   }
 
+  /** Package controls transmit destinations and operator intentions; ESKA owns lifetimes, dependencies and syntax. */
+  function packages() {
+    const l = state.labels, node = panel(l.packages, "package-settings"), owner = statement(), permissions = owner.package;
+    if (!permissions) return node;
+    node.querySelector(".section-title").append(button(l.addStatement, () => send({ kind: "addStatement", statement: selected, operation: "select", name: null }), !permissions.add ? "unsupported" : null, "add-statement"));
+    for (const scope of state.model.scopes.filter(scope => scope.parent === null)) {
+      const value = state.model.statements[scope.branches[0]], row = element("div", undefined, "row"), controls = value.package;
+      row.append(button(`${l.statement} ${controls.position + 1}`, () => navigate(value.index)), element("pre", value.preview));
+      row.append(button(l.remove, () => send({ kind: "removeStatement", statement: value.index }), !controls.remove ? "required_item" : null, "remove-statement"));
+      for (const [key, label] of [["moveUp", "↑"], ["moveDown", "↓"]]) row.append(button(label, () => send({ kind: "moveStatement", statement: value.index, to: controls[key] }), controls[key] === null ? "unsupported" : null));
+      node.append(row);
+    }
+    if (permissions.operation === "select") {
+      const form = element("form", undefined, "temporary-destination"), value = { name: permissions.destination ?? "" };
+      input(form, l.destination, "name", value, { required: false });
+      const submit = button(l.setDestination, () => {}, !permissions.setInto ? "unsupported" : null, "set-destination"); submit.type = "submit";
+      form.addEventListener("submit", event => { event.preventDefault(); if (!state.busy && !state.paused && form.reportValidity()) send({ kind: "setInto", statement: selected, name: value.name.trim() || null }); });
+      form.append(submit); node.append(form, list("index", l.index));
+    }
+    if (permissions.operation === "destroy") node.append(list("destroy", l.destroyTable));
+    const drop = element("form", undefined, "temporary-drop"), value = { name: permissions.destination ?? state.metadata.catalog?.temporaryTables?.[0]?.name ?? "" };
+    input(drop, l.temporaryTable, "dropName", { dropName: value.name });
+    const submit = button(l.destroyTable, () => {}, !permissions.add ? "unsupported" : null, "add-destroy"); submit.type = "submit";
+    drop.addEventListener("submit", event => { event.preventDefault(); if (!state.busy && !state.paused && drop.reportValidity()) send({ kind: "addStatement", statement: selected, operation: "destroy", name: drop.querySelector("input").value }); });
+    drop.append(submit); node.append(drop); return node;
+  }
+
   /** Overall totals and ordinary groups share one backend-owned section. */
   function totals() {
     const l = state.labels, node = element("div", undefined, "total-settings"), groups = list("totalGroups", l.totalGroups);
@@ -236,7 +264,8 @@
   /** Pages group domain clauses and scopes; selecting a page never changes query text. */
   function renderPage(container) {
     const l = state.labels;
-    if (page === "tablesFields") {
+    if (page === "packages") { container.append(packages()); }
+    else if (page === "tablesFields") {
       container.classList.add("three-panes"); container.append(database(), sources(), list("fields", l.selectedFields));
     } else if (page === "joins") {
       container.classList.add("two-panes"); container.append(sourceFields("joins"), list("joins", l.joins));
@@ -383,9 +412,11 @@
     const cancel = button(l.cancel, () => api.postMessage({ type: "cancel" })); cancel.disabled = state.busy; actions.append(cancel); header.append(actions);
     selected = Math.min(state.statement ?? selected, Math.max(0, state.model.statements.length - 1));
     navigation(header); root.append(header);
+    if (statement()?.package?.operation === "destroy") page = "packages";
     if (state.paused) root.append(element("p", state.pausedText, "error"));
-    if (state.model.issues?.length) root.append(element("p", l.unionMismatch, "error"));
-    const pages = [...basePages, ...(state.features.unions ? ["unions"] : []), ...(state.features.totals ? ["totals"] : [])];
+    for (const issue of state.model.issues ?? []) root.append(element("p", issue.code === "union_field_count" ? l.unionMismatch : `${l.packageIssue}: ${issue.table}${issue.column ? `.${issue.column}` : ""}`, "error"));
+    const pages = [...basePages, ...(state.features.unions ? ["unions"] : []), ...(state.features.totals ? ["totals"] : []), ...(state.features.packages && !statement()?.nested ? ["packages"] : [])];
+    if (!pages.includes(page)) page = "tablesFields";
     const tabs = element("nav", undefined, "tabs"); tabs.setAttribute("role", "tablist");
     for (const value of pages) {
       const activate = target => { page = target; editing = undefined; render(); document.getElementById(`tab-${target}`)?.focus(); };

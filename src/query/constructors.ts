@@ -5,9 +5,10 @@ import { parseDraftPlan, type QueryTextPlan } from "./plan.js";
 
 export const BASE_CLAUSES = ["fields", "sources", "joins", "conditions", "group", "order"] as const;
 export const CLAUSES = [...BASE_CLAUSES, "totals", "totalGroups"] as const;
-export type ConstructorClauseKind = typeof CLAUSES[number];
+export const PACKAGE_CLAUSES = [...CLAUSES, "into", "destroy", "index"] as const;
+export type ConstructorClauseKind = typeof PACKAGE_CLAUSES[number];
 export type ConstructorMethod = "query/constructorOpen" | "query/constructorPlan" | "query/constructorModel" | "query/constructorAction" | "query/constructorFinish" | "query/constructorCancel" | "query/constructorCatalog";
-export interface ConstructorLimits { maxExpression: number; maxModel: number; visual?: boolean; virtualTables?: boolean; nestedQueries?: boolean; unions?: boolean; totals?: boolean }
+export interface ConstructorLimits { maxExpression: number; maxModel: number; visual?: boolean; virtualTables?: boolean; nestedQueries?: boolean; unions?: boolean; totals?: boolean; packages?: boolean }
 export interface ConstructorSelection { statement: number; clause: number; item: number }
 export type Comparison = "equal" | "notEqual" | "less" | "lessOrEqual" | "greater" | "greaterOrEqual" | "like" | "in" | "inHierarchy";
 export type Aggregate = "sum" | "count" | "minimum" | "maximum" | "average" | null;
@@ -27,14 +28,18 @@ export type VisualExpression = { kind: "source"; table: string; alias: string }
 export interface CatalogParameter { key: string; required: boolean; choices?: CatalogField[] }
 export interface CatalogTable { name: string; category: string; russian: string; english: string; alias: string; virtualTable?: string }
 export interface CatalogField { russian: string; english: string }
-export interface CatalogPage { tables: CatalogTable[]; fields: CatalogField[]; parameters?: CatalogParameter[]; nextOffset: number | null; found: boolean; limitedContext: boolean; contextFingerprint: string }
-export interface CatalogQuery { search?: string; offset?: number; limit?: number; table?: string; qualifier?: string; virtualTables?: boolean; source?: ConstructorSelection; scope?: number }
+export interface CatalogPage { tables: CatalogTable[]; fields: CatalogField[]; parameters?: CatalogParameter[]; temporaryTables?: { name: string; scope: number; statement: number }[]; nextOffset: number | null; found: boolean; limitedContext: boolean; contextFingerprint: string }
+export interface CatalogQuery { search?: string; offset?: number; limit?: number; table?: string; qualifier?: string; virtualTables?: boolean; source?: ConstructorSelection; scope?: number; atStatement?: number }
 export type ConstructorAction = { kind: "compose"; statement: number; selection: ConstructorSelection | null; expression: VisualExpression }
   | { kind: "appendFields"; statement: number; fields: string[] }
   | { kind: "append"; statement: number; clause: ConstructorClauseKind; text: string; join?: "inner" | "left" | "right" | "full" }
   | { kind: "replace"; selection: ConstructorSelection; text: string }
   | { kind: "remove"; selection: ConstructorSelection; comments?: "keep" | "discard" }
   | { kind: "move"; selection: ConstructorSelection; to: number }
+  | { kind: "setInto"; statement: number; name: string | null; comments?: "keep" | "discard" }
+  | { kind: "addStatement"; statement: number; operation: "select" | "destroy"; name: string | null }
+  | { kind: "removeStatement"; statement: number; comments?: "keep" | "discard" }
+  | { kind: "moveStatement"; statement: number; to: number }
   | { kind: "addUnion" | "setUnion"; statement: number; all: boolean } | { kind: "removeUnion"; statement: number; comments?: "keep" | "discard" };
 export interface ConstructorItem {
   index: number; range: ByteRange; preview: string; expression: string | null; comments: number; removable: boolean; movable: boolean;
@@ -48,12 +53,14 @@ export interface ConstructorStatement {
   append: { kind: ConstructorClauseKind; unavailable: string | null }[];
   russian?: boolean; sources?: ConstructorSource[];
   scope?: number; branch?: number; nested?: boolean; result?: boolean; columns?: string[];
+  package?: PackageControls;
 }
+export interface PackageControls { operation: "select" | "destroy" | null; position: number | null; first: number; destination: string | null; add: boolean; remove: boolean; setInto: boolean; moveUp: number | null; moveDown: number | null }
 export interface ConstructorSource { table: string; alias: string; clause?: number; item?: number; derived?: boolean; nestedScope?: number | null; parameters?: string[] }
 export interface ConstructorScope { index: number; range: ByteRange; parent: number | null; branches: number[]; result: number; unions: { all: boolean }[] }
 export interface ConstructorModel {
   id: string; revision: string; snapshot: string; text: string; bytes: number; writable: boolean; statements: ConstructorStatement[];
-  scopes?: ConstructorScope[]; issues?: { code: string; scope: number }[];
+  scopes?: ConstructorScope[]; issues?: { code: string; scope: number; table?: string; column?: string | null }[];
   focus?: number | null;
 }
 type Transport = (method: ConstructorMethod, params: Record<string, unknown>) => Promise<unknown>;
@@ -74,7 +81,11 @@ export function constructorCapabilities(hello: unknown): ConstructorLimits | und
     if (hello.apiVersion.minor < 23 || value[key] !== true) invalid();
     flags[key] = true;
   }
-  const clauses = flags.totals ? CLAUSES : BASE_CLAUSES;
+  if (value.packages !== undefined || value.temporaryTables !== undefined) {
+    if (hello.apiVersion.minor < 26 || value.packages !== true || value.temporaryTables !== true || !advanced.every(key => flags[key])) invalid();
+    flags.packages = true;
+  }
+  const clauses = flags.packages ? PACKAGE_CLAUSES : flags.totals ? CLAUSES : BASE_CLAUSES;
   if (value.clauses.length !== clauses.length || !value.clauses.every((kind, index) => kind === clauses[index])) invalid();
   const visual = value.visualExpressions !== undefined || value.metadataCatalog !== undefined;
   if ((Object.keys(flags).length && !visual) || (visual && (hello.apiVersion.minor < 22 || value.visualExpressions !== true || value.metadataCatalog !== true))) invalid();
@@ -89,7 +100,7 @@ export function constructorModel(raw: unknown, limits: ConstructorLimits, id?: s
     || Buffer.from(raw.text).toString() !== raw.text || typeof raw.writable !== "boolean"
     || !Array.isArray(raw.statements) || raw.statements.length > 256 || Buffer.byteLength(JSON.stringify(raw)) > limits.maxModel) invalid();
   let entries = 0;
-  const clauses = limits.totals ? CLAUSES : BASE_CLAUSES;
+  const clauses = limits.packages ? PACKAGE_CLAUSES : limits.totals ? CLAUSES : BASE_CLAUSES;
   for (const [index, statement] of raw.statements.entries()) {
     if (!isRecord(statement) || statement.index !== index || !isByteRange(statement.range, raw.bytes)
       || !reason(statement.unavailable) || typeof statement.preview !== "string" || !Array.isArray(statement.clauses)
@@ -97,6 +108,7 @@ export function constructorModel(raw: unknown, limits: ConstructorLimits, id?: s
     if (statement.russian !== undefined && (typeof statement.russian !== "boolean" || !Array.isArray(statement.sources)
       || statement.sources.length > 65_536 || !statement.sources.every(source => isRecord(source) && shortText(source.table) && shortText(source.alias)
         && (source.parameters === undefined || parameters(source.parameters))))) invalid();
+    if (limits.packages) validatePackage(statement.package, raw.statements.length);
     for (const [index, option] of statement.append.entries()) {
       if (!isRecord(option) || option.kind !== clauses[index] || !reason(option.unavailable)) invalid();
     }
@@ -146,6 +158,7 @@ export class QueryConstructor {
   /** Read one bounded metadata page from the constructor's own application; no client parses XML or constructs field paths. */
   async catalog(query: CatalogQuery): Promise<CatalogPage> {
     if (!this.limits.visual) throw new ExplorerError("incompatible");
+    if (query.atStatement !== undefined && !this.limits.packages) throw new ExplorerError("incompatible");
     const result = await this.request("query/constructorCatalog", { query });
     if (!isRecord(result) || !isRecord(result.catalog)) invalid();
     const value = result.catalog;
@@ -156,11 +169,14 @@ export class QueryConstructor {
       || value.parameters !== undefined && (!Array.isArray(value.parameters) || value.parameters.length > 16 || !value.parameters.every(parameter => isRecord(parameter)
         && shortText(parameter.key) && typeof parameter.required === "boolean" && (parameter.choices === undefined || Array.isArray(parameter.choices) && parameter.choices.length <= 32
           && parameter.choices.every(choice => isRecord(choice) && shortText(choice.russian) && shortText(choice.english)))))) invalid();
+    if (value.temporaryTables !== undefined && (!this.limits.packages || !Array.isArray(value.temporaryTables) || value.temporaryTables.length > 256
+      || !value.temporaryTables.every(table => isRecord(table) && shortText(table.name) && unsigned(table.scope) && unsigned(table.statement) && table.statement < this.current.statements.length))) invalid();
     return value as unknown as CatalogPage;
   }
 
   /** Stale indices are rejected by ESKA, including parallel actions captured before the previous reply. */
   async action(action: ConstructorAction): Promise<void> {
+    if (["setInto", "addStatement", "removeStatement", "moveStatement"].includes(action.kind) && !this.limits.packages) throw new ExplorerError("incompatible");
     const result = await this.request("query/constructorAction", { action });
     if (!isRecord(result) || result.constructorActive !== true) invalid();
     this.current = constructorModel(result.constructor, this.limits, this.current.id);
@@ -230,6 +246,14 @@ function visualExpression(value: unknown): boolean {
 
 /** Arguments stay positional and bounded; this check deliberately knows nothing about query syntax. */
 function parameters(value: unknown): boolean { return Array.isArray(value) && value.length <= 16 && value.every(shortText); }
+
+/** Package controls are permissions and target ordinals supplied by ESKA, never inferred from statement text. */
+function validatePackage(value: unknown, statements: number): void {
+  if (!isRecord(value) || ![null, "select", "destroy"].includes(value.operation as string | null)
+    || !(value.position === null || unsigned(value.position)) || !unsigned(value.first) || value.first >= statements
+    || !(value.destination === null || shortText(value.destination)) || ![value.add, value.remove, value.setInto].every(v => typeof v === "boolean")
+    || ![value.moveUp, value.moveDown].every(v => v === null || unsigned(v))) invalid();
+}
 
 /** Validate the backend's navigation graph without discovering scopes or source bindings in SQL text. */
 function validateScopes(raw: Record<string, unknown>): void {

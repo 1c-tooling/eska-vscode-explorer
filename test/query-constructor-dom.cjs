@@ -12,7 +12,13 @@ async function attach(target) {
     if (value.method === 'Runtime.executionContextDestroyed') contexts.delete(value.params.executionContextId);
     if (value.id && pending.has(value.id)) { const request = pending.get(value.id); pending.delete(value.id); clearTimeout(request.timer); value.error ? request.reject(new Error(JSON.stringify(value.error))) : request.resolve(value.result); }
   };
+  socket.onclose = () => {
+    contexts.clear();
+    for (const value of pending.values()) { clearTimeout(value.timer); value.reject(new Error('debug target closed')); }
+    pending.clear();
+  };
   const request = (method, params = {}) => new Promise((resolve, reject) => {
+    if (socket.readyState !== WebSocket.OPEN) { reject(new Error('debug target closed')); return; }
     const id = ++serial, timer = setTimeout(() => { pending.delete(id); reject(new Error(method + ' deadline')); }, 10000);
     pending.set(id, { resolve, reject, timer }); socket.send(JSON.stringify({ id, method, params }));
   });
@@ -28,7 +34,7 @@ exports.connect = async function (until) {
     const targets = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json();
     for (const target of targets) if (["page", "iframe"].includes(target.type) && target.webSocketDebuggerUrl && !connections.has(target.id)) {
       try { connections.set(target.id, await attach(target)); }
-      catch (error) { throw new Error(`${target.type} ${target.url}: ${error.message}`); }
+      catch { /* A disposed webview can remain in the target list until Chromium removes it. */ }
     }
     for (const connection of connections.values()) for (const contextId of connection.contexts) {
       const result = await connection.request('Runtime.evaluate', { contextId, expression: '!!document.getElementById("root")?.querySelector(".sections")', returnByValue: true }).catch(() => undefined);
@@ -53,7 +59,7 @@ exports.connect = async function (until) {
 exports.exercise = async function ({ explorer, view, until, locale }) {
   const client = await exports.connect(until);
   try {
-    assert.equal(await client.evaluate('document.querySelectorAll("[role=tab]").length'), 7);
+    assert.equal(await client.evaluate('document.querySelectorAll("[role=tab]").length'), 8);
     assert.equal(await client.evaluate('document.querySelector("header button").textContent'), locale === 'ru' ? 'Применить к черновику' : 'Apply to draft');
     assert.equal(await client.evaluate('document.querySelectorAll("#root img, #root script").length'), 0);
     assert.equal(await client.evaluate('globalThis.queryExecuted === true'), false);
@@ -68,6 +74,6 @@ exports.exercise = async function ({ explorer, view, until, locale }) {
     if (stand) { await fs.mkdir(stand, { recursive: true }); await client.screenshot(path.join(stand, `constructor-${locale}.png`)); }
     await client.evaluate('document.querySelectorAll("header button")[1].click()');
     await until(() => view.ending && !explorer.queryDesigner.views.size, 'DOM cancellation returned to draft');
-    return 'installed_webview_dom_seven_tabs_translated_labels_text_only_rendering_expression_submission_and_cancel';
+    return 'installed_webview_dom_eight_tabs_translated_labels_text_only_rendering_expression_submission_and_cancel';
   } finally { client.close(); }
 };

@@ -20,7 +20,7 @@ if (!isAbsolute(playground)) throw new Error("ESKA_TEST_ROOT must be absolute.")
 const root = await mkdtemp(join(playground, "explorer-host-"));
 try {
   const fixture = await createTreeProject(join(root, "project"), process.env.ESKA_HOST_PROJECT_TYPE ?? "configuration");
-  if (basename(suite) === "query-advanced-host.cjs") {
+  if (["query-advanced-host.cjs", "query-package-host.cjs"].includes(basename(suite))) {
     await (await import("./query-advanced-fixture.mjs")).addQueryRegister(fixture);
     fixture.query = await (await import("./query-fixture.mjs")).createQuerySource(fixture);
     await writeFile(fixture.module, '\ufeff// owner 😀\r\nQ = "SELECT 1\r\n|AS Value";\r\nOther = 42;\r\n');
