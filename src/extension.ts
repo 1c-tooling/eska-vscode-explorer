@@ -1,3 +1,4 @@
+import { QueryDesigner } from "./query/designer.js";
 import { SupportContexts } from "./support-contexts.js";
 import { SupportController } from "./support.js";
 import { PROTECTED_SOURCE_SCHEME, ProtectedSources } from "./protected-source.js";
@@ -59,6 +60,7 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
   private readonly setup: BackendSetup;
   private readonly tooling: ToolingSetup;
   private readonly language: LanguageService;
+  private readonly queryDesigner: QueryDesigner;
   private readonly legacyNotices = new Set<string>();
   private readonly view: vscode.TreeView<Element>;
   private readonly status = vscode.window.createStatusBarItem("eska.explorer.connection", vscode.StatusBarAlignment.Right, 0);
@@ -122,6 +124,7 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
     this.queries = new QueryTabs(context, this.connection, () => this.tree, () => this.language.selectedApplication,
       entry => { if (!this.disposed) this.changed.fire(entry); }, value => this.output.warn(value));
     this.language.attachQueries(new QueryLanguage(this.queries, value => this.output.warn(value)));
+    this.queryDesigner = new QueryDesigner(context, this.queries, value => this.output.warn(value));
     this.setup = new BackendSetup(context, (text, level) => { if (!this.disposed) this.output[level ?? "info"](text); },
       () => this.connection.disconnect(), () => this.connect(false));
     this.disposables.push(this.setup);
@@ -159,6 +162,14 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
     this.disposables.push(vscode.commands.registerCommand("eska.explorer.editBslQuery", async () => {
       const editor = vscode.window.activeTextEditor;
       try { if (!this.tree) await this.connect(false); await this.queries.showBsl(editor); }
+      catch (error) { this.queries.explain(error); }
+    }));
+    this.disposables.push(vscode.commands.registerCommand("eska.explorer.queryConstructor", async (uri?: vscode.Uri) => {
+      try { await this.queryDesigner.show(uri); }
+      catch (error) { this.queries.explain(error); }
+    }));
+    this.disposables.push(vscode.commands.registerCommand("eska.explorer.placeQueryComments", async () => {
+      try { await this.queries.placeComments(); }
       catch (error) { this.queries.explain(error); }
     }));
     this.disposables.push(vscode.commands.registerCommand("eska.explorer.applyQuery", async (uri?: vscode.Uri) => {
@@ -888,7 +899,7 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
       this.view.dispose();
       this.changed.dispose();
       const other = Promise.allSettled([this.supportContexts.stop(), this.support.shutdown(), this.setup.shutdown(), this.tooling.shutdown()]);
-      const queries = Promise.allSettled([this.queries.shutdown()]);
+      const queries = this.queryDesigner.shutdown().then(() => Promise.allSettled([this.queries.shutdown()]));
       this.stopping = (async () => {
         const language = await Promise.allSettled([this.language.shutdown()]);
         const queryResults = await queries;

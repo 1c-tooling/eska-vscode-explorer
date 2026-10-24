@@ -26,6 +26,13 @@ try {
   }
   if (basename(suite) === "query-language-context-host.cjs") fixture.applications = await (await import("./query-language-fixture.mjs")).createQueryLanguageContexts(fixture);
   if (basename(suite) === "query-language-host.cjs") fixture.languageSource = await (await import("./query-language-fixture.mjs")).createQueryLanguageSource(fixture);
+  if (basename(suite) === "query-constructor-host.cjs") {
+    fixture.query = await (await import("./query-fixture.mjs")).createQuerySource(fixture);
+    await writeFile(fixture.module, '\ufeff// owner 😀\r\nПроцедура Test()\r\nQ = "SELECT 1 AS A,\r\n|// field B 😀\r\n|2 AS B";\r\nOther = 42;\r\nКонецПроцедуры\r\n');
+    const schema = await readFile(fixture.query.schemaPath, "utf8");
+    await writeFile(fixture.query.schemaPath, schema.replace('<query><!--keep--><![CDATA[SELECT 1;\r\n// пакет 😀\r\nSELECT 77]]></query>', '<query>SELECT Lo<!--source 😀-->ng</query>'));
+
+  }
   // These scenarios exercise language lifecycle, not concurrent mutation of XML during workspace/open.
   if (["language-host.cjs", "language-cancellation-host.cjs"].includes(basename(suite))) {
     fixture.languageSource = await (await import("./language-fixture.mjs")).createLanguageSource(fixture);

@@ -1,0 +1,25 @@
+body { color: var(--vscode-foreground); background: var(--vscode-editor-background); font: var(--vscode-font-size)/1.5 var(--vscode-font-family); margin: 0; }
+main { max-width: 1200px; padding: 18px 22px 40px; margin: auto; }
+header { display: flex; gap: 8px; position: sticky; top: 0; background: var(--vscode-editor-background); padding: 10px 0; z-index: 1; }
+button, select, textarea { font: inherit; color: var(--vscode-input-foreground); background: var(--vscode-input-background); border: 1px solid var(--vscode-widget-border, transparent); border-radius: 3px; padding: 5px 9px; }
+button { cursor: pointer; }
+button:hover:not(:disabled) { background: var(--vscode-toolbar-hoverBackground); }
+button:focus-visible, select:focus-visible, textarea:focus-visible { outline: 1px solid var(--vscode-focusBorder); }
+button:disabled { opacity: .5; cursor: default; }
+button.primary { color: var(--vscode-button-foreground); background: var(--vscode-button-background); }
+select { max-width: 100%; }
+.notice, small { color: var(--vscode-descriptionForeground); }
+.error { color: var(--vscode-errorForeground); border-left: 3px solid var(--vscode-errorForeground); padding-left: 10px; }
+.sections { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr)); gap: 12px; margin: 16px 0; }
+section { border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border)); border-radius: 5px; padding: 10px 12px; }
+.section-title { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+h2 { font-size: 1em; margin: 0 0 7px; font-weight: 600; }
+.row { border-top: 1px solid var(--vscode-panel-border); padding: 8px 0; }
+pre { white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--vscode-editor-font-family); font-size: var(--vscode-editor-font-size); margin: 5px 0; }
+.controls { display: flex; flex-wrap: wrap; gap: 5px; }
+.controls button { font-size: .88em; padding: 2px 6px; }
+.expression { margin: 14px 0; border-color: var(--vscode-focusBorder); }
+textarea { display: block; box-sizing: border-box; width: 100%; resize: vertical; margin: 8px 0; }
+.expression button, .expression select { margin-right: 6px; }
+details { margin-top: 18px; border-top: 1px solid var(--vscode-panel-border); padding-top: 10px; }
+details pre { max-height: 420px; overflow: auto; }

@@ -1,3 +1,4 @@
+import { constructorCapabilities, type ConstructorLimits, type ConstructorMethod } from "./constructors.js";
 import { projectionCapabilities, type ProjectionLimits, type ProjectionMethod } from "./projections.js";
 import { isRecord, isToken } from "../protocol.js";
 import { invalid, unsigned, type QueryPlan } from "./protocol.js";
@@ -6,11 +7,12 @@ import { recoveryHeader, type RecoveryCapabilities, type RecoveryHeader } from "
 export interface QuerySessionCapabilities {
   readonly bslEditing: boolean;
   readonly projections?: ProjectionLimits;
+  readonly constructorLimits?: ConstructorLimits;
   readonly maxSessions: number;
   readonly maxRetainedBytes: number;
 }
 export type QuerySessionMethod = "query/sessionOpen" | "query/sessionRestore" | "query/sessionGet"
-  | "query/sessionResume" | "query/sessionPrepare" | "query/sessionApplied" | "query/sessionAbort" | "query/sessionClose" | ProjectionMethod;
+  | "query/sessionResume" | "query/sessionPrepare" | "query/sessionApplied" | "query/sessionAbort" | "query/sessionClose" | ProjectionMethod | ConstructorMethod | "query/sessionComments";
 export interface QuerySessionTransport {
   readonly capabilities: QuerySessionCapabilities;
   request(method: QuerySessionMethod, params: Record<string, unknown>): Promise<unknown>;
@@ -30,6 +32,7 @@ export interface QuerySessionHeader {
   resumed: boolean;
   applyPending: boolean;
   draftWritable: boolean;
+  constructorActive?: boolean;
   format: "editor" | "source";
   protection: { capturedSourceWritable: boolean; userReadOnly: boolean; ownerLock: string | null };
   record: RecoveryHeader;
@@ -55,7 +58,8 @@ export function querySessionCapabilities(hello: unknown): QuerySessionCapabiliti
   if (bslEditing && (hello.apiVersion.minor < 19 || !value.sourceKinds.includes("bsl")
     || value.ownerProtection !== "protectedViewWithConflicts" || value.bslSave !== "checkpointOnly")) invalid();
   const projections = projectionCapabilities(hello);
-  return { bslEditing, ...(projections ? { projections } : {}), maxSessions: Math.min(value.maxSessions, 16), maxRetainedBytes: Math.min(value.maxRetainedBytes, 33_554_432) };
+  const constructorLimits = constructorCapabilities(hello);
+  return { bslEditing, ...(constructorLimits ? { constructorLimits } : {}), ...(projections ? { projections } : {}), maxSessions: Math.min(value.maxSessions, 16), maxRetainedBytes: Math.min(value.maxRetainedBytes, 33_554_432) };
 }
 
 /** Validate transport shape only; ESKA decides source ownership, permissions and lifecycle transitions. */
@@ -63,6 +67,7 @@ export function querySessionHeader(value: unknown, limits: RecoveryCapabilities)
   if (!isRecord(value) || typeof value.querySessionId !== "string" || !value.querySessionId
     || typeof value.storeId !== "string" || !value.storeId || !isToken(value.revision) || value.revision === "0"
     || typeof value.resumed !== "boolean" || typeof value.applyPending !== "boolean" || typeof value.draftWritable !== "boolean"
+    || (value.constructorActive !== undefined && (typeof value.constructorActive !== "boolean" || (value.constructorActive && value.draftWritable)))
     || !["editor", "source"].includes(String(value.format)) || !isRecord(value.protection)
     || typeof value.protection.capturedSourceWritable !== "boolean" || typeof value.protection.userReadOnly !== "boolean"
     || !(value.protection.ownerLock === null || (isToken(value.protection.ownerLock) && value.protection.ownerLock !== "0"))) invalid();

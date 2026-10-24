@@ -43,5 +43,7 @@
   "selectAnalysisContext": "Выбрать приложение для анализа",
   "queryEditBsl": "Редактировать запрос отдельно",
   "queryApply": "Применить запрос к модулю",
-  "queryCancel": "Отменить редактирование запроса"
+  "queryCancel": "Отменить редактирование запроса",
+  "command.queryConstructor": "Конструктор запросов",
+  "command.placeQueryComments": "Назначить позиции исходных комментариев"
 }

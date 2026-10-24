@@ -1,3 +1,4 @@
+import { NativeQueryConstructor } from "./native-constructor.js";
 import * as vscode from "vscode";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -15,6 +16,8 @@ import { QueryRecovery, type QueryDraftRecord } from "./recovery.js";
 import type { QueryHeader, QueryIdentity } from "./protocol.js";
 import type { RecoveryEndpoint } from "./recovery-protocol.js";
 import { QuerySessions, type QuerySourceSession } from "./sessions.js";
+import type { CommentDecision } from "./protocol.js";
+import type { SourceCommentState } from "./comments.js";
 import type { QueryOwnerFacts } from "./session-protocol.js";
 import type { QueryLanguageProjection } from "./projections.js";
 
@@ -30,6 +33,8 @@ interface Session {
   ownerMtime?: number;
   ending?: boolean;
   closing?: Promise<void>;
+  design?: NativeQueryConstructor;
+  placements?: { draft: string; owner: string; decisions: CommentDecision[] };
 }
 
 /** Editable SDBL views own private drafts; only a freshly checked backend plan can change their owner. */
@@ -61,6 +66,7 @@ export class QueryTabs implements vscode.FileSystemProvider {
       vscode.workspace.onDidChangeTextDocument(event => {
         const session = this.session(event.document.uri);
         if (session && !this.isOwnerSnapshot(event.document.uri) && !this.disposed) {
+          if (session.design) { session.design.observe(event.document); this.languageEvents.fire(event.document.uri); return; }
           session.record = { ...session.record, draft: canonical(event.document.getText()) };
           this.persist(session);
           this.languageEvents.fire(event.document.uri);
@@ -224,7 +230,7 @@ export class QueryTabs implements vscode.FileSystemProvider {
     if (session.record.identity.kind !== "bslLiteral") return "basic";
     if (this.recoveryAvailable && !this.recoveryEndpoint?.sessions?.capabilities.projections) return "backend";
     return !this.disposed && this.recoveryAvailable
-      && session.resumed && !session.pending && !session.saving && !!session.source ? "bsl" : "paused";
+      && session.resumed && !session.pending && !session.saving && !!session.source && !session.source.header.constructorActive ? "bsl" : "paused";
   }
 
   /** Only ESKA constructs the immutable language input and checks its current native owner facts. */
@@ -244,6 +250,79 @@ export class QueryTabs implements vscode.FileSystemProvider {
       await projection.close().catch(() => {}); throw new ExplorerError("obsolete");
     }
     return { owner: owner.document, projection };
+  }
+
+  /** A visual adapter receives an owned native binding; all model and text operations remain in ESKA. */
+  async beginConstructor(document: vscode.TextDocument): Promise<NativeQueryConstructor> {
+    await this.ready;
+    const session = this.session(document.uri), tree = this.currentTree();
+    if (!session || !tree || this.isOwnerSnapshot(document.uri) || !session.resumed || session.design) throw new ExplorerError("obsolete");
+    if (session.saving) await session.saving;
+    await this.requiredRecovery().saveDraft(session.record.id, canonical(document.getText()));
+    const source = await this.source(session, tree);
+    let design: NativeQueryConstructor;
+    design = new NativeQueryConstructor(source, document, {
+      current: () => !this.disposed && session.design === design && session.source === source && session.endpoint === this.recoveryEndpoint && session.resumed,
+      header: () => this.accept(session, source),
+      failed: () => { session.resumed = false; void this.closeSource(session).catch(() => {}); },
+      complete: async native => {
+        if (session.design !== design) return;
+        delete session.design;
+        if (session.source === source) this.accept(session, source);
+        if (!native.isClosed) {
+          session.record = { ...session.record, draft: canonical(native.getText()) };
+          this.persist(session);
+          if (!this.disposed) await this.restore(native);
+        }
+        this.languageEvents.fire(document.uri); this.updateContext();
+      },
+    });
+    session.design = design; this.languageEvents.fire(document.uri);
+    try { await design.open(); return design; }
+    catch (error) { await design.cancel().catch(() => {}); throw error; }
+  }
+
+  /** Explicit UI choices use ESKA source anchors and core-converted native positions, never guessed XML offsets. */
+  async placeComments(document = vscode.window.activeTextEditor?.document): Promise<void> {
+    await this.ready;
+    const session = document && this.session(document.uri), tree = this.currentTree();
+    if (!document || !session || !tree || session.design || this.isOwnerSnapshot(document.uri)) return;
+    if (session.saving) await session.saving;
+    const draft = canonical(document.getText()), version = document.version;
+    await this.requiredRecovery().saveDraft(session.record.id, draft);
+    const source = await this.source(session, tree), info = await source.comments([]);
+    if (!info.comments.length) { void vscode.window.showInformationMessage(this.text("queryNoSourceComments")); return; }
+    const decisions = await this.sourceCommentChoices(source, info, document);
+    if (!decisions) return;
+    if (document.isClosed || document.version !== version || session.source !== source || canonical(document.getText()) !== draft) throw new ExplorerError("sourceChanged");
+    session.placements = { draft: querySnapshot(draft), owner: querySnapshot(session.record.ownerText), decisions };
+    void vscode.window.showInformationMessage(this.text("querySourceCommentsReady"));
+  }
+
+  /** Automatic placement remains a core decision; deletion and replacement destinations require a distinct user choice. */
+  private async sourceCommentChoices(source: QuerySourceSession, info: SourceCommentState, document: vscode.TextDocument): Promise<CommentDecision[] | undefined> {
+    const decisions: CommentDecision[] = [];
+    for (const comment of info.comments) {
+      const automatic = this.text("queryCommentAutomatic"), cursor = this.text("queryCommentCursor"), position = this.text("queryCommentPosition"), discard = this.text("queryCommentDelete");
+      const choice = await vscode.window.showQuickPick([automatic, cursor, position, discard], { title: comment.text.slice(0, 160), placeHolder: this.text("queryCommentChoice"), ignoreFocusOut: true });
+      if (!choice) return undefined;
+      if (choice === automatic) continue;
+      if (choice === discard) { decisions.push({ comment: comment.comment, queryOffset: null }); continue; }
+      const editor = vscode.window.visibleTextEditors.find(value => value.document === document);
+      let point = editor?.selection.active ?? new vscode.Position(0, 0);
+      if (choice === position) {
+        const input = await vscode.window.showInputBox({ title: this.text("queryCommentPosition"), prompt: this.text("queryCommentPositionHint"), value: `${point.line + 1}:${point.character + 1}`, ignoreFocusOut: true });
+        if (input === undefined) return undefined;
+        const parts = /^(\d+):(\d+)$/.exec(input.trim());
+        if (!parts || Number(parts[1]) < 1 || Number(parts[2]) < 1) throw new ExplorerError("requestFailed", "query_failed", { reason: "comment_position" });
+        point = new vscode.Position(Number(parts[1]) - 1, Number(parts[2]) - 1);
+      }
+      if (!document.validatePosition(point).isEqual(point)) throw new ExplorerError("requestFailed", "query_failed", { reason: "comment_position" });
+      const mapped = await source.comments([point]), offset = mapped.positions[0]?.queryOffset;
+      if (offset === undefined || offset === null || mapped.snapshot !== info.snapshot) throw new ExplorerError("requestFailed", "query_failed", { reason: "comment_position" });
+      decisions.push({ comment: comment.comment, queryOffset: offset });
+    }
+    return decisions;
   }
 
   /** Expose the retained dirty-owner snapshot for review without making it a project source. */
@@ -268,7 +347,7 @@ export class QueryTabs implements vscode.FileSystemProvider {
     await this.ready;
     const session = this.required(uri);
     return Buffer.from(this.isOwnerSnapshot(uri) ? session.record.ownerText
-      : session.record.identity.kind === "bslLiteral" ? session.record.draft : session.record.base);
+      : session.design ? session.design.before : session.record.identity.kind === "bslLiteral" ? session.record.draft : session.record.base);
   }
 
   /** Provider metadata never delegates a writable native source URI. */
@@ -278,14 +357,14 @@ export class QueryTabs implements vscode.FileSystemProvider {
     return { type: vscode.FileType.File, ctime: 1, mtime: this.isOwnerSnapshot(uri) ? session.ownerMtime ?? session.mtime : session.mtime,
       size: Buffer.byteLength(this.isOwnerSnapshot(uri) ? session.record.ownerText
         : session.record.identity.kind === "bslLiteral" ? session.record.draft : session.record.base),
-      ...(!(session.source?.header.draftWritable ?? session.record.writable) || this.isOwnerSnapshot(uri) ? { permissions: vscode.FilePermission.Readonly } : {}) };
+      ...(!(session.design ? session.design.nativeWritable : session.source?.header.draftWritable ?? session.record.writable) || this.isOwnerSnapshot(uri) ? { permissions: vscode.FilePermission.Readonly } : {}) };
   }
 
   /** XML Save applies a checked plan; BSL Save acknowledges only its private checkpoint. */
   async writeFile(uri: vscode.Uri, content: Uint8Array): Promise<void> {
     await this.ready;
     const session = this.required(uri);
-    if (this.isOwnerSnapshot(uri) || !(session.source?.header.draftWritable ?? session.record.writable)) throw vscode.FileSystemError.NoPermissions(this.text("queryReadonly"));
+    if (session.design || this.isOwnerSnapshot(uri) || !(session.source?.header.draftWritable ?? session.record.writable)) throw vscode.FileSystemError.NoPermissions(this.text("queryReadonly"));
     if (!session.resumed && session.record.identity.kind !== "bslLiteral") throw vscode.FileSystemError.Unavailable(this.text("queryResumeRequired"));
     const draft = canonical(new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(content));
     if (session.saving) await session.saving;
@@ -402,7 +481,7 @@ export class QueryTabs implements vscode.FileSystemProvider {
   private closeView(uri: vscode.Uri): void {
     if (this.disposed || this.isOwnerSnapshot(uri)) return;
     const session = this.session(uri);
-    if (!session || session.ending || vscode.window.tabGroups.all.some(group => group.tabs.some(tab => tab.input instanceof vscode.TabInputText
+    if (!session || session.design || session.ending || vscode.window.tabGroups.all.some(group => group.tabs.some(tab => tab.input instanceof vscode.TabInputText
       && tab.input.uri.toString() === uri.toString()))) return;
     if (session.saving) {
       void session.saving.then(() => this.closeView(uri), () => this.closeView(uri));
@@ -486,7 +565,7 @@ export class QueryTabs implements vscode.FileSystemProvider {
   private async restoreOnce(document: vscode.TextDocument): Promise<void> {
     await this.ready;
     const session = this.session(document.uri);
-    if (this.disposed || !session || this.isOwnerSnapshot(document.uri) || document.isClosed) return;
+    if (this.disposed || !session || session.design || this.isOwnerSnapshot(document.uri) || document.isClosed) return;
     const text = canonical(document.getText());
     // BSL checkpoints already contain the saved view. Its close decision uses semantic changes, not a forced native dirty bit.
     if (session.record.identity.kind === "bslLiteral" && text === session.record.draft) return;
@@ -520,7 +599,8 @@ export class QueryTabs implements vscode.FileSystemProvider {
     try {
       if (session.record.draft !== draft) throw new ExplorerError("requestFailed", "query_failed", { reason: "stale_draft" });
       await this.requiredRecovery().saveDraft(session.record.id, draft);
-      const plan = await source.prepare(facts, draft, [], owner.document.eol === vscode.EndOfLine.CRLF ? "crlf" : "lf");
+      const decisions = session.placements?.draft === querySnapshot(draft) && session.placements.owner === facts.snapshot ? session.placements.decisions : [];
+      const plan = await source.prepare(facts, draft, decisions, owner.document.eol === vscode.EndOfLine.CRLF ? "crlf" : "lf");
       session.pending = true;
       if (this.disposed || tree !== this.currentTree() || !session.resumed || selection !== this.application()) throw new ExplorerError("obsolete");
       if (await nativeReadOnly(owner.document)) throw new ExplorerError("requestFailed", "query_failed", { reason: "user_read_only" });
@@ -620,6 +700,7 @@ export class QueryTabs implements vscode.FileSystemProvider {
   /** Native views may close independently; releasing a handle never deletes its retained checkpoint. */
   private async closeSource(session: Session): Promise<void> {
     const source = session.source;
+    session.design?.invalidate();
     delete session.source;
     delete session.endpoint;
     this.languageEvents.fire(this.uri(session.record));
@@ -707,8 +788,10 @@ export class QueryTabs implements vscode.FileSystemProvider {
     this.log(`query_error code=${error instanceof ExplorerError ? error.code : "io"} kind=${error instanceof ExplorerError ? error.domain ?? "none" : "none"}`);
     const reason = error instanceof ExplorerError ? error.details?.reason : undefined;
     const key = reason === "bsl_sessions_unavailable" ? "queryBslUnavailable"
+      : reason === "constructor_unavailable" ? "constructorUnavailable"
       : error instanceof ExplorerError && error.code === "incompatible" ? "queryUnavailable"
       : ["unsupported_expression", "invalid_literal", "not_found"].includes(String(reason)) ? "queryUnsupported"
+      : reason === "comment_position" ? "queryCommentInvalid"
       : ["read_only", "user_read_only"].includes(String(reason)) ? "queryReadonly" : reason === "comments_require_decision" ? "queryComments" : "querySaveFailed";
     if (!this.disposed) void vscode.window.showWarningMessage(this.text(key));
   }

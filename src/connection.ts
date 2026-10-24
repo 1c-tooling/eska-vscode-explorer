@@ -166,7 +166,7 @@ export class Connection {
           const supported = error instanceof ExplorerError ? error.details?.supported : undefined;
           if (backend !== "project" || !(error instanceof ExplorerError) || error.domain !== "unsupported_version"
             || !isRecord(supported) || supported.major !== 1
-            || typeof supported.minor !== "number" || ![12, 13, 14, 15, 16, 17, 18, 19].includes(supported.minor)) throw error;
+            || typeof supported.minor !== "number" || ![12, 13, 14, 15, 16, 17, 18, 19, 20].includes(supported.minor)) throw error;
           response = await initialize(supported.minor >= 17 ? { major: 1, minor: supported.minor } : supported.minor === 16 ? SESSION_API_VERSION : supported.minor >= 14 ? RECOVERY_API_VERSION
             : supported.minor === QUERY_API_VERSION.minor ? QUERY_API_VERSION : BASE_API_VERSION);
         }
@@ -251,7 +251,7 @@ export class Connection {
 
   /** Native authorization snapshots expire before any queued request can change source ownership in this process. */
   private sourceMutation(method: string): boolean {
-    if ((method.startsWith("query/session") && method !== "query/sessionGet")
+    if ((method.startsWith("query/session") && !["query/sessionGet", "query/sessionComments"].includes(method))
       || ["workspace/close", "query/recoveryOpen", "query/recoveryClose", "query/recoveryRemove"].includes(method)) {
       this.sourceEra = {};
       return true;

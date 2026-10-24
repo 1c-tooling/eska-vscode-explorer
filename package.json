@@ -221,6 +221,18 @@
         "category": "ESKA Explorer",
         "icon": "$(close)",
         "enablement": "eska.queryBsl"
+      },
+      {
+        "command": "eska.explorer.queryConstructor",
+        "title": "%command.queryConstructor%",
+        "category": "ESKA",
+        "icon": "$(table)"
+      },
+      {
+        "command": "eska.explorer.placeQueryComments",
+        "title": "%command.placeQueryComments%",
+        "category": "ESKA",
+        "icon": "$(comment-discussion)"
       }
     ],
     "views": {
@@ -254,6 +266,11 @@
           "command": "eska.explorer.cancelQuery",
           "when": "resourceScheme == eska-query && eska.queryBsl",
           "group": "navigation@3"
+        },
+        {
+          "command": "eska.explorer.queryConstructor",
+          "when": "resourceScheme == eska-query && resourceExtname == .sdbl",
+          "group": "navigation@5"
         }
       ],
       "view/title": [
@@ -390,6 +407,16 @@
           "command": "eska.explorer.editBslQuery",
           "when": "editorLangId == bsl && (resourceScheme == file || resourceScheme == eska-protected)",
           "group": "eska@1"
+        },
+        {
+          "command": "eska.explorer.queryConstructor",
+          "when": "resourceScheme == eska-query && resourceExtname == .sdbl",
+          "group": "eska@4"
+        },
+        {
+          "command": "eska.explorer.placeQueryComments",
+          "when": "resourceScheme == eska-query && resourceExtname == .sdbl",
+          "group": "eska@5"
         }
       ]
     },

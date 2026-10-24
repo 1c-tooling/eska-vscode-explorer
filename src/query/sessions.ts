@@ -1,8 +1,10 @@
+import { sourceCommentState, type SourceCommentState } from "./comments.js";
+import { QueryConstructor, type ConstructorMethod } from "./constructors.js";
 import { ExplorerError, isRecord, isToken } from "../protocol.js";
 import { querySnapshot, type QueryDocument } from "./client.js";
 import { QueryLanguageProjection } from "./projections.js";
 import { parsePlan } from "./plan.js";
-import { invalid, type CommentDecision, type QueryCapabilities, type QueryIdentity } from "./protocol.js";
+import { invalid, type CommentDecision, type QueryCapabilities, type QueryIdentity, type QueryPosition } from "./protocol.js";
 import { QueryRecovery } from "./recovery.js";
 import type { RecoveryEndpoint } from "./recovery-protocol.js";
 import { querySessionHeader, type QueryOwnerFacts, type QueryPreparedSession, type QuerySessionHeader,
@@ -22,6 +24,9 @@ export class QuerySessions {
 
   /** The language adapter can use only an explicitly negotiated immutable projection contract. */
   get projectionLimits() { return this.endpoint.sessions?.capabilities.projections; }
+
+  /** Visual editing requires the independently negotiated exclusive-draft contract. */
+  get constructorLimits() { return this.endpoint.sessions?.capabilities.constructorLimits; }
 
   /** ESKA publishes the initial owner/base/draft and consumes the transient checked document handle. */
   async open(document: QueryDocument, id: string, query: QueryIdentity,
@@ -48,7 +53,7 @@ export class QuerySessions {
     const context = this.context();
     const value = await this.transport.request(method, { ...context, ...params });
     if (!isRecord(value)) invalid();
-    if (!["query/sessionClose", "query/sessionGet", "query/projectionRead", "query/projectionMap", "query/projectionEdits", "query/projectionClose"].includes(method)
+    if (!["query/sessionClose", "query/sessionGet", "query/projectionRead", "query/projectionMap", "query/projectionEdits", "query/projectionClose", "query/constructorModel", "query/constructorPlan", "query/constructorCancel", "query/sessionComments"].includes(method)
       && (value.sessionId !== context.sessionId || value.projectId !== context.projectId || !isToken(value.generation)
         || (!["query/sessionApplied", "query/sessionAbort"].includes(method) && value.generation !== context.generation))) invalid();
     return value;
@@ -89,6 +94,35 @@ export class QuerySourceSession {
       return { record: current.record, projection };
     });
     return result.projection;
+  }
+
+  /** The same source session acquires the canonical draft lock and exposes its portable visual model. */
+  async openConstructor(): Promise<QueryConstructor> {
+    const constructor = this.client.constructorLimits;
+    if (!constructor) throw new ExplorerError("incompatible", "query_failed", { reason: "constructor_unavailable" });
+    this.current = await this.transition(async (storeId, current) => this.call("query/constructorOpen", storeId, { revision: current.revision }));
+    const raw = this.current as unknown as Record<string, unknown>;
+    return QueryConstructor.capture((method, params) => this.constructorRequest(method, params), raw.constructor,
+      this.record.draft, constructor);
+  }
+
+  /** Constructor mutation replies adopt the same checkpoint queue and never create an adapter-owned store. */
+  private async constructorRequest(method: ConstructorMethod, params: Record<string, unknown>): Promise<unknown> {
+    this.current = await this.transition(async storeId => this.call(method, storeId, params));
+    return this.current;
+  }
+
+  /** Core anchors are bound to the acknowledged draft and cannot be replaced by adapter byte calculations. */
+  async comments(positions: readonly QueryPosition[]): Promise<SourceCommentState> {
+    if (!this.client.constructorLimits) throw new ExplorerError("incompatible", "query_failed", { reason: "constructor_unavailable" });
+    const result = await this.client.recovery.withCheckpoint(this.current.id, async storeId => {
+      const current = await this.call("query/sessionGet", storeId, {}); this.current = current;
+      const record = this.record;
+      const value = await this.client.request("query/sessionComments", { querySessionId: current.querySessionId, revision: current.revision, positions });
+      return { record: current.record, comments: sourceCommentState(value, { revision: current.revision, snapshot: querySnapshot(record.draft), positions,
+        baseBytes: Buffer.byteLength(record.base), draftBytes: Buffer.byteLength(record.draft) }) };
+    });
+    return result.comments;
   }
 
   /** The core owns explicit recovery and source rebinding, including an already applied durable intent. */

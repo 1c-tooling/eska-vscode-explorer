@@ -43,5 +43,7 @@
   "selectAnalysisContext": "Choose analysis application",
   "queryEditBsl": "Edit query separately",
   "queryApply": "Apply query to module",
-  "queryCancel": "Cancel query editing"
+  "queryCancel": "Cancel query editing",
+  "command.queryConstructor": "Query constructor",
+  "command.placeQueryComments": "Assign source comment positions"
 }
