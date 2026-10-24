@@ -87,12 +87,23 @@ test("source-session capability requires durable preparation and bounds untruste
     nativeApplicationReceipt: true, explicitResume: true, bslEditing: false, sourceKinds: ["form", "dataCompositionSchema"],
     maxSessions: 16, maxRetainedBytes: 33_554_432,
   } } };
-  assert.deepEqual(querySessionCapabilities(hello), { maxSessions: 16, maxRetainedBytes: 33_554_432 });
+  assert.deepEqual(querySessionCapabilities(hello), { bslEditing: false, maxSessions: 16, maxRetainedBytes: 33_554_432 });
   assert.equal(querySessionCapabilities({ ...hello, apiVersion: { major: 1, minor: 15 } }), undefined);
   for (const replacement of [{ preparedStateDurable: false }, { writesOwner: true }, { maxSessions: 0 }, { preparedStorageVersion: 1 }]) {
     assert.throws(() => querySessionCapabilities({ ...hello, capabilities: { querySessions: { ...hello.capabilities.querySessions, ...replacement } } }),
       { code: "protocolInvalid" });
   }
+  const bsl = { ...hello, apiVersion: { major: 1, minor: 19 }, capabilities: { querySessions: {
+    ...hello.capabilities.querySessions, bslEditing: true, sourceKinds: ["form", "dataCompositionSchema", "bsl"],
+    ownerProtection: "protectedViewWithConflicts", bslSave: "checkpointOnly",
+  } } };
+  assert.equal(querySessionCapabilities(bsl).bslEditing, true);
+  for (const replacement of [{ ownerProtection: "nativeLock" }, { bslSave: "apply" }, { sourceKinds: ["form", "dataCompositionSchema"] }]) {
+    assert.throws(() => querySessionCapabilities({ ...bsl, capabilities: { querySessions: { ...bsl.capabilities.querySessions, ...replacement } } }),
+      { code: "protocolInvalid" });
+  }
+  assert.throws(() => querySessionCapabilities({ ...bsl, apiVersion: { major: 1, minor: 18 } }), { code: "protocolInvalid" });
+
 });
 
 for (const locale of ["ru-RU", "en-US"]) test(`source-session SDK rebases input arriving during a native receipt (${locale})`,

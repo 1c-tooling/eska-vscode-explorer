@@ -154,6 +154,19 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
       try { await this.queries.show(this.tree, entry.owner, entry.header.identity); }
       catch (error) { this.queries.explain(error); }
     }));
+    this.disposables.push(vscode.commands.registerCommand("eska.explorer.editBslQuery", async () => {
+      const editor = vscode.window.activeTextEditor;
+      try { if (!this.tree) await this.connect(false); await this.queries.showBsl(editor); }
+      catch (error) { this.queries.explain(error); }
+    }));
+    this.disposables.push(vscode.commands.registerCommand("eska.explorer.applyQuery", async (uri?: vscode.Uri) => {
+      try { await this.queries.apply(uri); }
+      catch (error) { this.queries.explain(error); }
+    }));
+    this.disposables.push(vscode.commands.registerCommand("eska.explorer.cancelQuery", async (uri?: vscode.Uri) => {
+      try { await this.queries.cancel(uri); }
+      catch (error) { this.queries.explain(error); }
+    }));
     this.disposables.push(vscode.commands.registerCommand("eska.explorer.resumeQuery", async () => {
       try { await this.queries.resume(); }
       catch (error) { this.queries.explain(error); }

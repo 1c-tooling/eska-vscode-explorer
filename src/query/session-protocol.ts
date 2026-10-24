@@ -3,6 +3,7 @@ import { invalid, unsigned, type QueryPlan } from "./protocol.js";
 import { recoveryHeader, type RecoveryCapabilities, type RecoveryHeader } from "./recovery-protocol.js";
 
 export interface QuerySessionCapabilities {
+  readonly bslEditing: boolean;
   readonly maxSessions: number;
   readonly maxRetainedBytes: number;
 }
@@ -48,7 +49,10 @@ export function querySessionCapabilities(hello: unknown): QuerySessionCapabiliti
     || value.nativeApplicationReceipt !== true || value.explicitResume !== true || typeof value.bslEditing !== "boolean"
     || !Array.isArray(value.sourceKinds) || !value.sourceKinds.includes("dataCompositionSchema") || !value.sourceKinds.includes("form")
     || !unsigned(value.maxSessions) || value.maxSessions === 0 || !unsigned(value.maxRetainedBytes) || value.maxRetainedBytes === 0) invalid();
-  return { maxSessions: Math.min(value.maxSessions, 16), maxRetainedBytes: Math.min(value.maxRetainedBytes, 33_554_432) };
+  const bslEditing = value.bslEditing === true;
+  if (bslEditing && (hello.apiVersion.minor < 19 || !value.sourceKinds.includes("bsl")
+    || value.ownerProtection !== "protectedViewWithConflicts" || value.bslSave !== "checkpointOnly")) invalid();
+  return { bslEditing, maxSessions: Math.min(value.maxSessions, 16), maxRetainedBytes: Math.min(value.maxRetainedBytes, 33_554_432) };
 }
 
 /** Validate transport shape only; ESKA decides source ownership, permissions and lifecycle transitions. */

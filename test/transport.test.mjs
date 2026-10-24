@@ -160,7 +160,7 @@ for (const minor of [14, 15]) {
     const { value, children, versions } = connection(t, `api${minor}`);
     await value.connect(target);
     assert.equal(value.state.kind, "ready", JSON.stringify(value.state));
-    assert.deepEqual(versions, [18, 14]);
+    assert.deepEqual(versions, [19, 14]);
     assert.equal(value.recovery?.sessions, undefined);
     assert.equal(children.length, 1);
   });
@@ -171,7 +171,7 @@ test("API 1.16 is retained on the same process without claiming source snapshots
   const { value, children, versions } = connection(t, "api16");
   await value.connect(target);
   assert.equal(value.state.kind, "ready", JSON.stringify(value.state));
-  assert.deepEqual(versions, [18, 16]);
+  assert.deepEqual(versions, [19, 16]);
   assert.equal(value.sources, undefined);
   assert.equal(children.length, 1);
 });
@@ -181,7 +181,7 @@ test("API 1.17 fallback stays on the same process", async t => {
   const { value, children, versions } = connection(t, "api17");
   await value.connect(target);
   assert.equal(value.state.kind, "ready", JSON.stringify(value.state));
-  assert.deepEqual(versions, [18, 17]);
+  assert.deepEqual(versions, [19, 17]);
   assert.equal(children.length, 1);
 });
 

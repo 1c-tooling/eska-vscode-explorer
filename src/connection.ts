@@ -1,7 +1,7 @@
 import { isAbsolute } from "node:path";
 import { diagnostic, errorContext, type DiagnosticLog } from "./diagnostics.js";
 import { BackendProcess, type ProcessOptions } from "./process.js";
-import { API_VERSION, BASE_API_VERSION, QUERY_API_VERSION, RECOVERY_API_VERSION, SESSION_API_VERSION, SOURCE_API_VERSION, LEGACY_API_VERSION, ExplorerError, isRecord, parseHandshake, parseWorkspace, type BackendKind, type WorkspaceSession } from "./protocol.js";
+import { API_VERSION, BASE_API_VERSION, QUERY_API_VERSION, RECOVERY_API_VERSION, SESSION_API_VERSION, LEGACY_API_VERSION, ExplorerError, isRecord, parseHandshake, parseWorkspace, type BackendKind, type WorkspaceSession } from "./protocol.js";
 import { queryCapabilities, type QueryCapabilities } from "./query/protocol.js";
 import { recoveryCapabilities, type RecoveryEndpoint } from "./query/recovery-protocol.js";
 import { querySessionCapabilities } from "./query/session-protocol.js";
@@ -166,8 +166,8 @@ export class Connection {
           const supported = error instanceof ExplorerError ? error.details?.supported : undefined;
           if (backend !== "project" || !(error instanceof ExplorerError) || error.domain !== "unsupported_version"
             || !isRecord(supported) || supported.major !== 1
-            || typeof supported.minor !== "number" || ![12, 13, 14, 15, 16, 17].includes(supported.minor)) throw error;
-          response = await initialize(supported.minor === 17 ? SOURCE_API_VERSION : supported.minor === 16 ? SESSION_API_VERSION : supported.minor >= 14 ? RECOVERY_API_VERSION
+            || typeof supported.minor !== "number" || ![12, 13, 14, 15, 16, 17, 18].includes(supported.minor)) throw error;
+          response = await initialize(supported.minor >= 17 ? { major: 1, minor: supported.minor } : supported.minor === 16 ? SESSION_API_VERSION : supported.minor >= 14 ? RECOVERY_API_VERSION
             : supported.minor === QUERY_API_VERSION.minor ? QUERY_API_VERSION : BASE_API_VERSION);
         }
         const version = parseHandshake(response, backend);

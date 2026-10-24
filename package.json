@@ -202,6 +202,25 @@
         "title": "%queryCompare%",
         "category": "ESKA Explorer",
         "icon": "$(diff)"
+      },
+      {
+        "command": "eska.explorer.editBslQuery",
+        "title": "%queryEditBsl%",
+        "category": "ESKA Explorer"
+      },
+      {
+        "command": "eska.explorer.applyQuery",
+        "title": "%queryApply%",
+        "category": "ESKA Explorer",
+        "icon": "$(check)",
+        "enablement": "eska.queryBsl"
+      },
+      {
+        "command": "eska.explorer.cancelQuery",
+        "title": "%queryCancel%",
+        "category": "ESKA Explorer",
+        "icon": "$(close)",
+        "enablement": "eska.queryBsl"
       }
     ],
     "views": {
@@ -225,6 +244,16 @@
           "command": "eska.explorer.compareQueryOwner",
           "when": "resourceScheme == eska-query",
           "group": "navigation@2"
+        },
+        {
+          "command": "eska.explorer.applyQuery",
+          "when": "resourceScheme == eska-query && eska.queryBsl",
+          "group": "navigation@0"
+        },
+        {
+          "command": "eska.explorer.cancelQuery",
+          "when": "resourceScheme == eska-query && eska.queryBsl",
+          "group": "navigation@3"
         }
       ],
       "view/title": [
@@ -354,6 +383,13 @@
         {
           "command": "eska.explorer.resetSortOrder",
           "when": "false"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "eska.explorer.editBslQuery",
+          "when": "editorLangId == bsl && (resourceScheme == file || resourceScheme == eska-protected)",
+          "group": "eska@1"
         }
       ]
     },
