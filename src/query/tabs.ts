@@ -502,6 +502,7 @@ export class QueryTabs implements vscode.FileSystemProvider {
       return;
     }
     this.sessions.delete(session.record.id);
+    this.languageEvents.fire(uri);
     this.events.fire([{ type: vscode.FileChangeType.Deleted, uri }]);
     this.removals.add(session.record.id);
     if (this.recoveryAvailable) void this.closeSource(session).then(() => this.recovery?.remove(session.record.id)).then(
@@ -544,6 +545,7 @@ export class QueryTabs implements vscode.FileSystemProvider {
       if (!keep) {
         await this.requiredRecovery().remove(session.record.id, true);
         this.sessions.delete(session.record.id);
+        this.languageEvents.fire(uri);
         this.events.fire([{ type: vscode.FileChangeType.Deleted, uri }]);
       }
     } finally { delete session.ending; }

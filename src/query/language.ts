@@ -65,7 +65,10 @@ export class QueryLanguage implements vscode.Disposable {
   /** Metadata, editor and progress changes cancel obsolete work and coalesce fresh projections. */
   changed(uri?: vscode.Uri): void {
     for (const document of vscode.workspace.textDocuments) if (document.uri.scheme === QUERY_SCHEME
-      && (!uri || uri.toString() === document.uri.toString())) this.schedule(document);
+      && (!uri || uri.toString() === document.uri.toString())) {
+      if (this.tabs.languageState(document)) this.schedule(document);
+      else { void this.remove(document); this.states.delete(document); }
+    }
     this.render();
   }
 
@@ -319,7 +322,11 @@ export class QueryLanguage implements vscode.Disposable {
   }
 
   /** The status describes available analysis without interpreting an empty report as a completed index. */
-  private state(document: vscode.TextDocument, state: MessageKey): void { this.states.set(document, state); this.render(); }
+  private state(document: vscode.TextDocument, state: MessageKey): void {
+    if (!this.disposed && !document.isClosed && this.tabs.languageState(document)) this.states.set(document, state);
+    else this.states.delete(document);
+    this.render();
+  }
 
   /** Capability gaps have a distinct explanation from an explicitly paused or conflicted session. */
   private unavailable(document: vscode.TextDocument): MessageKey {
