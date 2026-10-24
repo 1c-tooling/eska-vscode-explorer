@@ -3,39 +3,58 @@ import { querySnapshot } from "./client.js";
 import { invalid, isByteRange, isSnapshot, unsigned, type ByteRange } from "./protocol.js";
 import { parseDraftPlan, type QueryTextPlan } from "./plan.js";
 
-export const CLAUSES = ["fields", "sources", "joins", "conditions", "group", "order"] as const;
+export const BASE_CLAUSES = ["fields", "sources", "joins", "conditions", "group", "order"] as const;
+export const CLAUSES = [...BASE_CLAUSES, "totals", "totalGroups"] as const;
 export type ConstructorClauseKind = typeof CLAUSES[number];
 export type ConstructorMethod = "query/constructorOpen" | "query/constructorPlan" | "query/constructorModel" | "query/constructorAction" | "query/constructorFinish" | "query/constructorCancel" | "query/constructorCatalog";
-export interface ConstructorLimits { maxExpression: number; maxModel: number; visual?: boolean }
+export interface ConstructorLimits { maxExpression: number; maxModel: number; visual?: boolean; virtualTables?: boolean; nestedQueries?: boolean; unions?: boolean; totals?: boolean }
 export interface ConstructorSelection { statement: number; clause: number; item: number }
 export type Comparison = "equal" | "notEqual" | "less" | "lessOrEqual" | "greater" | "greaterOrEqual" | "like" | "in" | "inHierarchy";
+export type Aggregate = "sum" | "count" | "minimum" | "maximum" | "average" | null;
+export type PeriodUnit = "second" | "minute" | "hour" | "day" | "week" | "tenDays" | "month" | "quarter" | "halfYear" | "year";
+export type Hierarchy = "none" | "hierarchy" | "onlyHierarchy";
+export interface PeriodRange { unit: PeriodUnit; begin: string | null; end: string | null }
 export type VisualExpression = { kind: "source"; table: string; alias: string }
-  | { kind: "field"; expression: string; alias: string; aggregate: "sum" | "count" | "minimum" | "maximum" | "average" | null }
+  | { kind: "virtualSource"; table: string; alias: string; parameters: string[] }
+  | { kind: "subquerySource"; alias: string }
+  | { kind: "field" | "totalField"; expression: string; alias: string; aggregate: Aggregate }
   | { kind: "join"; table: string; alias: string; join: "inner" | "left" | "right" | "full"; left: string; comparison: Comparison; right: string }
+  | { kind: "virtualJoin"; table: string; alias: string; parameters: string[]; join: "inner" | "left" | "right" | "full"; left: string; comparison: Comparison; right: string }
+  | { kind: "subqueryJoin"; alias: string; join: "inner" | "left" | "right" | "full"; left: string; comparison: Comparison; right: string }
   | { kind: "condition"; left: string; comparison: Comparison; right: string }
-  | { kind: "group"; expression: string } | { kind: "order"; expression: string; descending: boolean };
-export interface CatalogTable { name: string; category: string; russian: string; english: string; alias: string }
+  | { kind: "group"; expression: string } | { kind: "order"; expression: string; descending: boolean }
+  | { kind: "totalGroup"; expression: string; alias: string; hierarchy: Hierarchy; period: PeriodRange | null } | { kind: "overall" };
+export interface CatalogParameter { key: string; required: boolean; choices?: CatalogField[] }
+export interface CatalogTable { name: string; category: string; russian: string; english: string; alias: string; virtualTable?: string }
 export interface CatalogField { russian: string; english: string }
-export interface CatalogPage { tables: CatalogTable[]; fields: CatalogField[]; nextOffset: number | null; found: boolean; limitedContext: boolean; contextFingerprint: string }
+export interface CatalogPage { tables: CatalogTable[]; fields: CatalogField[]; parameters?: CatalogParameter[]; nextOffset: number | null; found: boolean; limitedContext: boolean; contextFingerprint: string }
+export interface CatalogQuery { search?: string; offset?: number; limit?: number; table?: string; qualifier?: string; virtualTables?: boolean; source?: ConstructorSelection; scope?: number }
 export type ConstructorAction = { kind: "compose"; statement: number; selection: ConstructorSelection | null; expression: VisualExpression }
   | { kind: "appendFields"; statement: number; fields: string[] }
   | { kind: "append"; statement: number; clause: ConstructorClauseKind; text: string; join?: "inner" | "left" | "right" | "full" }
   | { kind: "replace"; selection: ConstructorSelection; text: string }
   | { kind: "remove"; selection: ConstructorSelection; comments?: "keep" | "discard" }
-  | { kind: "move"; selection: ConstructorSelection; to: number };
+  | { kind: "move"; selection: ConstructorSelection; to: number }
+  | { kind: "addUnion" | "setUnion"; statement: number; all: boolean } | { kind: "removeUnion"; statement: number; comments?: "keep" | "discard" };
 export interface ConstructorItem {
   index: number; range: ByteRange; preview: string; expression: string | null; comments: number; removable: boolean; movable: boolean;
   unavailable: { replace: string | null; remove: string | null; move: string | null };
   visual?: VisualExpression | null;
+  children?: number[]; moveUp?: boolean; moveDown?: boolean;
 }
 export interface ConstructorClause { index: number; kind: ConstructorClauseKind; header: string; items: ConstructorItem[] }
 export interface ConstructorStatement {
   index: number; range: ByteRange; unavailable: string | null; preview: string; clauses: ConstructorClause[];
   append: { kind: ConstructorClauseKind; unavailable: string | null }[];
-  russian?: boolean; sources?: { table: string; alias: string }[];
+  russian?: boolean; sources?: ConstructorSource[];
+  scope?: number; branch?: number; nested?: boolean; result?: boolean; columns?: string[];
 }
+export interface ConstructorSource { table: string; alias: string; clause?: number; item?: number; derived?: boolean; nestedScope?: number | null; parameters?: string[] }
+export interface ConstructorScope { index: number; range: ByteRange; parent: number | null; branches: number[]; result: number; unions: { all: boolean }[] }
 export interface ConstructorModel {
   id: string; revision: string; snapshot: string; text: string; bytes: number; writable: boolean; statements: ConstructorStatement[];
+  scopes?: ConstructorScope[]; issues?: { code: string; scope: number }[];
+  focus?: number | null;
 }
 type Transport = (method: ConstructorMethod, params: Record<string, unknown>) => Promise<unknown>;
 
@@ -46,13 +65,20 @@ export function constructorCapabilities(hello: unknown): ConstructorLimits | und
   if (!isRecord(hello.apiVersion) || hello.apiVersion.major !== 1 || !unsigned(hello.apiVersion.minor) || hello.apiVersion.minor < 21
     || !isRecord(value) || value.schemaVersion !== 1 || value.writesOwner !== false || value.writesDraft !== true
     || value.explicitFinish !== true || value.exclusiveDraft !== true || value.lossless !== true || value.nativeDraftPlan !== true || value.sourceCommentPositions !== true
-    || value.sharedQueryBudget !== true || !Array.isArray(value.clauses) || value.clauses.length !== CLAUSES.length
+    || value.sharedQueryBudget !== true || !Array.isArray(value.clauses)
     || !unsigned(value.maxExpressionBytes) || value.maxExpressionBytes === 0
     || !unsigned(value.maxModelBytes) || value.maxModelBytes === 0) invalid();
-  if (!value.clauses.every((kind, index) => kind === CLAUSES[index])) invalid();
+  const advanced = ["virtualTables", "nestedQueries", "unions", "totals"] as const;
+  const flags: Partial<ConstructorLimits> = {};
+  for (const key of advanced) if (value[key] !== undefined) {
+    if (hello.apiVersion.minor < 23 || value[key] !== true) invalid();
+    flags[key] = true;
+  }
+  const clauses = flags.totals ? CLAUSES : BASE_CLAUSES;
+  if (value.clauses.length !== clauses.length || !value.clauses.every((kind, index) => kind === clauses[index])) invalid();
   const visual = value.visualExpressions !== undefined || value.metadataCatalog !== undefined;
-  if (visual && (hello.apiVersion.minor < 22 || value.visualExpressions !== true || value.metadataCatalog !== true)) invalid();
-  return { maxExpression: Math.min(value.maxExpressionBytes, 16_384), maxModel: Math.min(value.maxModelBytes, 33_554_432), ...(visual ? { visual: true } : {}) };
+  if ((Object.keys(flags).length && !visual) || (visual && (hello.apiVersion.minor < 22 || value.visualExpressions !== true || value.metadataCatalog !== true))) invalid();
+  return { maxExpression: Math.min(value.maxExpressionBytes, 16_384), maxModel: Math.min(value.maxModelBytes, 33_554_432), ...(visual ? { visual: true } : {}), ...flags };
 }
 
 /** Validate only transport shape and snapshot bytes; parsing, eligibility and text generation remain in ESKA. */
@@ -63,18 +89,20 @@ export function constructorModel(raw: unknown, limits: ConstructorLimits, id?: s
     || Buffer.from(raw.text).toString() !== raw.text || typeof raw.writable !== "boolean"
     || !Array.isArray(raw.statements) || raw.statements.length > 256 || Buffer.byteLength(JSON.stringify(raw)) > limits.maxModel) invalid();
   let entries = 0;
+  const clauses = limits.totals ? CLAUSES : BASE_CLAUSES;
   for (const [index, statement] of raw.statements.entries()) {
     if (!isRecord(statement) || statement.index !== index || !isByteRange(statement.range, raw.bytes)
       || !reason(statement.unavailable) || typeof statement.preview !== "string" || !Array.isArray(statement.clauses)
-      || !Array.isArray(statement.append) || statement.append.length !== CLAUSES.length) invalid();
+      || !Array.isArray(statement.append) || statement.append.length !== clauses.length) invalid();
     if (statement.russian !== undefined && (typeof statement.russian !== "boolean" || !Array.isArray(statement.sources)
-      || statement.sources.length > 65_536 || !statement.sources.every(source => isRecord(source) && shortText(source.table) && shortText(source.alias)))) invalid();
+      || statement.sources.length > 65_536 || !statement.sources.every(source => isRecord(source) && shortText(source.table) && shortText(source.alias)
+        && (source.parameters === undefined || parameters(source.parameters))))) invalid();
     for (const [index, option] of statement.append.entries()) {
-      if (!isRecord(option) || option.kind !== CLAUSES[index] || !reason(option.unavailable)) invalid();
+      if (!isRecord(option) || option.kind !== clauses[index] || !reason(option.unavailable)) invalid();
     }
     for (const [index, clause] of statement.clauses.entries()) {
-      if (!isRecord(clause) || clause.index !== index || !CLAUSES.includes(clause.kind as ConstructorClauseKind)
-        || typeof clause.header !== "string" || !Array.isArray(clause.items) || clause.items.length === 0) invalid();
+      if (!isRecord(clause) || clause.index !== index || !(clauses as readonly unknown[]).includes(clause.kind)
+        || typeof clause.header !== "string" || !Array.isArray(clause.items) || (clause.items.length === 0 && clause.kind !== "totals")) invalid();
       for (const [index, item] of clause.items.entries()) {
         if (++entries > 65_536 || !isRecord(item) || item.index !== index || !isByteRange(item.range, raw.bytes)
           || item.range.start < statement.range.start || item.range.end > statement.range.end || typeof item.preview !== "string"
@@ -82,9 +110,12 @@ export function constructorModel(raw: unknown, limits: ConstructorLimits, id?: s
           || !unsigned(item.comments) || typeof item.removable !== "boolean" || typeof item.movable !== "boolean"
           || !isRecord(item.unavailable) || ![item.unavailable.replace, item.unavailable.remove, item.unavailable.move].every(reason)) invalid();
         if (item.visual !== undefined && item.visual !== null && !visualExpression(item.visual)) invalid();
+        if (item.moveUp !== undefined && typeof item.moveUp !== "boolean" || item.moveDown !== undefined && typeof item.moveDown !== "boolean") invalid();
       }
     }
   }
+  if ((limits.nestedQueries || limits.unions) && raw.scopes === undefined) invalid();
+  validateScopes(raw);
   return raw as unknown as ConstructorModel;
 }
 
@@ -113,15 +144,18 @@ export class QueryConstructor {
   get isClosed(): boolean { return this.closed; }
 
   /** Read one bounded metadata page from the constructor's own application; no client parses XML or constructs field paths. */
-  async catalog(query: { search?: string; offset?: number; limit?: number; table?: string; qualifier?: string }): Promise<CatalogPage> {
+  async catalog(query: CatalogQuery): Promise<CatalogPage> {
     if (!this.limits.visual) throw new ExplorerError("incompatible");
     const result = await this.request("query/constructorCatalog", { query });
     if (!isRecord(result) || !isRecord(result.catalog)) invalid();
     const value = result.catalog;
     if (!Array.isArray(value.tables) || value.tables.length > 500 || !Array.isArray(value.fields) || value.fields.length > 65_536
       || !(value.nextOffset === null || unsigned(value.nextOffset)) || typeof value.found !== "boolean" || typeof value.limitedContext !== "boolean"
-      || !isSnapshot(value.contextFingerprint) || !value.tables.every(table => isRecord(table) && [table.name, table.category, table.russian, table.english, table.alias].every(shortText))
-      || !value.fields.every(field => isRecord(field) && shortText(field.russian) && shortText(field.english))) invalid();
+      || !isSnapshot(value.contextFingerprint) || !value.tables.every(table => isRecord(table) && [table.name, table.category, table.russian, table.english, table.alias].every(shortText) && (table.virtualTable === undefined || shortText(table.virtualTable)))
+      || !value.fields.every(field => isRecord(field) && shortText(field.russian) && shortText(field.english))
+      || value.parameters !== undefined && (!Array.isArray(value.parameters) || value.parameters.length > 16 || !value.parameters.every(parameter => isRecord(parameter)
+        && shortText(parameter.key) && typeof parameter.required === "boolean" && (parameter.choices === undefined || Array.isArray(parameter.choices) && parameter.choices.length <= 32
+          && parameter.choices.every(choice => isRecord(choice) && shortText(choice.russian) && shortText(choice.english)))))) invalid();
     return value as unknown as CatalogPage;
   }
 
@@ -177,12 +211,67 @@ function visualExpression(value: unknown): boolean {
   if (!isRecord(value)) return false;
   switch (value.kind) {
     case "source": return shortText(value.table) && shortText(value.alias);
-    case "field": return shortText(value.expression) && shortText(value.alias) && (value.aggregate === null || ["sum", "count", "minimum", "maximum", "average"].includes(String(value.aggregate)));
-    case "condition": case "join": return shortText(value.left) && shortText(value.right)
+    case "virtualSource": return shortText(value.table) && shortText(value.alias) && parameters(value.parameters);
+    case "subquerySource": return shortText(value.alias);
+    case "field": case "totalField": return shortText(value.expression) && shortText(value.alias) && (value.aggregate === null || ["sum", "count", "minimum", "maximum", "average"].includes(String(value.aggregate)));
+    case "condition": case "join": case "virtualJoin": case "subqueryJoin": return shortText(value.left) && shortText(value.right)
       && ["equal", "notEqual", "less", "lessOrEqual", "greater", "greaterOrEqual", "like", "in", "inHierarchy"].includes(String(value.comparison))
-      && (value.kind === "condition" || (shortText(value.table) && shortText(value.alias) && ["inner", "left", "right", "full"].includes(String(value.join))));
+      && (value.kind === "condition" || (shortText(value.alias) && ["inner", "left", "right", "full"].includes(String(value.join))
+        && (value.kind === "subqueryJoin" || shortText(value.table)) && (value.kind !== "virtualJoin" || parameters(value.parameters))));
     case "group": return shortText(value.expression);
     case "order": return shortText(value.expression) && typeof value.descending === "boolean";
+    case "overall": return true;
+    case "totalGroup": return shortText(value.expression) && shortText(value.alias) && ["none", "hierarchy", "onlyHierarchy"].includes(String(value.hierarchy))
+      && (value.period === null || isRecord(value.period) && ["second", "minute", "hour", "day", "week", "tenDays", "month", "quarter", "halfYear", "year"].includes(String(value.period.unit))
+        && [value.period.begin, value.period.end].every(boundary => boundary === null || shortText(boundary)));
     default: return false;
+  }
+}
+
+/** Arguments stay positional and bounded; this check deliberately knows nothing about query syntax. */
+function parameters(value: unknown): boolean { return Array.isArray(value) && value.length <= 16 && value.every(shortText); }
+
+/** Validate the backend's navigation graph without discovering scopes or source bindings in SQL text. */
+function validateScopes(raw: Record<string, unknown>): void {
+  if (raw.scopes === undefined) return;
+  if (!Array.isArray(raw.scopes) || raw.scopes.length > 256 || !Array.isArray(raw.statements) || !unsigned(raw.bytes)) invalid();
+  const scopes = raw.scopes, statements = raw.statements;
+  if (raw.focus !== undefined && raw.focus !== null && (!unsigned(raw.focus) || raw.focus >= statements.length)) invalid();
+  const statementIndex = (value: unknown): value is number => unsigned(value) && value < statements.length;
+  const scopeIndex = (value: unknown): value is number => unsigned(value) && value < scopes.length;
+  const members = new Set<number>();
+  for (const [index, scope] of scopes.entries()) {
+    if (!isRecord(scope) || scope.index !== index || !isByteRange(scope.range, raw.bytes) || !(scope.parent === null || statementIndex(scope.parent))
+      || !Array.isArray(scope.branches) || !scope.branches.length || !scope.branches.every(statementIndex)
+      || scope.result !== scope.branches.at(-1) || !Array.isArray(scope.unions) || scope.unions.length !== scope.branches.length - 1
+      || !scope.unions.every(union => isRecord(union) && typeof union.all === "boolean")) invalid();
+    for (const [branch, id] of scope.branches.entries()) {
+      const statement = statements[id];
+      if (members.has(id) || !isRecord(statement) || statement.scope !== index || statement.branch !== branch || statement.nested !== (scope.parent !== null)
+        || statement.result !== (scope.result === id) || !isByteRange(statement.range, raw.bytes) || statement.range.start < scope.range.start || statement.range.end > scope.range.end
+        || !Array.isArray(statement.columns) || !statement.columns.every(column => typeof column === "string" && Buffer.byteLength(column) <= 8_388_608)) invalid();
+      members.add(id);
+    }
+    const seen = new Set<number>([index]);
+    let parent = scope.parent;
+    while (parent !== null) {
+      const owner = statements[parent];
+      if (!isRecord(owner) || !scopeIndex(owner.scope) || seen.has(owner.scope) || seen.size > 32) invalid();
+      seen.add(owner.scope);
+      const ancestor = scopes[owner.scope];
+      if (!isRecord(ancestor) || !(ancestor.parent === null || statementIndex(ancestor.parent))) invalid();
+      parent = ancestor.parent;
+    }
+  }
+  if (members.size !== statements.length || !Array.isArray(raw.issues) || !raw.issues.every(issue => isRecord(issue) && shortText(issue.code) && scopeIndex(issue.scope))) invalid();
+  for (const statement of statements) {
+    if (!isRecord(statement) || !Array.isArray(statement.clauses) || !Array.isArray(statement.sources)) invalid();
+    for (const source of statement.sources) if (!isRecord(source) || !unsigned(source.clause) || !unsigned(source.item) || typeof source.derived !== "boolean"
+      || !(source.nestedScope === null || scopeIndex(source.nestedScope)) || !isRecord(statement.clauses[source.clause])
+      || !Array.isArray(statement.clauses[source.clause].items) || source.item >= statement.clauses[source.clause].items.length) invalid();
+    for (const clause of statement.clauses) {
+      if (!isRecord(clause) || !Array.isArray(clause.items)) invalid();
+      for (const item of clause.items) if (!isRecord(item) || !Array.isArray(item.children) || !item.children.every(scopeIndex)) invalid();
+    }
   }
 }

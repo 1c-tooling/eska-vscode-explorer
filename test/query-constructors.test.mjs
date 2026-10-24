@@ -9,13 +9,24 @@ import { revealFile } from "../out/reveal.js";
 import { QueryClient, querySnapshot } from "../out/query/client.js";
 import { QueryRecovery } from "../out/query/recovery.js";
 import { QuerySessions } from "../out/query/sessions.js";
-import { CLAUSES, QueryConstructor, constructorCapabilities } from "../out/query/constructors.js";
+import { BASE_CLAUSES as CLAUSES, CLAUSES as ADVANCED_CLAUSES, QueryConstructor, constructorCapabilities, constructorModel } from "../out/query/constructors.js";
 import { querySessionCapabilities } from "../out/query/session-protocol.js";
 import { createTreeProject } from "./fixture.mjs";
+import { addQueryRegister } from "./query-advanced-fixture.mjs";
 
 const executable = process.env.ESKA_TEST_BINARY, limits = { maxExpression: 16384, maxModel: 33554432 };
 const capability = { schemaVersion: 1, writesOwner: false, writesDraft: true, explicitFinish: true, exclusiveDraft: true,
   lossless: true, nativeDraftPlan: true, sourceCommentPositions: true, sharedQueryBudget: true, maxExpressionBytes: 16384, maxModelBytes: 33554432, clauses: [...CLAUSES] };
+
+/** New clause identifiers and domain intentions require explicit minor-23 negotiation with visual support. */
+test("advanced constructor capabilities reject partial or older negotiation", () => {
+  const features = { visual: true, virtualTables: true, nestedQueries: true, unions: true, totals: true };
+  const advanced = { ...capability, ...features, visualExpressions: true, metadataCatalog: true, clauses: [...ADVANCED_CLAUSES] };
+  assert.deepEqual(constructorCapabilities({ apiVersion: { major: 1, minor: 23 }, capabilities: { queryConstructor: advanced } }), { ...limits, ...features });
+  for (const [minor, change] of [[22, {}], [23, { totals: false }], [23, { clauses: [...CLAUSES] }], [23, { metadataCatalog: false }]]) {
+    assert.throws(() => constructorCapabilities({ apiVersion: { major: 1, minor }, capabilities: { queryConstructor: { ...advanced, ...change } } }), { code: "protocolInvalid" });
+  }
+});
 
 /** Structured operations and metadata choices require an explicit coherent capability, never a guessed crate version. */
 test("visual constructor capabilities are additive and require Metadata API 1.22", () => {
@@ -54,6 +65,7 @@ async function fixture(t, locale, readonly = false) {
   const connection = new Connection("constructor-test", () => {}, () => {}); let tree, store;
   t.after(async () => { await store?.settled().catch(() => {}); tree?.dispose(); await connection.dispose(); await rm(outer, { recursive: true, force: true }); });
   const files = await createTreeProject(join(outer, "project"));
+  await addQueryRegister(files);
   await mkdir(join(files.source, "Ext")); await writeFile(join(files.source, "Ext", "ParentConfigurations.bin"), "{6,0,0,0,0,0}");
   const owner = '// 😀\r\nQ = "SELECT A, B FROM T";\r\nTail = 42;\r\n'; await writeFile(files.module, owner);
   await connection.connect({ executable, path: files.root, name: "constructor", locale });
@@ -86,6 +98,42 @@ function apply(text, plan) {
 }
 
 for (const locale of ["ru-RU", "en-US"]) {
+  test(`portable advanced constructor owns virtual arguments, nested projections, union columns and totals (${locale})`, { skip: !executable }, async t => {
+    const f = await fixture(t, locale), before = f.source.record.draft, disk = await readFile(f.files.module);
+    const core = await f.source.openConstructor();
+    for (const key of ["virtualTables", "nestedQueries", "unions", "totals"]) assert.equal(core.limits[key], true);
+    const page = await core.catalog({ table: "AccumulationRegister.Stock", virtualTables: true });
+    assert.ok(page.tables.some(table => table.virtualTable === "balanceAndTurnovers"));
+    const signature = await core.catalog({ table: "AccumulationRegister.Stock.BalanceAndTurnovers", virtualTables: true });
+    assert.deepEqual(signature.parameters.map(parameter => parameter.key), ["beginPeriod", "endPeriod", "periodicity", "complementMethod", "condition"]);
+    assert.ok(signature.parameters[2].choices.some(choice => choice.english === "MONTH"));
+    await core.action({ kind: "compose", statement: 0, selection: null, expression: { kind: "virtualSource", table: "AccumulationRegister.Stock.BalanceAndTurnovers", alias: "S", parameters: ["", "&End", "Month", "RegisterRecords", "Item = &Item"] } });
+    assert.ok(core.model.text.includes("BalanceAndTurnovers(, &End, Month, RegisterRecords, Item = &Item) AS S"));
+    const virtual = core.model.statements[0].sources.find(source => source.alias === "S");
+    const virtualFields = await core.catalog({ source: { statement: 0, clause: virtual.clause, item: virtual.item }, qualifier: "S" });
+    assert.ok(virtualFields.fields.some(field => field.english === "S.QuantityClosingBalance"));
+    await core.action({ kind: "compose", statement: 0, selection: null, expression: { kind: "subquerySource", alias: "Q" } });
+    const source = core.model.statements[0].sources.find(source => source.derived);
+    assert.equal(source.nestedScope, 1);
+    const fields = await core.catalog({ source: { statement: 0, clause: source.clause, item: source.item }, qualifier: "Q" });
+    assert.ok(fields.fields.some(field => field.english === "Q.Value"));
+    await core.action({ kind: "compose", statement: 0, selection: null, expression: { kind: "field", expression: "Q.Value", alias: "Value", aggregate: null } });
+    await core.action({ kind: "replace", selection: { statement: 1, clause: 0, item: 0 }, text: "1 AS Updated" });
+    assert.ok(core.model.text.includes("Q.Updated AS Value"));
+    await core.action({ kind: "addUnion", statement: 0, all: true });
+    assert.equal(core.model.scopes[0].branches.length, 2);
+    const tail = core.model.scopes[0].result;
+    await core.action({ kind: "compose", statement: tail, selection: null, expression: { kind: "totalField", expression: "Value", alias: "", aggregate: "sum" } });
+    await core.action({ kind: "compose", statement: tail, selection: null, expression: { kind: "totalGroup", expression: "Value", alias: "", hierarchy: "none", period: { unit: "month", begin: null, end: "&End" } } });
+    assert.ok(core.model.text.includes("PERIODS(MONTH, , &End)"));
+    assert.ok(core.model.text.lastIndexOf("TOTALS") > core.model.text.lastIndexOf("UNION ALL"));
+    assert.deepEqual(core.model.issues, []);
+    const result = await core.catalog({ scope: 0 }); assert.ok(result.fields.some(field => field.english === "Value"));
+    const malformed = structuredClone(core.model); malformed.scopes[1].parent = malformed.scopes[1].branches[0];
+    assert.throws(() => constructorModel(malformed, core.limits), { code: "protocolInvalid" });
+    assert.equal(f.source.record.draft, before); assert.deepEqual(await readFile(f.files.module), disk);
+    await core.cancel(); assert.equal(f.source.record.draft, before);
+  });
   test(`large constructor expressions remain inspectable without malformed structured DTOs (${locale})`, { skip: !executable }, async t => {
     const f = await fixture(t, locale), text = `SELECT ${"A".repeat(16385)} FROM T`;
     await f.store.saveDraft(f.source.record.id, text);
