@@ -146,8 +146,11 @@ exports.activate = async function () {
   if (process.env.ESKA_HOST_RUN === '-1') return;
   try { await require(${JSON.stringify(suite)}).run(); }
   catch (error) {
-    await require('node:fs/promises').writeFile(${JSON.stringify(join(fixture.root, "host-result.json"))},
-      JSON.stringify({ passed: false, error: String(error.stack ?? error) }));
+    const fs = require('node:fs/promises'), file = ${JSON.stringify(join(fixture.root, "host-result.json"))};
+    let reported;
+    try { reported = JSON.parse(await fs.readFile(file, 'utf8')); } catch {}
+    // Keep the suite's precise failure evidence, including UI state and completed assertions.
+    if (reported?.passed !== false) await fs.writeFile(file, JSON.stringify({ passed: false, error: String(error.stack ?? error) }));
   }
   await vscode.commands.executeCommand('workbench.action.closeWindow');
 };\n`);

@@ -44,7 +44,7 @@ exports.run = async function () {
     editor.selection = new vscode.Selection(at, at); await vscode.commands.executeCommand('eska.explorer.editBslQuery');
     const draft = await until(() => vscode.window.activeTextEditor?.document.uri.scheme === 'eska-query' && vscode.window.activeTextEditor.document, 'query');
     const before = draft.getText(); await vscode.commands.executeCommand('eska.explorer.queryConstructor', draft.uri); client = await connect(until);
-    assert.equal(await client.evaluate('document.querySelectorAll("[role=tab]").length'), Number(process.env.ESKA_EXPECT_CONSTRUCTOR_PAGES ?? 8));
+    assert.equal(await client.evaluate('document.querySelectorAll("[role=tab]").length'), Number(process.env.ESKA_EXPECT_CONSTRUCTOR_PAGES ?? 9));
     assert.equal(await client.evaluate('document.querySelector("[role=tab]").textContent'), vscode.env.language === 'ru' ? 'Таблицы и поля' : 'Tables and fields');
     await pick(client);
     await client.evaluate('document.querySelector(".all-fields").click()');

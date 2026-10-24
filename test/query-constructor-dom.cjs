@@ -26,6 +26,22 @@ async function attach(target) {
   return { request, contexts, close: () => socket.close() };
 }
 
+/** Normal-window acceptance observes the public workbench DOM without accessing the extension's private exports. */
+exports.connectWorkbench = async function (until) {
+  const port = Number(process.env.ESKA_HOST_DEBUG_PORT); assert.ok(port > 0);
+  let connection;
+  await until(async () => {
+    const targets = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json();
+    const target = targets.find(value => value.type === 'page' && value.url.includes('workbench'));
+    if (!target) return false;
+    connection = await attach(target); return true;
+  }, 'native workbench endpoint');
+  return { close: () => connection.close(), evaluate: async expression => {
+    const value = await connection.request('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true });
+    if (value.exceptionDetails) throw new Error(JSON.stringify(value.exceptionDetails)); return value.result.value;
+  } };
+};
+
 /** A visible webview frame is located by its own DOM, rather than inferred from a tab title. */
 exports.connect = async function (until) {
   const port = Number(process.env.ESKA_HOST_DEBUG_PORT); assert.ok(port > 0);
@@ -59,7 +75,7 @@ exports.connect = async function (until) {
 exports.exercise = async function ({ explorer, view, until, locale }) {
   const client = await exports.connect(until);
   try {
-    assert.equal(await client.evaluate('document.querySelectorAll("[role=tab]").length'), 8);
+    assert.equal(await client.evaluate('document.querySelectorAll("[role=tab]").length'), Number(process.env.ESKA_EXPECT_CONSTRUCTOR_PAGES ?? 9));
     assert.equal(await client.evaluate('document.querySelector("header button").textContent'), locale === 'ru' ? 'Применить к черновику' : 'Apply to draft');
     assert.equal(await client.evaluate('document.querySelectorAll("#root img, #root script").length'), 0);
     assert.equal(await client.evaluate('globalThis.queryExecuted === true'), false);

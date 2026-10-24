@@ -31,7 +31,9 @@ async function openConstructor(explorer, document) {
   await Promise.all([vscode.commands.executeCommand("eska.explorer.queryConstructor", document.uri),
     vscode.commands.executeCommand("eska.explorer.queryConstructor", document.uri)]);
   await until(() => explorer.queryDesigner.views.has(document.uri.toString()), "constructor panel");
-  return explorer.queryDesigner.views.get(document.uri.toString());
+  const view = explorer.queryDesigner.views.get(document.uri.toString());
+  await until(() => !view.busy && (!view.binding.core.limits.visual || view.catalog || view.metadataFailed), "constructor ready message acknowledged");
+  return view;
 }
 
 /** Locate a returned metadata identity without matching translated display names. */
@@ -141,7 +143,7 @@ async function visualDom(explorer, owner, accepted) {
   await vscode.commands.executeCommand("eska.explorer.cancelQuery", draft.uri);
 }
 
-/** Installed UI/controller/core preserve dirty owner text and apply one undoable edit to the same private draft. */
+/** Constructor isolation starts after the modal owner's native close decision; apply remains one undoable draft edit. */
 exports.run = async function () {
   const fixture = JSON.parse(process.env.ESKA_HOST_FIXTURE), accepted = [], errors = [];
   let explorer;
@@ -151,15 +153,16 @@ exports.run = async function () {
     const originalExplain = explorer.queries.explain.bind(explorer.queries);
     explorer.queries.explain = error => { errors.push({ code: error.code, details: error.details, message: String(error.stack ?? error) }); originalExplain(error); };
     await until(() => explorer.tree && explorer.connection.state.kind === "ready" && !explorer.support.loading, "metadata ready");
-    const disk = await fs.readFile(fixture.module), owner = await vscode.workspace.openTextDocument(vscode.Uri.file(fixture.module));
-    await replace(owner, "Other = 42", "Other = 43"); const dirtyOwner = owner.getText(), ownerVersion = owner.version;
+    const disk = await fs.readFile(fixture.module); let owner = await vscode.workspace.openTextDocument(vscode.Uri.file(fixture.module));
     let draft = await openQuery(owner); const before = draft.getText(), uri = draft.uri;
+    owner = await vscode.workspace.openTextDocument(owner.uri);
+    const capturedOwner = owner.getText(), ownerVersion = owner.version;
     await vscode.commands.executeCommand("workbench.action.splitEditorRight");
     const view = await openConstructor(explorer, draft);
     assert.equal(view.binding.core.model.text, before);
     assert.equal(vscode.window.tabGroups.all.some(group => group.tabs.some(tab => tab.input instanceof vscode.TabInputText && tab.input.uri.toString() === uri.toString())), false);
     assert.equal((await vscode.workspace.fs.stat(uri)).permissions, vscode.FilePermission.Readonly);
-    assert.equal(owner.version, ownerVersion); assert.equal(owner.getText(), dirtyOwner);
+    assert.equal(owner.version, ownerVersion); assert.equal(owner.getText(), capturedOwner);
     accepted.push("all_editable_splits_replaced_by_constructor_and_core_draft_lock");
     await explorer.queryDesigner.receive(view, { type: "action", action: { kind: "move", selection: { statement: 0, clause: 0, item: 1 }, to: 0 } });
     assert.ok(view.binding.core.model.text.indexOf("// field B") < view.binding.core.model.text.indexOf("1 AS A"));
@@ -171,24 +174,25 @@ exports.run = async function () {
     await explorer.queryDesigner.receive(view, { type: "apply" });
     await until(() => vscode.window.activeTextEditor?.document.uri.toString() === uri.toString(), "same query draft reopened");
     draft = vscode.window.activeTextEditor.document;
-    assert.equal(draft.getText(), working); assert.equal(owner.getText(), dirtyOwner); assert.deepEqual(await fs.readFile(fixture.module), disk);
+    assert.equal(draft.getText(), working); assert.equal(owner.getText(), capturedOwner); assert.deepEqual(await fs.readFile(fixture.module), disk);
     await vscode.commands.executeCommand("undo"); assert.equal(draft.getText(), before, "one native undo returns the pre-constructor draft");
     await vscode.commands.executeCommand("redo"); assert.equal(draft.getText(), working);
     accepted.push("comments_follow_nodes_explicit_keep_and_same_draft_single_undo_redo");
     await vscode.commands.executeCommand("eska.explorer.applyQuery", uri);
-    assert.ok(owner.getText().includes("3 AS C")); assert.ok(owner.getText().includes("Other = 43")); assert.equal(owner.isDirty, true);
+    owner = await vscode.workspace.openTextDocument(owner.uri);
+    assert.ok(owner.getText().includes("3 AS C")); assert.ok(owner.getText().includes("Other = 42")); assert.equal(owner.isDirty, true);
     assert.deepEqual(await fs.readFile(fixture.module), disk);
-    await vscode.window.showTextDocument(owner); await vscode.commands.executeCommand("undo"); assert.equal(owner.getText(), dirtyOwner);
+    await vscode.window.showTextDocument(owner); await vscode.commands.executeCommand("undo"); assert.equal(owner.getText(), capturedOwner);
     accepted.push("constructor_result_uses_existing_explicit_bsl_apply_without_disk_save");
     draft = await openQuery(owner); const unchanged = draft.getText();
     let next = await openConstructor(explorer, draft);
     await explorer.queryDesigner.receive(next, { type: "apply" });
-    draft = vscode.window.activeTextEditor.document; assert.equal(draft.getText(), unchanged); assert.equal(owner.getText(), dirtyOwner);
+    draft = vscode.window.activeTextEditor.document; assert.equal(draft.getText(), unchanged); assert.equal(owner.getText(), capturedOwner);
     accepted.push("opening_and_applying_without_operations_preserves_exact_draft_and_owner");
     next = await openConstructor(explorer, draft);
     await explorer.queryDesigner.receive(next, { type: "action", action: { kind: "append", statement: 0, clause: "order", text: "A" } });
     await explorer.queryDesigner.receive(next, { type: "cancel" });
-    draft = vscode.window.activeTextEditor.document; assert.equal(draft.getText(), unchanged); assert.equal(owner.getText(), dirtyOwner);
+    draft = vscode.window.activeTextEditor.document; assert.equal(draft.getText(), unchanged); assert.equal(owner.getText(), capturedOwner);
     assert.notEqual((await vscode.workspace.fs.stat(draft.uri)).permissions, vscode.FilePermission.Readonly);
     accepted.push("cancel_discards_only_unaccepted_constructor_operations_and_releases_its_lock");
     await vscode.commands.executeCommand("eska.explorer.cancelQuery", draft.uri);

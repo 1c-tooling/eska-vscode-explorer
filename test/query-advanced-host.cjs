@@ -24,7 +24,7 @@ exports.run = async function () {
     editor.selection = new vscode.Selection(at, at); await vscode.commands.executeCommand('eska.explorer.editBslQuery');
     const draft = await until(() => vscode.window.activeTextEditor?.document.uri.scheme === 'eska-query' && vscode.window.activeTextEditor.document, 'query');
     const before = draft.getText(); await vscode.commands.executeCommand('eska.explorer.queryConstructor', draft.uri); client = await connect(until);
-    assert.equal(await client.evaluate('document.querySelectorAll("[role=tab]").length'), 8);
+    assert.equal(await client.evaluate('document.querySelectorAll("[role=tab]").length'), Number(process.env.ESKA_EXPECT_CONSTRUCTOR_PAGES ?? 9));
     await client.evaluate(`const row=[...document.querySelectorAll('.metadata-table')].find(row=>row.querySelector('.table-name').textContent==='Stock');
       if(!row)throw Error('Stock');row.querySelector('button').click();`);
     await until(() => client.evaluate(`!!document.querySelector('[data-table="AccumulationRegister.Stock.BalanceAndTurnovers"]')`), 'virtual catalog'); await ready(client);
