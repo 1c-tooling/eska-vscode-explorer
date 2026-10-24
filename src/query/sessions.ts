@@ -108,6 +108,12 @@ export class QuerySourceSession {
 
   /** Constructor mutation replies adopt the same checkpoint queue and never create an adapter-owned store. */
   private async constructorRequest(method: ConstructorMethod, params: Record<string, unknown>): Promise<unknown> {
+    if (method === "query/constructorCatalog") {
+      // Metadata inspection changes neither the checkpoint nor its header; do not rehydrate a large draft for every tree expansion.
+      const result = await this.client.request(method, { querySessionId: this.current.querySessionId, ...params });
+      if (!isRecord(result) || result.querySessionId !== this.current.querySessionId || result.constructorActive !== true) invalid();
+      return result;
+    }
     this.current = await this.transition(async storeId => this.call(method, storeId, params));
     return this.current;
   }

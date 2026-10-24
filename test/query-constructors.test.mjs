@@ -17,6 +17,15 @@ const executable = process.env.ESKA_TEST_BINARY, limits = { maxExpression: 16384
 const capability = { schemaVersion: 1, writesOwner: false, writesDraft: true, explicitFinish: true, exclusiveDraft: true,
   lossless: true, nativeDraftPlan: true, sourceCommentPositions: true, sharedQueryBudget: true, maxExpressionBytes: 16384, maxModelBytes: 33554432, clauses: [...CLAUSES] };
 
+/** Structured operations and metadata choices require an explicit coherent capability, never a guessed crate version. */
+test("visual constructor capabilities are additive and require Metadata API 1.22", () => {
+  const visual = { ...capability, visualExpressions: true, metadataCatalog: true };
+  assert.deepEqual(constructorCapabilities({ apiVersion: { major: 1, minor: 22 }, capabilities: { queryConstructor: visual } }), { ...limits, visual: true });
+  for (const [minor, change] of [[21, {}], [22, { metadataCatalog: false }], [22, { visualExpressions: false }]]) {
+    assert.throws(() => constructorCapabilities({ apiVersion: { major: 1, minor }, capabilities: { queryConstructor: { ...visual, ...change } } }), { code: "protocolInvalid" });
+  }
+});
+
 /** Version and explicit ownership semantics are required independently from language projections. */
 test("constructor capability requires an exclusive lossless native-draft plan contract", () => {
   const hello = { apiVersion: { major: 1, minor: 21 }, capabilities: { queryConstructor: capability } };
@@ -55,7 +64,8 @@ async function fixture(t, locale, readonly = false) {
     catch (error) { error.message += ` ${method} ${JSON.stringify(error.details)}`; throw error; }
   };
 
-  assert.deepEqual(connection.recovery.sessions.capabilities.constructorLimits, limits);
+  const constructor = connection.recovery.sessions.capabilities.constructorLimits;
+  assert.deepEqual({ maxExpression: constructor.maxExpression, maxModel: constructor.maxModel }, limits);
   tree = new MetadataTree(connection, state.session, () => {}, () => {});
   const project = tree.projects[0], entry = await revealFile(tree, files.module);
   store = new QueryRecovery(connection.recovery, join(outer, "private"), () => assert.fail("valid checkpoint")); await store.records();
@@ -76,6 +86,32 @@ function apply(text, plan) {
 }
 
 for (const locale of ["ru-RU", "en-US"]) {
+  test(`large constructor expressions remain inspectable without malformed structured DTOs (${locale})`, { skip: !executable }, async t => {
+    const f = await fixture(t, locale), text = `SELECT ${"A".repeat(16385)} FROM T`;
+    await f.store.saveDraft(f.source.record.id, text);
+    const constructor = await f.source.openConstructor();
+    const item = constructor.model.statements[0].clauses[0].items[0];
+    assert.equal(item.expression, null); assert.equal(item.visual, null); assert.equal(item.unavailable.replace, "expression_too_large");
+    await constructor.cancel(); assert.equal(f.source.record.draft, text);
+  });
+  test(`real visual metadata selection uses core-qualified fields and keeps source/checkpoint unchanged (${locale})`, { skip: !executable }, async t => {
+    const f = await fixture(t, locale), original = f.source.record.draft, disk = await readFile(f.files.module);
+    const constructor = await f.source.openConstructor(); assert.equal(constructor.limits.visual, true);
+    const methods = [], request = f.connection.child.request.bind(f.connection.child);
+    f.connection.child.request = (method, ...args) => { methods.push(method); return request(method, ...args); };
+    const page = await constructor.catalog({ search: "Товары" }); assert.equal(page.tables.length, 1);
+    assert.deepEqual(methods, ["query/constructorCatalog"], "metadata inspection never reloads private draft parts");
+    const table = page.tables[0]; assert.equal(table.english, "Catalog.Товары");
+    const metadata = await constructor.catalog({ table: table.english, qualifier: "Товары" });
+    assert.ok(metadata.found); assert.ok(metadata.fields.some(field => field.english === "Товары.Артикул"));
+    assert.ok(metadata.tables.some(table => table.english === "Catalog.Товары.Строки"));
+    await constructor.action({ kind: "compose", statement: 0, selection: null, expression: { kind: "source", table: table.english, alias: "" } });
+    assert.ok(constructor.model.statements[0].sources.some(source => source.alias === "Товары"));
+    await constructor.action({ kind: "appendFields", statement: 0, fields: ["Товары.Артикул", "Товары.Ref", "Товары.Ref"] });
+    assert.equal(constructor.model.text.match(/Товары\.Ref/g).length, 1);
+    assert.equal(f.source.record.draft, original); assert.deepEqual(await readFile(f.files.module), disk);
+    await constructor.cancel(); assert.equal(f.source.record.draft, original);
+  });
   test(`real constructor plans, cancels and explicitly publishes the same BSL draft (${locale})`, { skip: !executable }, async t => {
     const f = await fixture(t, locale), before = f.source.record.draft;
     let constructor = await f.source.openConstructor();

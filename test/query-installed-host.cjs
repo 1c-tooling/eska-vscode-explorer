@@ -33,10 +33,10 @@ exports.run = async function () {
       return result?.items.some(item => (typeof item.label === 'string' ? item.label : item.label.label) === input.labelA);
     }, 'published analyzer metadata completion');
     await vscode.commands.executeCommand('eska.explorer.queryConstructor', draft.uri); client = await connect(until);
-    assert.equal(await client.evaluate('document.querySelectorAll(".sections > section").length'), 6);
-    await client.evaluate('document.querySelector(".sections > section .section-title button").click()');
-    await client.evaluate('document.querySelector("textarea").value="99 AS InstalledField"; document.querySelector(".expression button").click()');
-    await until(() => client.evaluate('document.querySelector(".sections > section").textContent.includes("99 AS InstalledField")'), 'DOM accepted expression');
+    assert.equal(await client.evaluate('document.querySelectorAll("[role=tab]").length'), 5);
+    await client.evaluate(`document.querySelector('[data-section="fields"] .action-add').click()`);
+    await client.evaluate(`for (const [key,value] of [["expression","99"],["alias","InstalledField"]]) { const input=document.querySelector('.expression [name="'+key+'"]'); input.value=value; input.dispatchEvent(new Event("input",{bubbles:true})); } document.querySelector(".expression").requestSubmit();`);
+    await until(() => client.evaluate(`document.querySelector('[data-section="fields"]').textContent.includes("99 AS InstalledField")`), 'DOM accepted expression');
     await client.evaluate('document.querySelector("header button").click()'); client.close(); client = undefined;
     const changed = await until(() => {
       const document = vscode.window.activeTextEditor?.document;

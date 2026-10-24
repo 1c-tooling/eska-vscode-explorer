@@ -40,6 +40,7 @@ exports.connect = async function (until) {
     const value = await found.connection.request('Runtime.evaluate', { contextId: found.contextId, expression, returnByValue: true, awaitPromise: true });
     if (value.exceptionDetails) throw new Error(JSON.stringify(value.exceptionDetails)); return value.result.value;
   };
+  await until(async () => await evaluate('document.getElementById("root").getAttribute("aria-busy") !== "true"'), 'constructor metadata controls ready');
   return { evaluate, close: () => { for (const connection of connections.values()) connection.close(); },
     screenshot: async file => {
       const [connection] = connections.values(); await connection.request('Page.enable');
@@ -52,21 +53,21 @@ exports.connect = async function (until) {
 exports.exercise = async function ({ explorer, view, until, locale }) {
   const client = await exports.connect(until);
   try {
-    assert.equal(await client.evaluate('document.querySelectorAll(".sections > section").length'), 6);
+    assert.equal(await client.evaluate('document.querySelectorAll("[role=tab]").length'), 5);
     assert.equal(await client.evaluate('document.querySelector("header button").textContent'), locale === 'ru' ? 'Применить к черновику' : 'Apply to draft');
     assert.equal(await client.evaluate('document.querySelectorAll("#root img, #root script").length'), 0);
     assert.equal(await client.evaluate('globalThis.queryExecuted === true'), false);
     assert.equal(await client.evaluate('document.body.scrollWidth <= innerWidth'), true);
     const before = view.binding.core.model.revision;
-    await client.evaluate('document.querySelector(".sections > section .section-title button").click()');
-    await client.evaluate('document.querySelector("textarea").value = "99 AS BrowserField"; document.querySelector(".expression button").click()');
+    await client.evaluate(`document.querySelector('[data-section="fields"] .action-add').click()`);
+    await client.evaluate(`for (const [key,value] of [["expression","99"],["alias","BrowserField"]]) { const input=document.querySelector('.expression [name="'+key+'"]'); input.value=value; input.dispatchEvent(new Event("input",{bubbles:true})); } document.querySelector(".expression").requestSubmit();`);
     await until(() => view.binding.core.model.revision !== before && !view.busy, 'DOM expression reached ESKA');
-    await until(async () => await client.evaluate('document.querySelector(".sections > section").textContent.includes("99 AS BrowserField")'), 'acknowledged DOM row');
+    await until(async () => await client.evaluate(`document.querySelector('[data-section="fields"]').textContent.includes("99 AS BrowserField")`), 'acknowledged DOM row');
     assert.equal(await client.evaluate('document.querySelectorAll("#root img").length'), 0);
     const stand = process.env.ESKA_HOST_DOM_ARTIFACTS;
     if (stand) { await fs.mkdir(stand, { recursive: true }); await client.screenshot(path.join(stand, `constructor-${locale}.png`)); }
     await client.evaluate('document.querySelectorAll("header button")[1].click()');
     await until(() => view.ending && !explorer.queryDesigner.views.size, 'DOM cancellation returned to draft');
-    return 'installed_webview_dom_six_sections_translated_labels_text_only_rendering_expression_submission_and_cancel';
+    return 'installed_webview_dom_five_tabs_translated_labels_text_only_rendering_expression_submission_and_cancel';
   } finally { client.close(); }
 };
