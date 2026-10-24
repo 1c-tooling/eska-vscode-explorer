@@ -859,6 +859,7 @@ export class QueryTabs implements vscode.FileSystemProvider {
         tab.input instanceof vscode.TabInputText && tab.input.uri.toString() === this.uri(session.record).toString()) : [];
       const active = vscode.window.activeTextEditor?.document.uri;
       if (!parentTabs.some(tab => !tab.isDirty) && !draftTabs.length && !(active && session.parent.contains(active))) continue;
+      let closed = false;
       const guard = (async () => {
         await this.focus(session);
         if (this.disposed || session.ending || !session.parent?.active || !this.sessions.has(session.record.id)) return;
@@ -866,14 +867,13 @@ export class QueryTabs implements vscode.FileSystemProvider {
         const currentDraftTabs = session.design?.parentLocked || session.review?.parentLocked ? vscode.window.tabGroups.all.flatMap(group => group.tabs).filter(tab =>
           tab.input instanceof vscode.TabInputText && tab.input.uri.toString() === this.uri(session.record).toString()) : [];
         const tabs = [...session.parent.tabs(), ...currentDraftTabs].filter(tab => !tab.isDirty);
-        if (tabs.length) await vscode.window.tabGroups.close(tabs, true);
+        if (tabs.length) closed = await vscode.window.tabGroups.close(tabs, true);
       })();
       session.guarding = guard;
-      let failed = false;
-      void guard.catch(error => { failed = true; this.failure(error); }).finally(() => {
+      void guard.catch(error => this.failure(error)).finally(() => {
         if (session.guarding === guard) delete session.guarding;
-        // A parent open can finish after its first tab event; process that final activation as well.
-        if (!failed) this.guardParents();
+        // A completed close can expose a late parent tab. A stale dirty TextEditor must never reschedule focus by itself.
+        if (closed) this.guardParents();
       });
     }
   }
