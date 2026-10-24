@@ -98,7 +98,7 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
   private supportContextsPending: Promise<void> = Promise.resolve();
 
   constructor(private readonly context: vscode.ExtensionContext) {
-    this.support = new SupportController(context, () => this.supportRepaint(), text => this.output.warn(text));
+    this.support = new SupportController(context, entries => this.supportRepaint(entries), text => this.output.warn(text));
     this.supportContexts = new SupportContexts(String(context.extension.packageJSON.version), (trees, pending) => {
       this.additionalPolicyTrees = trees; this.support.setAdditionalTrees(trees, pending);
     }, () => this.support.invalidate(), text => this.output.info(text));
@@ -490,7 +490,11 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
   }
 
   /** Preserve native selection while the support preloader temporarily replaces the roots. */
-  private supportRepaint(): void {
+  private supportRepaint(entries?: TreeEntry[]): void {
+    if (entries) {
+      if (entries.length) this.changed.fire(entries);
+      return;
+    }
     const selected = this.view?.selection[0];
     if (this.support.loading && !this.supportSelection && this.tree && selected && "node" in selected) {
       this.supportSelection = { tree: this.tree, entry: selected };

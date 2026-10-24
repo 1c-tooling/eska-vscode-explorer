@@ -8,9 +8,8 @@ import { reconcileRules, readonlyPattern, readonlyPatterns } from './support-set
 import { ProtectedSources } from './protected-source.js';
 import { SourceAccess } from './source-access.js';
 import { nativeDirty } from './query/owner.js';
+import { SupportObjectQueue, type ObjectPolicy, type ObjectSnapshot } from './support-objects.js';
 
-type State = 'locked' | 'editableWithSupport' | 'unrestricted' | 'unknown';
-interface ObjectPolicy { objectId: string; uuid: string; state: State; reason: string }
 interface FilePolicy { path: string; objects: string[]; readOnly: boolean; mixed: boolean; unknown: boolean }
 interface Snapshot { generation: string; eventSequence: string; objects: Map<string, ObjectPolicy>; files: FilePolicy[]; diagnostics: string[] }
 
@@ -42,6 +41,8 @@ export class SupportController implements vscode.FileDecorationProvider {
   private fileTimer: NodeJS.Timeout | undefined;
   private serial: Promise<void> = Promise.resolve();
   private readonly snapshots = new Map<ProjectTree, Snapshot>();
+  private readonly objectSnapshots = new Map<ProjectTree, ObjectSnapshot>();
+  private readonly objectQueue: SupportObjectQueue;
   private readonly changed = new vscode.EventEmitter<vscode.Uri[] | undefined>();
   readonly onDidChangeFileDecorations = this.changed.event;
   private readonly subscription: vscode.Disposable;
@@ -62,7 +63,9 @@ export class SupportController implements vscode.FileDecorationProvider {
   private readonly mixedObjects = new Map<ProjectTree, Set<string>>();
   private readonly fileIndex = new Map<string, { file: FilePolicy; snapshot: Snapshot }>();
 
-  constructor(private readonly context: vscode.ExtensionContext, private readonly repaint: () => void, private readonly log: (text: string) => void) {
+  constructor(private readonly context: vscode.ExtensionContext, private readonly repaint: (entries?: TreeEntry[]) => void, private readonly log: (text: string) => void) {
+    this.objectQueue = new SupportObjectQueue((project, snapshot) => this.publishObjects(project, snapshot),
+      error => this.log(`support_object_failed ${String(error)}`));
     this.subscription = vscode.window.registerFileDecorationProvider(this);
     this.documentSubscription = vscode.workspace.onDidOpenTextDocument(document => {
       if (document.uri.scheme === 'file') this.queueFile(document.uri.fsPath);
@@ -109,7 +112,7 @@ export class SupportController implements vscode.FileDecorationProvider {
     const key = JSON.stringify([this.enabled, this.available, this.pendingFolders, [this.tree, ...this.additional].filter(Boolean).map(tree => [tree?.session.sessionId, tree?.projects.map(project => [project.supportGeneration ?? project.info.generation, project.supportEventSequence ?? project.info.eventSequence])])]);
     if (key === this.requested) {
       // A backend-confirmed BSL-only edit advances metadata tokens without changing support.
-      for (const [project, snapshot] of this.snapshots) {
+      for (const [project, snapshot] of [...this.snapshots, ...this.objectSnapshots]) {
         snapshot.generation = project.info.generation;
         snapshot.eventSequence = project.info.eventSequence;
       }
@@ -117,6 +120,7 @@ export class SupportController implements vscode.FileDecorationProvider {
     }
     this.requested = key;
     const epoch = ++this.epoch;
+    this.objectQueue.invalidate(); this.objectSnapshots.clear();
     clearTimeout(this.fileTimer);
     this.requestedEntries.clear();
     this.loading = this.enabled && !!this.tree && this.available && !this.targeted;
@@ -140,7 +144,7 @@ export class SupportController implements vscode.FileDecorationProvider {
   object(entry: TreeEntry): ObjectPolicy | undefined {
     if (!this.enabled || entry.node.id.kind === 'collection') return undefined;
     const id = entry.node.id.kind === 'object' ? entry.node.id.objectId : entry.node.id.owner;
-    const snapshot = this.snapshots.get(entry.project);
+    const snapshot = this.objectSnapshots.get(entry.project) ?? this.snapshots.get(entry.project);
     const current = snapshot?.generation === entry.project.info.generation && snapshot?.eventSequence === entry.project.info.eventSequence;
     if (!current || !snapshot.objects.has(id)) this.queueEntry(entry);
     return (current ? snapshot.objects.get(id) : undefined) ?? { objectId: id, uuid: '', state: 'unknown', reason: this.available ? 'unknown' : 'compatibility' };
@@ -151,7 +155,7 @@ export class SupportController implements vscode.FileDecorationProvider {
     const policy = this.object(entry);
     if (!policy) return '';
     const details = [supportText(policy.reason)];
-    const snapshot = this.snapshots.get(entry.project);
+    const snapshot = this.objectSnapshots.get(entry.project) ?? this.snapshots.get(entry.project);
     if (policy.state === 'unknown' && snapshot?.diagnostics.length) details.push(snapshot.diagnostics.join('; '));
     if (entry.node.id.kind === 'object' && this.mixedObjects.get(entry.project)?.has(policy.objectId)) details.push(supportText('mixed'));
     return details.join('\n');
@@ -309,6 +313,11 @@ export class SupportController implements vscode.FileDecorationProvider {
     if (!this.targeted || this.stopped || !this.enabled) return;
     const tree = [this.tree, ...this.additional].find(tree => tree?.projects.includes(entry.project));
     if (!tree) return;
+    if (tree.connection.state.kind === 'ready' && tree.connection.state.supportObjects) {
+      if (entry.node.id.kind !== 'collection') this.objectQueue.enqueue(tree, entry.project,
+        entry.node.id.kind === 'object' ? entry.node.id.objectId : entry.node.id.owner);
+      return;
+    }
     const key = JSON.stringify([entry.project.key, entry.node.id]);
     if (this.requestedEntries.has(key)) return;
     this.requestedEntries.add(key);
@@ -324,6 +333,16 @@ export class SupportController implements vscode.FileDecorationProvider {
         this.queueFile(join(nativePath(entry.project.info.sourcePath), local));
       }
     }).catch(error => this.log(`support_object_failed ${String(error)}`));
+  }
+
+  /** Display policy never writes readonly settings or replaces a concurrently checked file snapshot. */
+  private publishObjects(project: ProjectTree, snapshot: ObjectSnapshot): void {
+    const previous = this.objectSnapshots.get(project);
+    const current = previous?.generation === snapshot.generation && previous.eventSequence === snapshot.eventSequence;
+    this.objectSnapshots.set(project, current ? { ...snapshot, objects: new Map([...previous.objects, ...snapshot.objects]) } : snapshot);
+    const entries = [...project.nodes.values()].filter(entry => entry.node.id.kind !== 'collection'
+      && snapshot.objects.has(entry.node.id.kind === 'object' ? entry.node.id.objectId : entry.node.id.owner));
+    this.repaint(entries);
   }
 
   /** A bounded request returns only touched files; no global inventory or giant settings update is needed. */
@@ -554,6 +573,7 @@ export class SupportController implements vscode.FileDecorationProvider {
   /** Deactivation awaits cleanup; no writeable-in-session command is ever invoked. */
   async shutdown(): Promise<void> {
     this.stopped = true; this.epoch++; clearTimeout(this.timer); clearTimeout(this.fileTimer);
+    await this.objectQueue.shutdown();
     await this.serial;
     await this.apply([]);
     this.subscription.dispose(); this.settingsSubscription.dispose(); this.documentSubscription.dispose(); this.editorSubscription.dispose(); this.changed.dispose();
