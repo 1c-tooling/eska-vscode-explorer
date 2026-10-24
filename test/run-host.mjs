@@ -20,10 +20,13 @@ if (!isAbsolute(playground)) throw new Error("ESKA_TEST_ROOT must be absolute.")
 const root = await mkdtemp(join(playground, "explorer-host-"));
 try {
   const fixture = await createTreeProject(join(root, "project"), process.env.ESKA_HOST_PROJECT_TYPE ?? "configuration");
-  if (["query-advanced-host.cjs", "query-package-host.cjs", "query-having-host.cjs", "query-total-sections-host.cjs"].includes(basename(suite))) {
+  if (["query-advanced-host.cjs", "query-package-host.cjs", "query-having-host.cjs", "query-total-sections-host.cjs", "query-dcs-host.cjs"].includes(basename(suite))) {
     await (await import("./query-advanced-fixture.mjs")).addQueryRegister(fixture);
     fixture.query = await (await import("./query-fixture.mjs")).createQuerySource(fixture);
     await writeFile(fixture.module, '\ufeff// owner 😀\r\nQ = "SELECT 1\r\n|AS Value";\r\nOther = 42;\r\n');
+  }
+  if (basename(suite) === "query-dcs-host.cjs") {
+    await writeFile(fixture.module, '\ufeff// owner 😀\r\nQ = "SELECT T.Ref AS Value FROM Catalog.Товары AS T";\r\nOther = 42;\r\n');
   }
   if (["query-tabs-host.cjs", "query-session-host.cjs", "query-bsl-host.cjs", "query-bsl-restore-host.cjs", "query-bsl-windows-host.cjs", "query-modal-host.cjs", "query-modal-normal-host.cjs", "query-modal-restore-host.cjs", "query-builder-host.cjs"].includes(basename(suite))) fixture.query = await (await import("./query-fixture.mjs")).createQuerySource(fixture);
   if (["query-bsl-host.cjs", "query-bsl-restore-host.cjs", "query-bsl-windows-host.cjs", "query-modal-host.cjs", "query-modal-normal-host.cjs", "query-modal-restore-host.cjs", "query-builder-host.cjs"].includes(basename(suite))) {

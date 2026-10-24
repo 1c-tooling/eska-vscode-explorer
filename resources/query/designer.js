@@ -290,10 +290,61 @@
     node.append(fields, groups); return node;
   }
 
+  /** DCS positions, previews and permissions are projected by ESKA over the canonical query. */
+  function dcs() {
+    const l = state.labels, view = statement().dcs, node = panel(l.dcs, "dcs-settings");
+    node.append(element("p", l.dcsNotice, "notice"));
+    for (const [target, allowed] of [["select", view.addSelect], ["where", view.addWhere]]) {
+      node.append(button(l.add + " · " + l[`dcs${target[0].toUpperCase()}${target.slice(1)}`], () => {
+        editing = { dcs: { node: null, target, enabled: true, values: [{ kind: "field", expression: "", children: false, alias: "" }] } }; render();
+      }, !allowed ? "unsupported" : null, `dcs-add-${target}`));
+    }
+    for (const value of view.nodes) {
+      const row = element("div", undefined, "row dcs-node"); row.dataset.kind = value.kind; row.dataset.index = String(value.index);
+      row.append(element("h3", l[`dcs${value.kind[0].toUpperCase()}${value.kind.slice(1)}`]), element("pre", value.preview));
+      const reason = !value.editable || !state.model.writable ? "unsupported" : null;
+      if (value.kind === "optionalSource") row.append(button(l.dcsEnabled, () => send({ kind: "setDcs", statement: selected, node: value.index, target: value.kind, values: [], enabled: !value.enabled }), reason, "dcs-toggle"));
+      else row.append(button(l.edit, () => { editing = { dcs: { node: value.index, target: value.kind, values: structuredClone(value.values), enabled: true } }; render(); }, reason, "dcs-edit"));
+      if (value.enabled && ["select", "where", "virtualFilter"].includes(value.kind)) row.append(button(l.remove, () => send({ kind: "setDcs", statement: selected, node: value.index, target: value.kind, values: [], enabled: false }), reason, "dcs-remove"));
+      if (value.kind === "optionalSource") row.lastChild.setAttribute("aria-pressed", String(value.enabled));
+      node.append(row);
+    }
+    return node;
+  }
+
+  /** Lists are edited as typed values; no braces, separators or query keywords are generated in the renderer. */
+  function dcsForm() {
+    const l = state.labels, value = editing.dcs, form = element("form", undefined, "expression dcs-expression");
+    form.append(element("h2", l[`dcs${value.target[0].toUpperCase()}${value.target.slice(1)}`]));
+    if (value.target === "parameter") {
+      input(form, l.parameters, "name", value.values[0]);
+      const label = element("label", l.dcsEnabled), check = element("input"); check.type = "checkbox"; check.name = "enabled"; check.checked = value.enabled;
+      check.addEventListener("change", () => { value.enabled = check.checked; }); label.append(check); form.append(label);
+    } else {
+      for (const [index, entry] of value.values.entries()) {
+        const row = element("fieldset"); row.dataset.value = String(index);
+        if (entry.kind === "condition") condition(row, entry, false);
+        else {
+          input(row, l.expression, "expression", entry);
+          if (value.target !== "select") input(row, l.alias, "alias", entry, { required: false });
+          const label = element("label", l.dcsChildren), check = element("input"); check.type = "checkbox"; check.name = "children"; check.checked = entry.children;
+          check.addEventListener("change", () => { entry.children = check.checked; }); label.append(check); row.append(label);
+        }
+        row.append(button(l.remove, () => { value.values.splice(index, 1); render(); })); form.append(row);
+      }
+      form.append(button(l.add + " · " + l.fields, () => { value.values.push({ kind: "field", expression: "", children: false, alias: "" }); render(); }, value.values.length >= 128 ? "model_limit" : null, "dcs-add-field"));
+      if (value.target !== "select") form.append(button(l.add + " · " + l.conditions, () => { value.values.push({ kind: "condition", left: "", comparison: "equal", right: "" }); render(); }, value.values.length >= 128 ? "model_limit" : null, "dcs-add-condition"));
+    }
+    const accept = button(l.submit, () => {}); accept.type = "submit"; accept.dataset.action = "submit";
+    form.addEventListener("submit", event => { event.preventDefault(); if (!state.busy && !state.paused && form.reportValidity()) send({ kind: "setDcs", statement: selected, ...structuredClone(value) }); });
+    form.append(accept, button(l.close, () => { editing = undefined; render(); })); root.append(form);
+  }
+
   /** Pages group domain clauses and scopes; selecting a page never changes query text. */
   function renderPage(container) {
     const l = state.labels;
-    if (page === "packages") { container.append(packages()); }
+    if (page === "dcs") { container.append(dcs()); }
+    else if (page === "packages") { container.append(packages()); }
     else if (page === "tablesFields") {
       container.classList.add("three-panes"); container.append(database(), sources(), list("fields", l.selectedFields));
     } else if (page === "joins") {
@@ -408,6 +459,7 @@
 
   /** Expression mode is an explicit escape hatch; switching modes never reparses text in the renderer. */
   function renderEditor() {
+    if (editing.dcs) { dcsForm(); return; }
     const l = state.labels, form = element("form", undefined, "expression"); form.append(element("h2", l.edit));
     if (editing.raw) {
       const text = element("textarea"); text.name = "raw"; text.value = editing.initial; text.rows = 4;
@@ -446,7 +498,7 @@
     if (statement()?.package?.operation === "destroy") page = "packages";
     if (state.paused) root.append(element("p", state.pausedText, "error"));
     for (const issue of state.model.issues ?? []) root.append(element("p", issue.code === "union_field_count" ? l.unionMismatch : `${l.packageIssue}: ${issue.table}${issue.column ? `.${issue.column}` : ""}`, "error"));
-    const pages = [...basePages, ...(state.features.unions ? ["unions"] : []), ...(state.features.totals ? ["totals"] : []), ...(state.features.packages && !statement()?.nested ? ["packages"] : [])];
+    const pages = [...basePages, ...(state.features.unions ? ["unions"] : []), ...(state.features.totals ? ["totals"] : []), ...(state.features.packages && !statement()?.nested ? ["packages"] : []), ...(state.features.dcs ? ["dcs"] : [])];
     if (!pages.includes(page)) page = "tablesFields";
     const tabs = element("nav", undefined, "tabs"); tabs.setAttribute("role", "tablist");
     for (const value of pages) {
@@ -463,7 +515,7 @@
     root.append(tabs);
     const owner = statement(), content = element("div", undefined, "sections"); content.id = "query-page"; content.setAttribute("role", "tabpanel"); content.setAttribute("aria-labelledby", `tab-${page}`);
     if (!owner) content.append(element("p", l.empty));
-    else if (owner.unavailable) content.append(element("p", state.reasons[owner.unavailable] ?? l.empty, "notice"));
+    else if (owner.unavailable && page !== "dcs") content.append(element("p", state.reasons[owner.unavailable] ?? l.empty, "notice"));
     else renderPage(content);
     root.append(content); if (editing) renderEditor();
     const preview = element("details", undefined, "query-preview"); preview.append(element("summary", l.text), element("pre", state.model.text)); root.append(preview);
@@ -472,6 +524,7 @@
       const restored = [...root.querySelectorAll("input,textarea,select")].find(node => node.name === focus);
       if (restored) { restored.focus(); if (typeof start === "number" && restored.setSelectionRange && !["select-one", "select-multiple"].includes(restored.type)) restored.setSelectionRange(start, end); }
     }
+    tabs.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: "nearest", inline: "nearest" });
   }
 
   /** While a child scope is open, parent selectors are replaced with one explicit return control. */

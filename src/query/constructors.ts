@@ -9,7 +9,7 @@ export const PACKAGE_CLAUSES = [...CLAUSES, "into", "destroy", "index"] as const
 export const HAVING_CLAUSES = [...PACKAGE_CLAUSES, "having"] as const;
 export type ConstructorClauseKind = typeof HAVING_CLAUSES[number];
 export type ConstructorMethod = "query/constructorOpen" | "query/constructorPlan" | "query/constructorModel" | "query/constructorAction" | "query/constructorFinish" | "query/constructorCancel" | "query/constructorCatalog";
-export interface ConstructorLimits { maxExpression: number; maxModel: number; visual?: boolean; virtualTables?: boolean; nestedQueries?: boolean; unions?: boolean; totals?: boolean; packages?: boolean; having?: boolean; multipleTotals?: boolean }
+export interface ConstructorLimits { maxExpression: number; maxModel: number; visual?: boolean; virtualTables?: boolean; nestedQueries?: boolean; unions?: boolean; totals?: boolean; packages?: boolean; having?: boolean; multipleTotals?: boolean; dcs?: boolean }
 export interface ConstructorSelection { statement: number; clause: number; item: number }
 export type Comparison = "equal" | "notEqual" | "less" | "lessOrEqual" | "greater" | "greaterOrEqual" | "like" | "in" | "inHierarchy";
 export type Aggregate = "sum" | "count" | "minimum" | "maximum" | "average" | null;
@@ -32,6 +32,7 @@ export interface CatalogField { russian: string; english: string }
 export interface CatalogPage { tables: CatalogTable[]; fields: CatalogField[]; parameters?: CatalogParameter[]; temporaryTables?: { name: string; scope: number; statement: number }[]; nextOffset: number | null; found: boolean; limitedContext: boolean; contextFingerprint: string }
 export interface CatalogQuery { search?: string; offset?: number; limit?: number; table?: string; qualifier?: string; virtualTables?: boolean; source?: ConstructorSelection; scope?: number; atStatement?: number }
 export type ConstructorAction = { kind: "compose"; statement: number; selection: ConstructorSelection | null; expression: VisualExpression }
+  | { kind: "setDcs"; statement: number; node: number | null; target: DcsKind; values: DcsValue[]; enabled: boolean; comments?: "keep" | "discard" }
   | { kind: "composeTotal"; statement: number; section: number; selection: ConstructorSelection | null; expression: VisualExpression }
   | { kind: "appendTotal"; statement: number; section: number; clause: "totals" | "totalGroups"; text: string }
   | { kind: "addTotals"; statement: number; after: number | null }
@@ -61,7 +62,12 @@ export interface ConstructorStatement {
   scope?: number; branch?: number; nested?: boolean; result?: boolean; columns?: string[];
   package?: PackageControls;
   totalSections?: ConstructorTotalSection[]; addTotals?: boolean;
+  dcs?: { russian: boolean; addSelect: boolean; addWhere: boolean; nodes: DcsNode[] };
 }
+export type DcsKind = "select" | "where" | "parameter" | "virtualFilter" | "optionalSource" | "opaque";
+export type DcsValue = { kind: "field"; expression: string; children: boolean; alias: string }
+  | { kind: "condition"; left: string; comparison: Comparison; right: string } | { kind: "parameter"; name: string };
+export interface DcsNode { preview: string; index: number; kind: DcsKind; range: ByteRange; values: DcsValue[]; enabled: boolean; editable: boolean; comments: number }
 export interface ConstructorTotalSection { index: number; fields: number; groups: number; range: ByteRange; remove: boolean; moveUp: number | null; moveDown: number | null }
 export interface PackageControls { operation: "select" | "destroy" | null; position: number | null; first: number; destination: string | null; add: boolean; remove: boolean; setInto: boolean; moveUp: number | null; moveDown: number | null }
 export interface ConstructorSource { table: string; alias: string; clause?: number; item?: number; derived?: boolean; nestedScope?: number | null; parameters?: string[] }
@@ -102,6 +108,10 @@ export function constructorCapabilities(hello: unknown): ConstructorLimits | und
     if (hello.apiVersion.minor < 28 || value.multipleTotals !== true || value.maxTotalSections !== 32 || !flags.having) invalid();
     flags.multipleTotals = true;
   }
+  if (value.dcs !== undefined) {
+    if (hello.apiVersion.minor < 29 || value.dcs !== true || value.maxDcsValues !== 128 || !flags.multipleTotals) invalid();
+    flags.dcs = true;
+  }
   const clauses = flags.having ? HAVING_CLAUSES : flags.packages ? PACKAGE_CLAUSES : flags.totals ? CLAUSES : BASE_CLAUSES;
   if (value.clauses.length !== clauses.length || !value.clauses.every((kind, index) => kind === clauses[index])) invalid();
   const visual = value.visualExpressions !== undefined || value.metadataCatalog !== undefined;
@@ -127,6 +137,7 @@ export function constructorModel(raw: unknown, limits: ConstructorLimits, id?: s
         && (source.parameters === undefined || parameters(source.parameters))))) invalid();
     if (limits.packages) validatePackage(statement.package, raw.statements.length);
     if (limits.multipleTotals) validateTotals(statement, raw.bytes);
+    if (limits.dcs) validateDcs(statement, raw.bytes);
     for (const [index, option] of statement.append.entries()) {
       if (!isRecord(option) || option.kind !== clauses[index] || !reason(option.unavailable)) invalid();
     }
@@ -195,6 +206,7 @@ export class QueryConstructor {
 
   /** Stale indices are rejected by ESKA, including parallel actions captured before the previous reply. */
   async action(action: ConstructorAction): Promise<void> {
+    if (action.kind === "setDcs" && !this.limits.dcs) throw new ExplorerError("incompatible");
     if (["setInto", "addStatement", "removeStatement", "moveStatement"].includes(action.kind) && !this.limits.packages) throw new ExplorerError("incompatible");
     if (["addTotals", "removeTotals", "moveTotals", "composeTotal", "appendTotal"].includes(action.kind) && !this.limits.multipleTotals) throw new ExplorerError("incompatible");
     const result = await this.request("query/constructorAction", { action });
@@ -273,6 +285,27 @@ function validatePackage(value: unknown, statements: number): void {
     || !(value.position === null || unsigned(value.position)) || !unsigned(value.first) || value.first >= statements
     || !(value.destination === null || shortText(value.destination)) || ![value.add, value.remove, value.setInto].every(v => typeof v === "boolean")
     || ![value.moveUp, value.moveDown].every(v => v === null || unsigned(v))) invalid();
+}
+
+/** The transport checks DTO shape and byte containment; DCS grammar, signatures and positions belong to ESKA. */
+function validateDcs(owner: Record<string, unknown>, bytes: number): void {
+  const value = owner.dcs;
+  if (!isRecord(value) || typeof value.russian !== "boolean" || typeof value.addSelect !== "boolean" || typeof value.addWhere !== "boolean"
+    || !Array.isArray(value.nodes) || value.nodes.length > 65_536 || !isByteRange(owner.range, bytes)) invalid();
+  for (const [index, node] of value.nodes.entries()) {
+    if (!isRecord(node) || node.index !== index || !["select", "where", "parameter", "virtualFilter", "optionalSource", "opaque"].includes(String(node.kind))
+      || !isByteRange(node.range, bytes) || node.range.start < owner.range.start || node.range.end > owner.range.end
+      || typeof node.preview !== "string" || typeof node.enabled !== "boolean" || typeof node.editable !== "boolean" || !unsigned(node.comments)
+      || !Array.isArray(node.values) || node.values.length > 128 || !node.values.every(dcsValue)) invalid();
+  }
+}
+
+/** DCS value controls contain data only and never transmit a renderer-generated fragment. */
+function dcsValue(value: unknown): boolean {
+  if (!isRecord(value)) return false;
+  if (value.kind === "parameter") return shortText(value.name);
+  if (value.kind === "field") return shortText(value.expression) && shortText(value.alias) && typeof value.children === "boolean";
+  return value.kind === "condition" && visualExpression({ ...value, kind: "condition" });
 }
 
 /** The transport validates section-to-clause references; SQL pairing and edit permissions come exclusively from ESKA. */

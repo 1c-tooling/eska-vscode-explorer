@@ -18,6 +18,16 @@ const executable = process.env.ESKA_TEST_BINARY, limits = { maxExpression: 16384
 const capability = { schemaVersion: 1, writesOwner: false, writesDraft: true, explicitFinish: true, exclusiveDraft: true,
   lossless: true, nativeDraftPlan: true, sourceCommentPositions: true, sharedQueryBudget: true, maxExpressionBytes: 16384, maxModelBytes: 33554432, clauses: [...CLAUSES] };
 
+/** DCS editing is independent from ordinary clause editing and needs its complete explicit capability. */
+test("DCS constructor requires minor 29 and bounded typed value lists", () => {
+  const value = { ...capability, visualExpressions: true, metadataCatalog: true, virtualTables: true, nestedQueries: true, unions: true, totals: true,
+    packages: true, temporaryTables: true, having: true, multipleTotals: true, maxTotalSections: 32, dcs: true, maxDcsValues: 128, clauses: [...HAVING_CLAUSES] };
+  assert.equal(constructorCapabilities({ apiVersion: { major: 1, minor: 29 }, capabilities: { queryConstructor: value } }).dcs, true);
+  for (const [minor, change] of [[28, {}], [29, { multipleTotals: undefined }], [29, { maxDcsValues: 0 }]]) {
+    assert.throws(() => constructorCapabilities({ apiVersion: { major: 1, minor }, capabilities: { queryConstructor: { ...value, ...change } } }), { code: "protocolInvalid" });
+  }
+});
+
 /** Package/table shape additions are accepted only as a complete explicit minor-26 capability. */
 test("package constructor capabilities require coherent negotiation and clause vocabulary", () => {
   const value = { ...capability, visualExpressions: true, metadataCatalog: true, virtualTables: true, nestedQueries: true, unions: true, totals: true,
@@ -128,6 +138,31 @@ function apply(text, plan) {
 }
 
 for (const locale of ["ru-RU", "en-US"]) {
+  test(`portable DCS edits retain typed slots and canonical owner bytes (${locale})`, { skip: !executable }, async t => {
+    const f = await fixture(t, locale), original = "SELECT T.Ref AS Item {SELECT Item.*} FROM Catalog.Items AS T LEFT JOIN InformationRegister.Prices.SliceLast({&Period}, {Item.*}) AS P ON T.Ref = P.Item";
+    await f.store.saveDraft(f.source.record.id, original);
+    const core = await f.source.openConstructor(); assert.equal(core.limits.dcs, true);
+    const parameter = core.model.statements[0].dcs.nodes.find(node => node.kind === "parameter");
+    assert.ok(parameter.editable); assert.equal(parameter.enabled, true);
+    await core.action({ kind: "setDcs", statement: 0, node: parameter.index, target: "parameter", values: [{ kind: "parameter", name: "Updated" }], enabled: true });
+    assert.equal(core.model.text, original.replace("{&Period}", "{&Updated}"));
+    const source = core.model.statements[0].dcs.nodes.find(node => node.kind === "optionalSource");
+    await core.action({ kind: "setDcs", statement: 0, node: source.index, target: "optionalSource", values: [], enabled: true });
+    assert.ok(core.model.text.includes("{LEFT JOIN"));
+    await core.action({ kind: "setDcs", statement: 0, node: null, target: "where", values: [{ kind: "condition", left: "T.Ref", comparison: "equal", right: "&Item" }], enabled: true });
+    assert.ok(core.model.text.includes("P.Item}\n{WHERE T.Ref = &Item}"));
+    const malformed = structuredClone(core.model); malformed.statements[0].dcs.nodes[0].range.end = core.model.bytes + 1;
+    assert.throws(() => constructorModel(malformed, core.limits), { code: "protocolInvalid" });
+    assert.equal(f.source.record.draft, original); assert.equal(await readFile(f.files.module, "utf8"), f.owner);
+    await core.cancel(); assert.equal(f.source.record.draft, original);
+  });
+  test(`portable read-only DCS never exposes write permissions (${locale})`, { skip: !executable }, async t => {
+    const f = await fixture(t, locale, true), core = await f.source.openConstructor();
+    assert.equal(core.model.statements[0].dcs.addSelect, false); assert.equal(core.model.statements[0].dcs.addWhere, false);
+    assert.ok(core.model.statements[0].dcs.nodes.every(node => !node.editable));
+    await assert.rejects(core.action({ kind: "setDcs", statement: 0, node: null, target: "select", values: [{ kind: "field", expression: "A", children: true, alias: "" }], enabled: true }));
+    await core.cancel();
+  });
   test(`portable totals sections retain independent clauses and selection (${locale})`, { skip: !executable }, async t => {
     const f = await fixture(t, locale), original = "SELECT 1 AS A, 2 AS B";
     await f.store.saveDraft(f.source.record.id, original);
