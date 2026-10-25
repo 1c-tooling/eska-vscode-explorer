@@ -23,7 +23,7 @@
 
 ## Сборка пакета
 
-Из корня репозитория расширения, с Bun 1.4.2 в PATH:
+Из корня репозитория расширения, с Bun 1.4.4 в PATH:
 
 ```sh
 bun install --frozen-lockfile --ignore-scripts
@@ -33,7 +33,7 @@ python3 scripts/check-vsix.py eska-explorer-0.0.12.vsix
 
 Закреплён официальный `@vscode/vsce` 4.0.0; компилятор и упаковщик запускаются через
 Bun. `scripts/bundle.mjs` собирает production JS и runtime зависимости
-`yauzl`/`pend`, `vscode-languageclient` 10.1.2 и его зависимости в
+`yauzl`/`pend`, `vscode-languageclient` 11.0.0 и его зависимости в
 `out/extension.js` через закреплённый esbuild 0.28.2. Поэтому
 `--no-dependencies` сохраняет рабочие установщик и LSP-клиент в установленном VSIX.
 `out/THIRD-PARTY-NOTICES.txt` содержит лицензии всех модулей bundle; отсутствие

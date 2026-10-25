@@ -81,7 +81,7 @@ ESKA строит минимальные правки и сохраняет ко
 
 Нужны VS Code/VSCodium **≥ 1.109.0**, `eska-project` с **Metadata API 1.12**
 и папка с `eska.toml` и Designer XML. Для BSL нужен опубликованный
-**bsl-analyzer-app 0.3.2**, CLI contract **3.4**.
+**bsl-analyzer-app 0.4.0**, CLI contract **3.5**.
 Git, платформа 1С, полный CLI и анализатор для самого дерева не нужны.
 
 Можно установить только мини-программу `eska-project` либо полный комплект ESKA
@@ -133,7 +133,7 @@ cargo build -p eska-project --release --locked
 В Windows укажите `.exe` и экранируйте обратные слеши в JSON.
 Для Cargo-установки вместо `target/release` укажите путь установленного executable.
 В поле executable нужен только файл, без `serve --stdio`: аргументы добавляет
-Explorer. Анализатор берите из [официального app-релиза 0.3.2](https://github.com/itrous/bsl-analyzer/releases/tag/v0.3.2)
+Explorer. Анализатор берите из [официального app-релиза 0.4.0](https://github.com/itrous/bsl-analyzer/releases/tag/v0.4.0)
 для своей ОС. Это отдельный бинарник, он не входит в ESKA или VSIX.
 
 Команда **Подготовить проектный и языковой компоненты** проверяет оба инструмента

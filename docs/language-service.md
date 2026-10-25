@@ -1,7 +1,9 @@
 # Собственный языковой клиент
 
-T86 подключает `vscode-languageclient` 10.1.2 к опубликованному
-`bsl-analyzer-app` 0.3.2 по stdio. Backend project использует Metadata API 1.12;
+Языковой клиент `vscode-languageclient` 11.0.0 подключается к опубликованному
+`bsl-analyzer-app` 0.4.0 командой `lsp --mode stdio`. Явный режим сохраняет
+отдельный процесс на языковой контекст; upstream-режим `auto` использует общий
+backend. Backend project использует Metadata API 1.12;
 TypeScript читает его DTO, без собственного разбора `eska.toml` и Designer XML.
 Проверенная среда — Linux x64 GNU, VSCodium 1.109.5, Extension Host Node 22.21.1.
 

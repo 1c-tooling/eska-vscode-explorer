@@ -62,7 +62,7 @@ try {
     workspaceFolders: [{ uri: pathToFileURL(context.context.root.value).href, name: "probe" }],
     capabilities: { general: { positionEncodings: ["utf-16"] }, window: { workDoneProgress: true }, workspace: { workspaceFolders: true, workspaceEdit: { documentChanges: true } },
       textDocument: { publishDiagnostics: { versionSupport: true }, hover: { contentFormat: ["markdown", "plaintext"] }, completion: { completionItem: { snippetSupport: true } } } }, clientInfo: { name: "eska-native-probe", version: "1" } });
-  assert.equal(hello.serverInfo.name, "bsl-analyzer"); assert.equal(hello.serverInfo.version, "0.3.2");
+  assert.equal(hello.serverInfo.name, "bsl-analyzer"); assert.equal(hello.serverInfo.version, "0.4.0");
   await writeFile(join(root, "hello.json"), JSON.stringify(hello, null, 2) + "\n");
   await protocol.sendNotification("initialized", {});
   const uri = pathToFileURL(file).href;

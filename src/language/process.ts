@@ -14,7 +14,9 @@ export class LanguageProcess {
   constructor(executable: string, cwd: string, private readonly log: DiagnosticLog,
     failed: () => void, private readonly signal?: AbortSignal) {
     assertCurrent(signal);
-    this.child = spawn(executable, ["lsp"], { cwd, shell: false, windowsHide: true, stdio: "pipe",
+    // Upstream auto mode may share a backend; this owner must retain its own stdio process.
+    const args = ["lsp", "--mode", "stdio"];
+    this.child = spawn(executable, args, { cwd, shell: false, windowsHide: true, stdio: "pipe",
       env: { ...process.env, BSL_LOG: "warn" } });
     this.abort = () => { void this.stop().catch(() => this.log("language_process_cleanup_failed", "error")); };
     this.closed = new Promise(resolve => {
@@ -37,7 +39,7 @@ export class LanguageProcess {
       if (remaining > 0) this.log(chunk.subarray(0, remaining).toString("utf8"), "warn");
       this.stderrBytes += chunk.length;
     });
-    this.log(JSON.stringify({ event: "language_process_start", pid: this.child.pid, executable, cwd, args: ["lsp"] }));
+    this.log(JSON.stringify({ event: "language_process_start", pid: this.child.pid, executable, cwd, args }));
     signal?.addEventListener("abort", this.abort, { once: true });
     if (signal?.aborted) this.abort();
   }

@@ -47,10 +47,10 @@
     "package": "bun run --bun compile && bun run --bun vsce package --no-dependencies --no-rewrite-relative-links"
   },
   "devDependencies": {
-    "@types/node": "22.20.3",
+    "@types/node": "22.20.5",
     "@types/vscode": "1.109.0",
     "@vscode/vsce": "4.0.0",
-    "ovsx": "1.2.0",
+    "ovsx": "1.3.0",
     "typescript": "7.0.2",
     "@types/yauzl": "3.4.0",
     "esbuild": "0.28.2"
@@ -570,6 +570,6 @@
   "icon": "resources/icon.png",
   "dependencies": {
     "yauzl": "3.4.0",
-    "vscode-languageclient": "10.1.2"
+    "vscode-languageclient": "11.0.0"
   }
 }

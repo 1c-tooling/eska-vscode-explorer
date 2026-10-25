@@ -2,8 +2,8 @@ import { isRecord } from "../protocol.js";
 
 export type ToolKind = "project" | "analyzer";
 export const TOOL_NAMES = { project: "eska-project", analyzer: "bsl-analyzer-app" } as const;
-export const ANALYZER_VERSION = "0.3.2";
-export const ANALYZER_CONTRACT = "3.4";
+export const ANALYZER_VERSION = "0.4.0";
+export const ANALYZER_CONTRACT = "3.5";
 export const PROJECT_CONFIG = "designer-xml-1";
 export const TARGETS = ["aarch64-apple-darwin", "aarch64-unknown-linux-gnu", "aarch64-unknown-linux-musl",
   "x86_64-apple-darwin", "x86_64-unknown-linux-gnu", "x86_64-unknown-linux-musl", "x86_64-pc-windows-msvc"] as const;
@@ -67,6 +67,7 @@ export function analyzerContract(value: unknown): string {
   const analyze = commands.find(command => command.name === "analyze");
   const lsp = commands.find(command => command.name === "lsp");
   if (!Array.isArray(lsp?.args) || !Array.isArray(check?.args) || !Array.isArray(analyze?.args)
+    || !lsp.args.some(arg => isRecord(arg) && arg.name === "mode" && arg.takes_value === true && Array.isArray(arg.values) && arg.values.includes("stdio"))
     || !check.args.some(arg => isRecord(arg) && arg.name === "config" && arg.required === true && arg.takes_value === true)
     || !analyze.args.some(arg => isRecord(arg) && arg.name === "format" && arg.takes_value === true && Array.isArray(arg.values) && arg.values.includes("jsonl"))) {
     throw new ToolFailure("incompatible", "analyzer-commands");
@@ -86,7 +87,7 @@ export function nativeTarget(platform: NodeJS.Platform, architecture: string, gl
   throw new ToolFailure("unsupportedTarget", `${platform}/${architecture}`);
 }
 
-/** Upstream 0.3.2 publishes only these three app assets, independently of ESKA's target list. */
+/** Upstream 0.4.0 publishes only these three app assets, independently of ESKA's target list. */
 export function analyzerAsset(target: NativeTarget): string {
   switch (target) {
     case "x86_64-unknown-linux-gnu": return "bsl-analyzer-app-linux-amd64";

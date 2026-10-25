@@ -154,7 +154,7 @@ async function run() {
   assert.ok(!vscode.window.tabGroups.all.flatMap(group => group.tabs).some(tab => tab.input instanceof vscode.TabInputText
     && tab.input.uri.toString() === source.toString()), 'no writable counterpart tab was created');
   await fs.writeFile(path.join(fixture.root, 'host-result.json'), JSON.stringify({ passed: true, suite: 'protected-language',
-    vscode: vscode.version, locale: vscode.env.language, analyzer: own ? '0.3.2 (own LSP)' : analyzer.packageJSON.version, semanticTokens: tokens.data.length / 5,
+    vscode: vscode.version, locale: vscode.env.language, analyzer: own ? '0.4.0 (own LSP)' : analyzer.packageJSON.version, semanticTokens: tokens.data.length / 5,
     outline: true, hover: true, definitions: true, references: true, folding: true, diagnostics: true, readonly: true,
     own_lsp: own, late_real_hover_rejected: own, own_restart: own, native_alias_rename_denied: own, shutdownPids: ownedPids }));
 }

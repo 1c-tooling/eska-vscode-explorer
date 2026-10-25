@@ -5,9 +5,9 @@
 ## Разработка
 
 Зависимости закреплены в `bun.lock`: TypeScript 7.0.2, API VS Code 1.109.0,
-типы Node 22.20.3. Инструменты проверены 2026-09-18; Bun — 1.4.2.
+типы Node 22.20.5. Зависимости обновлены 2026-10-25; Bun — 1.4.4.
 Production-код работает в Node Extension Host. `yauzl` 3.4.0, `vscode-languageclient`
-10.1.2 и их зависимости включаются в bundle через esbuild 0.28.2; npm modules из checkout
+11.0.0 и их зависимости включаются в bundle через esbuild 0.28.2; npm modules из checkout
 установленному VSIX не нужны. Bun используется для инструментов проекта.
 
 ```bash

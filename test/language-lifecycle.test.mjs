@@ -34,10 +34,10 @@ test("language context accepts only versioned DTOs and leases for the exact curr
   assert.throws(() => analysisContext({ ...context, schema_version: 2 }));
   assert.throws(() => analysisContext({ ...context, context: { ...context.context, root: path("relative") } }));
   const config = { schema_version: 1, kind: "analyzer-configuration", status: "current", path: path(join(root, "bsl-analyzer.toml")), preview_token: "a".repeat(64),
-    ownership: { schema_version: 1, generator_version: 1, analyzer_version: "0.3.2", context: null, input_fingerprint: "b".repeat(64), body_sha256: "c".repeat(64) }, leaseId: "d".repeat(64) };
+    ownership: { schema_version: 1, generator_version: 1, analyzer_version: "0.4.0", context: null, input_fingerprint: "b".repeat(64), body_sha256: "c".repeat(64) }, leaseId: "d".repeat(64) };
   assert.equal(analyzerConfiguration(config).lease, config.leaseId);
   assert.throws(() => analyzerConfiguration({ ...config, status: "stale" }));
-  assert.throws(() => analyzerConfiguration({ ...config, ownership: { ...config.ownership, analyzer_version: "0.3.3" } }));
+  assert.throws(() => analyzerConfiguration({ ...config, ownership: { ...config.ownership, analyzer_version: "0.3.2" } }));
 });
 
 test("owned server cancellation reaps a peer which ignores normal termination", { skip: process.platform === "win32", timeout: 15000 }, async t => {
@@ -49,6 +49,20 @@ test("owned server cancellation reaps a peer which ignores normal termination", 
   const pid = owner.child.pid; controller.abort(); await owner.stop();
   assert.equal(owner.child.signalCode, "SIGKILL");
   assert.throws(() => process.kill(pid, 0), { code: "ESRCH" });
+});
+
+test("owned server explicitly selects stdio instead of the upstream shared backend", { skip: process.platform === "win32" }, async t => {
+  const root = await fixture(t), file = join(root, "server"), logs = [];
+  await writeFile(file, `#!${process.execPath}\nprocess.stdout.write(JSON.stringify(process.argv.slice(2)));\n`);
+  await chmod(file, 0o755);
+  const owner = new LanguageProcess(file, root, value => logs.push(value), () => {});
+  t.after(() => owner.stop());
+  const chunks = [];
+  owner.child.stdout.on("data", chunk => chunks.push(chunk));
+  await owner.closed;
+  const expected = ["lsp", "--mode", "stdio"];
+  assert.deepEqual(JSON.parse(Buffer.concat(chunks).toString("utf8")), expected);
+  assert.deepEqual(JSON.parse(logs.find(value => value.includes("language_process_start"))).args, expected);
 });
 
 test("spawn failure and an already cancelled startup cannot leave an owned child", async t => {

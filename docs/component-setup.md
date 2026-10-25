@@ -2,7 +2,7 @@
 
 T85 добавляет установку и независимые обновления `eska-project` и опубликованного
 `bsl-analyzer-app`. Дерево использует Metadata API 1.12; проверенная версия
-анализатора — 0.3.2, CLI contract 3.4. T86 добавляет
+анализатора — 0.4.0, CLI contract 3.5. T86 добавляет
 [собственный языковой клиент](language-service.md). Состояние «бинарник проверен»
 ещё не означает работающий LSP: клиент запускается при открытии BSL или вручную.
 
@@ -18,7 +18,7 @@ ZIP `eska-project-0.14.3-<target>.zip`. Explorer объясняет отсутс
 не запускает установщик монолита. Сейчас project можно собрать локально,
 установить из локального комплекта T97 или указать существующий бинарник.
 Публикация новых assets и изменение release pipeline в T85 не входят.
-Analyzer 0.3.2 устанавливается из готового официального app asset.
+Analyzer 0.4.0 устанавливается из готового официального app asset.
 
 Для первого запуска без сети задайте абсолютные пути в
 `eska.explorer.executable` и `eska.explorer.analyzerExecutable`.
@@ -78,7 +78,7 @@ ZIP допускает только объявленный executable и обы�
 и после установки. Локальные dev builds project проверяются Metadata API,
 без требования стабильного release-номера или установочного receipt.
 
-Project-пакеты поддерживают существующие семь targets T97. Upstream app 0.3.2
+Project-пакеты поддерживают существующие семь targets T97. Upstream app 0.4.0
 опубликован только для Linux x64 GNU, Windows x64 и macOS ARM64. Другие targets
 не подменяются соседней архитектурой; совместимый собственный бинарник можно
 выбрать явно. Наличие asset не является приёмкой соответствующей ОС.
@@ -99,5 +99,5 @@ project-компонента** и **Восстановить установку 
 может потребовать ручной проверки `.eska-components.recovering`.
 
 Публичные источники: [ESKA releases](https://github.com/1c-tooling/eska/releases),
-[Analyzer 0.3.2](https://github.com/itrous/bsl-analyzer/releases/tag/v0.3.2),
+[Analyzer 0.4.0](https://github.com/itrous/bsl-analyzer/releases/tag/v0.4.0),
 [GitHub asset digest](https://docs.github.com/en/rest/releases/assets).
