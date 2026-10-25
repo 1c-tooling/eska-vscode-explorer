@@ -18,7 +18,18 @@ const executable = process.env.ESKA_TEST_BINARY, limits = { maxExpression: 16384
 const capability = { schemaVersion: 1, writesOwner: false, writesDraft: true, explicitFinish: true, exclusiveDraft: true,
   lossless: true, nativeDraftPlan: true, sourceCommentPositions: true, sharedQueryBudget: true, maxExpressionBytes: 16384, maxModelBytes: 33554432, clauses: [...CLAUSES] };
 
-/** DCS editing is independent from ordinary clause editing and needs its complete explicit capability. */
+/** Current discovery must match the native dialect and its explicit resource limit. */
+test("native totals require minor 30 and the explicit single-section limit", () => {
+  const value = { ...capability, visualExpressions: true, metadataCatalog: true, virtualTables: true, nestedQueries: true, unions: true, totals: true,
+    packages: true, temporaryTables: true, having: true, totalSections: true, maxTotalSections: 1, dcs: true, maxDcsValues: 128, clauses: [...HAVING_CLAUSES] };
+  const hello = { apiVersion: { major: 1, minor: 30 }, capabilities: { queryConstructor: value } };
+  assert.equal(constructorCapabilities(hello).maxTotalSections, 1);
+  for (const change of [{ maxTotalSections: 32 }, { multipleTotals: true }, { totalSections: false }]) {
+    assert.throws(() => constructorCapabilities({ ...hello, capabilities: { queryConstructor: { ...value, ...change } } }), { code: "protocolInvalid" });
+  }
+});
+
+/** DCS editing needs its complete explicit capability, including the legacy section DTO. */
 test("DCS constructor requires minor 29 and bounded typed value lists", () => {
   const value = { ...capability, visualExpressions: true, metadataCatalog: true, virtualTables: true, nestedQueries: true, unions: true, totals: true,
     packages: true, temporaryTables: true, having: true, multipleTotals: true, maxTotalSections: 32, dcs: true, maxDcsValues: 128, clauses: [...HAVING_CLAUSES] };
@@ -52,7 +63,7 @@ test("HAVING capabilities require minor 27 and the complete package vocabulary",
 test("multiple totals require explicit minor 28 and the section bound", () => {
   const value = { ...capability, visualExpressions: true, metadataCatalog: true, virtualTables: true, nestedQueries: true, unions: true, totals: true,
     packages: true, temporaryTables: true, having: true, multipleTotals: true, maxTotalSections: 32, clauses: [...HAVING_CLAUSES] };
-  assert.equal(constructorCapabilities({ apiVersion: { major: 1, minor: 28 }, capabilities: { queryConstructor: value } }).multipleTotals, true);
+  assert.equal(constructorCapabilities({ apiVersion: { major: 1, minor: 28 }, capabilities: { queryConstructor: value } }).totalSections, true);
   for (const [minor, change] of [[27, {}], [28, { having: undefined }], [28, { maxTotalSections: 0 }]]) {
     assert.throws(() => constructorCapabilities({ apiVersion: { major: 1, minor }, capabilities: { queryConstructor: { ...value, ...change } } }), { code: "protocolInvalid" });
   }
@@ -163,25 +174,24 @@ for (const locale of ["ru-RU", "en-US"]) {
     await assert.rejects(core.action({ kind: "setDcs", statement: 0, node: null, target: "select", values: [{ kind: "field", expression: "A", children: true, alias: "" }], enabled: true }));
     await core.cancel();
   });
-  test(`portable totals sections retain independent clauses and selection (${locale})`, { skip: !executable }, async t => {
+  test(`portable totals use one executable section with several grouping levels (${locale})`, { skip: !executable }, async t => {
     const f = await fixture(t, locale), original = "SELECT 1 AS A, 2 AS B";
     await f.store.saveDraft(f.source.record.id, original);
-    const core = await f.source.openConstructor(); assert.equal(core.limits.multipleTotals, true);
-    for (const name of ["A", "B"]) {
-      await core.action({ kind: "addTotals", statement: 0, after: null });
-      const section = core.model.totalFocus;
-      await core.action({ kind: "composeTotal", statement: 0, section, selection: null, expression: { kind: "totalField", expression: name, alias: "", aggregate: "sum" } });
-      await core.action({ kind: "composeTotal", statement: 0, section, selection: null, expression: { kind: "totalGroup", expression: name, alias: "", hierarchy: "none", period: null } });
-    }
-    assert.equal(core.model.statements[0].totalSections.length, 2);
-    await core.action({ kind: "moveTotals", statement: 0, section: 1, to: 0 });
-    assert.equal(core.model.totalFocus, 0);
-    assert.ok(core.model.text.indexOf("SUM(B)") < core.model.text.indexOf("SUM(A)"));
+    const core = await f.source.openConstructor(); assert.equal(core.limits.totalSections, true); assert.equal(core.limits.maxTotalSections, 1);
+    await core.action({ kind: "addTotals", statement: 0, after: null });
+    assert.equal(core.model.statements[0].addTotals, false);
+    await core.action({ kind: "composeTotal", statement: 0, section: 0, selection: null, expression: { kind: "totalField", expression: "A", alias: "", aggregate: "sum" } });
+    for (const name of ["A", "B"]) await core.action({ kind: "composeTotal", statement: 0, section: 0, selection: null, expression: { kind: "totalGroup", expression: name, alias: "", hierarchy: "none", period: null } });
+    assert.equal(core.model.statements[0].totalSections.length, 1);
+    const before = structuredClone(core.model);
+    await assert.rejects(core.action({ kind: "addTotals", statement: 0, after: 0 }), error => error.details?.reason === "constructor_unsupported");
+    assert.deepEqual(core.model, before);
     const malformed = structuredClone(core.model); malformed.statements[0].totalSections[0].groups = 0;
     assert.throws(() => constructorModel(malformed, core.limits), { code: "protocolInvalid" });
+    const exceeded = structuredClone(core.model); exceeded.statements[0].totalSections.push(structuredClone(exceeded.statements[0].totalSections[0]));
+    assert.throws(() => constructorModel(exceeded, core.limits), { code: "protocolInvalid" });
     await core.action({ kind: "removeTotals", statement: 0, section: 0 });
-    assert.equal(core.model.statements[0].totalSections.length, 1);
-    assert.ok(!core.model.text.includes("SUM(B)")); assert.ok(core.model.text.includes("SUM(A)"));
+    assert.equal(core.model.statements[0].totalSections.length, 0);
     assert.equal(f.source.record.draft, original);
     await core.cancel(); assert.equal(f.source.record.draft, original);
   });

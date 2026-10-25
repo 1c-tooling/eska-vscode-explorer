@@ -39,7 +39,7 @@
 
   /** A user intention cannot supply a session, source path or constructor identity. */
   function send(action) {
-    if (state.features.multipleTotals && action.kind === "append" && ["totals", "totalGroups"].includes(action.clause)) {
+    if (state.features.totalSections && action.kind === "append" && ["totals", "totalGroups"].includes(action.clause)) {
       const section = activeTotal();
       if (section) action = { kind: "appendTotal", statement: action.statement, section: section.index, clause: action.clause, text: action.text };
     }
@@ -50,7 +50,7 @@
   /** Typed expressions are formatted and validated by ESKA, including language-specific keywords. */
   function compose(expression, selection = null) {
     const kind = expression.kind === "totalField" ? "totals" : ["totalGroup", "overall"].includes(expression.kind) ? "totalGroups" : expression.kind;
-    const section = state.features.multipleTotals && ["totals", "totalGroups"].includes(kind) ? activeTotal() : undefined;
+    const section = state.features.totalSections && ["totals", "totalGroups"].includes(kind) ? activeTotal() : undefined;
     send({ kind: section ? "composeTotal" : "compose", statement: selection?.statement ?? statement(kind).index, ...(section ? { section: section.index } : {}), selection, expression });
   }
 
@@ -76,7 +76,7 @@
   /** Section ownership and clause references come from ESKA; selection is presentation state only. */
   function activeTotal() {
     const owner = statement("totals");
-    if (!state.features.multipleTotals || !owner) return undefined;
+    if (!state.features.totalSections || !owner) return undefined;
     if (totalScope !== owner.scope) { totalScope = owner.scope; totalSection = 0; }
     totalSection = Math.min(totalSection, Math.max(0, owner.totalSections.length - 1));
     return owner.totalSections[totalSection];
@@ -85,7 +85,7 @@
   /** A clause row's indices are immutable until the backend returns its next revision. */
   function rows(kind) {
     const owner = statement(kind);
-    const section = state.features.multipleTotals && ["totals", "totalGroups"].includes(kind) ? activeTotal() : undefined;
+    const section = state.features.totalSections && ["totals", "totalGroups"].includes(kind) ? activeTotal() : undefined;
     return (owner?.clauses ?? []).filter(clause => clause.kind === kind && (!section || clause.index === (kind === "totals" ? section.fields : section.groups))).flatMap(clause => clause.items.map(item => ({
       clause, item, selection: { statement: owner.index, clause: clause.index, item: item.index }
     })));
@@ -274,7 +274,7 @@
     const fields = list("totals", l.aggregateFields);
     const section = activeTotal(), owner = statement("totals"), clause = section ? owner.clauses[section.fields] : owner.clauses.find(clause => clause.kind === "totals");
     if (clause && !clause.items.length) fields.append(element("p", l.autoTotals, "notice"));
-    if (state.features.multipleTotals) {
+    if (state.features.totalSections) {
       const toolbar = panel(l.totalSection, "total-sections");
       if (owner.totalSections.length) {
         const picker = select(toolbar, l.totalSection, "totalSection", { totalSection: String(totalSection) }, owner.totalSections.map(value => [String(value.index), `${l.totalSection} ${value.index + 1}`]));
@@ -283,7 +283,7 @@
       toolbar.append(button(l.addTotalSection, () => send({ kind: "addTotals", statement: owner.index, after: section?.index ?? null }), !owner.addTotals ? "unsupported" : null, "add-total-section"));
       if (section) {
         toolbar.append(button(l.remove, () => send({ kind: "removeTotals", statement: owner.index, section: section.index }), !section.remove ? "unsupported" : null, "remove-total-section"));
-        for (const [key, label] of [["moveUp", "↑"], ["moveDown", "↓"]]) toolbar.append(button(label, () => send({ kind: "moveTotals", statement: owner.index, section: section.index, to: section[key] }), section[key] === null ? "unsupported" : null, `total-section-${key}`));
+        for (const [key, label] of [["moveUp", "↑"], ["moveDown", "↓"]].filter(([key]) => section[key] !== null)) toolbar.append(button(label, () => send({ kind: "moveTotals", statement: owner.index, section: section.index, to: section[key] }), section[key] === null ? "unsupported" : null, `total-section-${key}`));
       }
       node.append(toolbar);
     }

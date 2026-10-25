@@ -9,7 +9,7 @@ export const PACKAGE_CLAUSES = [...CLAUSES, "into", "destroy", "index"] as const
 export const HAVING_CLAUSES = [...PACKAGE_CLAUSES, "having"] as const;
 export type ConstructorClauseKind = typeof HAVING_CLAUSES[number];
 export type ConstructorMethod = "query/constructorOpen" | "query/constructorPlan" | "query/constructorModel" | "query/constructorAction" | "query/constructorFinish" | "query/constructorCancel" | "query/constructorCatalog";
-export interface ConstructorLimits { maxExpression: number; maxModel: number; visual?: boolean; virtualTables?: boolean; nestedQueries?: boolean; unions?: boolean; totals?: boolean; packages?: boolean; having?: boolean; multipleTotals?: boolean; dcs?: boolean }
+export interface ConstructorLimits { maxExpression: number; maxModel: number; visual?: boolean; virtualTables?: boolean; nestedQueries?: boolean; unions?: boolean; totals?: boolean; packages?: boolean; having?: boolean; totalSections?: boolean; maxTotalSections?: number; dcs?: boolean }
 export interface ConstructorSelection { statement: number; clause: number; item: number }
 export type Comparison = "equal" | "notEqual" | "less" | "lessOrEqual" | "greater" | "greaterOrEqual" | "like" | "in" | "inHierarchy";
 export type Aggregate = "sum" | "count" | "minimum" | "maximum" | "average" | null;
@@ -104,12 +104,17 @@ export function constructorCapabilities(hello: unknown): ConstructorLimits | und
     if (hello.apiVersion.minor < 27 || value.having !== true || !flags.packages) invalid();
     flags.having = true;
   }
-  if (value.multipleTotals !== undefined) {
+  if (value.totalSections !== undefined) {
+    if (hello.apiVersion.minor < 30 || value.totalSections !== true || value.maxTotalSections !== 1 || !flags.having || value.multipleTotals !== undefined) invalid();
+    flags.totalSections = true;
+    flags.maxTotalSections = 1;
+  } else if (value.multipleTotals !== undefined) {
     if (hello.apiVersion.minor < 28 || value.multipleTotals !== true || value.maxTotalSections !== 32 || !flags.having) invalid();
-    flags.multipleTotals = true;
+    flags.totalSections = true;
+    flags.maxTotalSections = 32;
   }
   if (value.dcs !== undefined) {
-    if (hello.apiVersion.minor < 29 || value.dcs !== true || value.maxDcsValues !== 128 || !flags.multipleTotals) invalid();
+    if (hello.apiVersion.minor < 29 || value.dcs !== true || value.maxDcsValues !== 128 || !flags.totalSections) invalid();
     flags.dcs = true;
   }
   const clauses = flags.having ? HAVING_CLAUSES : flags.packages ? PACKAGE_CLAUSES : flags.totals ? CLAUSES : BASE_CLAUSES;
@@ -136,7 +141,7 @@ export function constructorModel(raw: unknown, limits: ConstructorLimits, id?: s
       || statement.sources.length > 65_536 || !statement.sources.every(source => isRecord(source) && shortText(source.table) && shortText(source.alias)
         && (source.parameters === undefined || parameters(source.parameters))))) invalid();
     if (limits.packages) validatePackage(statement.package, raw.statements.length);
-    if (limits.multipleTotals) validateTotals(statement, raw.bytes);
+    if (limits.totalSections) validateTotals(statement, raw.bytes, limits.maxTotalSections ?? 0);
     if (limits.dcs) validateDcs(statement, raw.bytes);
     for (const [index, option] of statement.append.entries()) {
       if (!isRecord(option) || option.kind !== clauses[index] || !reason(option.unavailable)) invalid();
@@ -156,7 +161,7 @@ export function constructorModel(raw: unknown, limits: ConstructorLimits, id?: s
     }
   }
   if ((limits.nestedQueries || limits.unions) && raw.scopes === undefined) invalid();
-  if (limits.multipleTotals && !(raw.totalFocus === null || unsigned(raw.totalFocus) && raw.totalFocus < 32)) invalid();
+  if (limits.totalSections && !(raw.totalFocus === null || unsigned(raw.totalFocus) && raw.totalFocus < (limits.maxTotalSections ?? 0))) invalid();
   validateScopes(raw);
   return raw as unknown as ConstructorModel;
 }
@@ -208,7 +213,7 @@ export class QueryConstructor {
   async action(action: ConstructorAction): Promise<void> {
     if (action.kind === "setDcs" && !this.limits.dcs) throw new ExplorerError("incompatible");
     if (["setInto", "addStatement", "removeStatement", "moveStatement"].includes(action.kind) && !this.limits.packages) throw new ExplorerError("incompatible");
-    if (["addTotals", "removeTotals", "moveTotals", "composeTotal", "appendTotal"].includes(action.kind) && !this.limits.multipleTotals) throw new ExplorerError("incompatible");
+    if (["addTotals", "removeTotals", "moveTotals", "composeTotal", "appendTotal"].includes(action.kind) && !this.limits.totalSections) throw new ExplorerError("incompatible");
     const result = await this.request("query/constructorAction", { action });
     if (!isRecord(result) || result.constructorActive !== true) invalid();
     this.current = constructorModel(result.constructor, this.limits, this.current.id);
@@ -309,8 +314,8 @@ function dcsValue(value: unknown): boolean {
 }
 
 /** The transport validates section-to-clause references; SQL pairing and edit permissions come exclusively from ESKA. */
-function validateTotals(owner: Record<string, unknown>, bytes: number): void {
-  if (!Array.isArray(owner.totalSections) || owner.totalSections.length > 32 || typeof owner.addTotals !== "boolean" || !Array.isArray(owner.clauses)) invalid();
+function validateTotals(owner: Record<string, unknown>, bytes: number, maxSections: number): void {
+  if (!Array.isArray(owner.totalSections) || owner.totalSections.length > maxSections || typeof owner.addTotals !== "boolean" || !Array.isArray(owner.clauses)) invalid();
   let previous = 0;
   const count = owner.totalSections.length;
   for (const [index, section] of owner.totalSections.entries()) {

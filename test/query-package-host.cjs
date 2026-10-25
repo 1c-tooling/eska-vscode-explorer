@@ -50,7 +50,7 @@ exports.run = async function () {
     await client.evaluate('document.querySelectorAll(".package-settings > .row")[1].querySelector("button").click()');
     await until(() => client.evaluate('document.querySelector(".temporary-destination input")?.value === ""'), 'consumer selected'); await ready(client);
     await client.evaluate(`{const input=document.querySelector('.temporary-drop input');input.value='Renamed';input.dispatchEvent(new Event('input',{bubbles:true}));document.querySelector('.temporary-drop').requestSubmit();}`);
-    await until(() => client.evaluate('document.querySelector(".query-preview pre").textContent.includes("DESTROY Renamed")'), 'destroy operator'); await ready(client);
+    await until(() => client.evaluate('document.querySelector(".query-preview pre").textContent.includes("DROP Renamed")'), 'destroy operator'); await ready(client);
     const text = await client.evaluate('document.querySelector(".query-preview pre").textContent');
     assert.equal(draft.getText(), before); assert.equal(parentTabs(uri).length, 0); assert.deepEqual(await fs.readFile(fixture.module), disk);
     assert.equal(await client.evaluate('document.body.scrollWidth <= innerWidth'), true);
@@ -63,7 +63,7 @@ exports.run = async function () {
     await vscode.commands.executeCommand('undo'); assert.equal(draft.getText(), before);
     await vscode.commands.executeCommand('redo'); assert.equal(draft.getText(), text);
     await vscode.commands.executeCommand('eska.explorer.applyQuery', draft.uri);
-    const updated = await returned(uri); assert.equal(updated.isDirty, true); assert.ok(updated.getText().includes('DESTROY Renamed'));
+    const updated = await returned(uri); assert.equal(updated.isDirty, true); assert.ok(updated.getText().includes('DROP Renamed'));
     assert.deepEqual(await fs.readFile(fixture.module), disk); await vscode.commands.executeCommand('undo'); assert.equal(updated.getText(), original);
     accepted.push('package_apply_native_undo_redo_and_parent_single_undo_preserve_disk');
     await fs.writeFile(path.join(fixture.root, 'host-result.json'), JSON.stringify({ passed: true, suite: 'query-package', locale: vscode.env.language, accepted }));
