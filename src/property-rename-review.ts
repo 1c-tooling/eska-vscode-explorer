@@ -34,7 +34,8 @@ export function reviewRename(api: typeof vscode, context: vscode.ExtensionContex
       if (settled || !isRecord(input)) return;
       if (input.type === "ready") {
         void panel.webview.postMessage({ type: "plan", plan: { ...plan, issues: plan.issues.map(issue => ({ ...issue, caption: message(language,
-          issue.reason === "source_read_only" ? "renameIssueReadOnly" : issue.reason === "opaque_code_or_form" ? "renameIssueOpaque"
+          issue.reason === "source_session_active" ? "renameIssueSourceSession"
+            : issue.reason === "source_read_only" ? "renameIssueReadOnly" : issue.reason === "opaque_code_or_form" ? "renameIssueOpaque"
             : issue.reason === "bsl_destination_shadowed" ? "renameIssueShadowed" : "renameIssueUnavailable") })) }, labels: Object.fromEntries([
           "renamePreviewTitle", "renameSummary", "renameReviewed", "renameApply", "propertyCancel", "renameMoves", "renameChanges", "renameUncertain", "renameBlocked", "openXml", "renameOpenLocation",
         ].map(key => [key, message(language, key as Parameters<typeof message>[1], "{0}", "{1}", "{2}")])) });

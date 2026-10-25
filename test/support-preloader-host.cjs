@@ -23,10 +23,11 @@ exports.run = async function () {
   let release;
   const barrier = new Promise(resolve => { release = resolve; });
   const request = explorer.connection.request.bind(explorer.connection);
-  let targeted = 0, bulk = 0;
+  let targeted = 0, bulk = 0, objectRequests = 0;
   explorer.connection.request = async (session, method, params, ...rest) => {
     if (method === 'metadata/support') { bulk++; throw new Error('unexpected full support inventory'); }
     if (method === 'metadata/supportFiles') { targeted++; await barrier; }
+    if (method === 'metadata/supportObjects') objectRequests++;
     return request(session, method, params, ...rest);
   };
   try {
@@ -38,8 +39,18 @@ exports.run = async function () {
     assert.ok(rows.some(row => row.node), 'tree stays available during permission check');
     assert.equal(explorer.support.loading, false);
     assert.equal(bulk, 0);
+    assert.equal(explorer.connection.state.supportObjects, true);
+    const root = rows.find(row => row.node);
+    const catalogs = (await explorer.getChildren(root)).find(row => row.node?.id.collection?.metadataKind === 'catalog');
+    const catalog = (await explorer.getChildren(catalogs)).find(row => row.node?.label.text === 'Товары');
+    assert.ok(catalog);
+    explorer.getTreeItem(catalog);
+    await until(() => explorer.support.object(catalog)?.state === 'locked', 'object policy publishes while file settings are blocked');
+    assert.ok(objectRequests > 0);
+    assert.equal(explorer.support.icon(catalog), 'lock');
     release();
     await until(() => explorer.support.provideFileDecoration(uri)?.badge === '🔒', 'locked module ready');
+    assert.equal(explorer.support.object(catalog)?.state, 'locked', 'file publication preserves the display snapshot');
     await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(uri));
     await until(() => vscode.window.activeTextEditor?.document.uri.scheme === 'eska-protected', 'native open redirects to protected provider');
     let editor = vscode.window.activeTextEditor;
@@ -51,6 +62,7 @@ exports.run = async function () {
     // Query immediately after a branch-like rewrite, without waiting for the watcher.
     await fs.writeFile(file, rules(1));
     await until(async () => (await explorer.support.resolveUri(fixture.module)).scheme === 'file', 'current bytes allow editable-with-support');
+    await until(() => explorer.support.object(catalog)?.state === 'editableWithSupport', 'rule event refreshes the displayed object');
     editor = await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(uri));
     await vscode.commands.executeCommand('type', {text:'// unsaved\n'});
     const dirty = editor.document.getText();
@@ -67,6 +79,6 @@ exports.run = async function () {
     await until(async () => (await explorer.support.resolveUri(fixture.module)).scheme === 'file', 'A-B-A rule change recovers');
     assert.equal(bulk, 0, 'no startup, reopen or branch change requested an inventory');
     await vscode.commands.executeCommand('eska.explorer.disconnect');
-    await fs.writeFile(path.join(fixture.root,'host-result.json'), JSON.stringify({passed:true,lazyTree:true,targetedRequests:targeted,bulkRequests:bulk,nativeProtected:true,dirtyPreserved:true,currentBytes:true}));
+    await fs.writeFile(path.join(fixture.root,'host-result.json'), JSON.stringify({passed:true,vscode:vscode.version,locale:vscode.env.language,lazyTree:true,targetedRequests:targeted,objectRequests,bulkRequests:bulk,independentDisplay:true,nativeProtected:true,dirtyPreserved:true,currentBytes:true}));
   } finally { release(); }
 };

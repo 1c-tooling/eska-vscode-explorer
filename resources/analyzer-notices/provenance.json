@@ -1,29 +1,29 @@
 {
-  "version": "0.3.2",
+  "version": "0.4.0",
   "files": [
     {
       "path": "LICENSE-APACHE",
-      "source": "https://raw.githubusercontent.com/itrous/bsl-analyzer/v0.3.2/LICENSE-APACHE",
+      "source": "https://raw.githubusercontent.com/itrous/bsl-analyzer/v0.4.0/LICENSE-APACHE",
       "sha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a"
     },
     {
       "path": "LICENSE-GPL",
-      "source": "https://raw.githubusercontent.com/itrous/bsl-analyzer/v0.3.2/LICENSE-GPL",
+      "source": "https://raw.githubusercontent.com/itrous/bsl-analyzer/v0.4.0/LICENSE-GPL",
       "sha256": "fb981668c18a279e285fc4d83fba1e836cc84dd4daa73c9697d3cfd2d8aca6e0"
     },
     {
       "path": "LICENSE-LGPL",
-      "source": "https://raw.githubusercontent.com/itrous/bsl-analyzer/v0.3.2/LICENSE-LGPL",
+      "source": "https://raw.githubusercontent.com/itrous/bsl-analyzer/v0.4.0/LICENSE-LGPL",
       "sha256": "996af0513df21f7496288951c41428a03c174e9e4a9d63665c57d670f845ccb1"
     },
     {
       "path": "LICENSE-MIT",
-      "source": "https://raw.githubusercontent.com/itrous/bsl-analyzer/v0.3.2/LICENSE-MIT",
+      "source": "https://raw.githubusercontent.com/itrous/bsl-analyzer/v0.4.0/LICENSE-MIT",
       "sha256": "eabf424905be03c7e86b9ba3905ee0935936f85ad98afce697716f3d046ac838"
     },
     {
       "path": "NOTICE",
-      "source": "https://raw.githubusercontent.com/itrous/bsl-analyzer/v0.3.2/NOTICE",
+      "source": "https://raw.githubusercontent.com/itrous/bsl-analyzer/v0.4.0/NOTICE",
       "sha256": "875e68ec08d4e7e1025f5c3f82377030988cee4070bd3ef01d8da33e1f652565"
     }
   ]

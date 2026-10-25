@@ -1,4 +1,7 @@
 {
+  "queryOpen": "Open query",
+  "queryResume": "Resume query draft",
+  "queryCompare": "Compare query owner",
   "hideEmptyGroups": "Hide Empty Groups",
   "showEmptyGroups": "Show Empty Groups",
   "resetRootFilter": "Use Default Filter",
@@ -37,5 +40,10 @@
   "recoverAnalyzerInstallation": "Recover Analyzer installation",
   "languageFeatures": "Run Explorer’s own BSL language client for the selected ESKA application. Grammar remains available when disabled.",
   "restartLanguage": "Restart BSL language service",
-  "selectAnalysisContext": "Choose analysis application"
+  "selectAnalysisContext": "Choose analysis application",
+  "queryEditBsl": "Edit query separately",
+  "queryApply": "Apply query to module",
+  "queryCancel": "Cancel query editing",
+  "command.queryConstructor": "Query constructor",
+  "command.placeQueryComments": "Assign source comment positions"
 }

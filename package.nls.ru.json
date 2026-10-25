@@ -1,4 +1,7 @@
 {
+  "queryOpen": "Открыть запрос",
+  "queryResume": "Продолжить черновик запроса",
+  "queryCompare": "Сравнить исходник владельца",
   "hideEmptyGroups": "Скрывать пустые группы",
   "showEmptyGroups": "Показывать пустые группы",
   "resetRootFilter": "Использовать фильтр по умолчанию",
@@ -37,5 +40,10 @@
   "recoverAnalyzerInstallation": "Восстановить установку Analyzer",
   "languageFeatures": "Запускать собственный BSL-клиент Explorer для выбранного приложения ESKA. При отключении базовая подсветка сохраняется.",
   "restartLanguage": "Перезапустить языковой сервис BSL",
-  "selectAnalysisContext": "Выбрать приложение для анализа"
+  "selectAnalysisContext": "Выбрать приложение для анализа",
+  "queryEditBsl": "Редактировать запрос отдельно",
+  "queryApply": "Применить запрос к модулю",
+  "queryCancel": "Отменить редактирование запроса",
+  "command.queryConstructor": "Конструктор запросов",
+  "command.placeQueryComments": "Назначить позиции исходных комментариев"
 }

@@ -6,9 +6,10 @@ import { nativePath } from './source.js';
 import type { MetadataTree, ProjectTree, TreeEntry } from './tree.js';
 import { reconcileRules, readonlyPattern, readonlyPatterns } from './support-settings.js';
 import { ProtectedSources } from './protected-source.js';
+import { SourceAccess } from './source-access.js';
+import { nativeDirty } from './query/owner.js';
+import { SupportObjectQueue, type ObjectPolicy, type ObjectSnapshot } from './support-objects.js';
 
-type State = 'locked' | 'editableWithSupport' | 'unrestricted' | 'unknown';
-interface ObjectPolicy { objectId: string; uuid: string; state: State; reason: string }
 interface FilePolicy { path: string; objects: string[]; readOnly: boolean; mixed: boolean; unknown: boolean }
 interface Snapshot { generation: string; eventSequence: string; objects: Map<string, ObjectPolicy>; files: FilePolicy[]; diagnostics: string[] }
 
@@ -40,6 +41,8 @@ export class SupportController implements vscode.FileDecorationProvider {
   private fileTimer: NodeJS.Timeout | undefined;
   private serial: Promise<void> = Promise.resolve();
   private readonly snapshots = new Map<ProjectTree, Snapshot>();
+  private readonly objectSnapshots = new Map<ProjectTree, ObjectSnapshot>();
+  private readonly objectQueue: SupportObjectQueue;
   private readonly changed = new vscode.EventEmitter<vscode.Uri[] | undefined>();
   readonly onDidChangeFileDecorations = this.changed.event;
   private readonly subscription: vscode.Disposable;
@@ -60,7 +63,9 @@ export class SupportController implements vscode.FileDecorationProvider {
   private readonly mixedObjects = new Map<ProjectTree, Set<string>>();
   private readonly fileIndex = new Map<string, { file: FilePolicy; snapshot: Snapshot }>();
 
-  constructor(private readonly context: vscode.ExtensionContext, private readonly repaint: () => void, private readonly log: (text: string) => void) {
+  constructor(private readonly context: vscode.ExtensionContext, private readonly repaint: (entries?: TreeEntry[]) => void, private readonly log: (text: string) => void) {
+    this.objectQueue = new SupportObjectQueue((project, snapshot) => this.publishObjects(project, snapshot),
+      error => this.log(`support_object_failed ${String(error)}`));
     this.subscription = vscode.window.registerFileDecorationProvider(this);
     this.documentSubscription = vscode.workspace.onDidOpenTextDocument(document => {
       if (document.uri.scheme === 'file') this.queueFile(document.uri.fsPath);
@@ -107,7 +112,7 @@ export class SupportController implements vscode.FileDecorationProvider {
     const key = JSON.stringify([this.enabled, this.available, this.pendingFolders, [this.tree, ...this.additional].filter(Boolean).map(tree => [tree?.session.sessionId, tree?.projects.map(project => [project.supportGeneration ?? project.info.generation, project.supportEventSequence ?? project.info.eventSequence])])]);
     if (key === this.requested) {
       // A backend-confirmed BSL-only edit advances metadata tokens without changing support.
-      for (const [project, snapshot] of this.snapshots) {
+      for (const [project, snapshot] of [...this.snapshots, ...this.objectSnapshots]) {
         snapshot.generation = project.info.generation;
         snapshot.eventSequence = project.info.eventSequence;
       }
@@ -115,6 +120,7 @@ export class SupportController implements vscode.FileDecorationProvider {
     }
     this.requested = key;
     const epoch = ++this.epoch;
+    this.objectQueue.invalidate(); this.objectSnapshots.clear();
     clearTimeout(this.fileTimer);
     this.requestedEntries.clear();
     this.loading = this.enabled && !!this.tree && this.available && !this.targeted;
@@ -138,7 +144,7 @@ export class SupportController implements vscode.FileDecorationProvider {
   object(entry: TreeEntry): ObjectPolicy | undefined {
     if (!this.enabled || entry.node.id.kind === 'collection') return undefined;
     const id = entry.node.id.kind === 'object' ? entry.node.id.objectId : entry.node.id.owner;
-    const snapshot = this.snapshots.get(entry.project);
+    const snapshot = this.objectSnapshots.get(entry.project) ?? this.snapshots.get(entry.project);
     const current = snapshot?.generation === entry.project.info.generation && snapshot?.eventSequence === entry.project.info.eventSequence;
     if (!current || !snapshot.objects.has(id)) this.queueEntry(entry);
     return (current ? snapshot.objects.get(id) : undefined) ?? { objectId: id, uuid: '', state: 'unknown', reason: this.available ? 'unknown' : 'compatibility' };
@@ -149,7 +155,7 @@ export class SupportController implements vscode.FileDecorationProvider {
     const policy = this.object(entry);
     if (!policy) return '';
     const details = [supportText(policy.reason)];
-    const snapshot = this.snapshots.get(entry.project);
+    const snapshot = this.objectSnapshots.get(entry.project) ?? this.snapshots.get(entry.project);
     if (policy.state === 'unknown' && snapshot?.diagnostics.length) details.push(snapshot.diagnostics.join('; '));
     if (entry.node.id.kind === 'object' && this.mixedObjects.get(entry.project)?.has(policy.objectId)) details.push(supportText('mixed'));
     return details.join('\n');
@@ -209,22 +215,55 @@ export class SupportController implements vscode.FileDecorationProvider {
   /** Authorize the entire language edit against fresh backend policy, then expose a synchronous freshness check. */
   async languageWriteAccess(paths: readonly string[]): Promise<() => boolean> {
     const epoch = this.epoch;
-    if (!this.enabled) return () => !this.stopped && epoch === this.epoch && !this.enabled;
-    if (!paths.length || !this.targeted || !this.available || !this.tree || paths.some(path => !this.locate(path))) {
-      throw new ExplorerError('sourceChanged');
+    const enabled = this.enabled;
+    if (!paths.length || this.stopped || !this.tree) throw new ExplorerError('sourceChanged');
+    const groups = new Map<ProjectTree, { tree: MetadataTree; relative: string[] }>();
+    for (const path of new Set(paths)) {
+      const entry = this.locate(path);
+      if (!entry) throw new ExplorerError('sourceChanged');
+      const group = groups.get(entry.project) ?? { tree: entry.tree, relative: [] };
+      group.relative.push(entry.relative); groups.set(entry.project, group);
     }
-    let checked = false;
-    this.serial = this.serial.then(async () => { await this.queryFiles([...paths], epoch); checked = true; })
-      .catch(error => this.log(`support_language_edit_failed ${String(error)}`));
-    await this.serial;
-    const current = (): boolean => checked && !this.stopped && this.enabled && epoch === this.epoch && paths.every(path => {
-      const entry = this.locate(path), policy = this.fileIndex.get(vscode.Uri.file(path).toString());
-      return !!entry && !!policy && !policy.file.readOnly && !policy.file.unknown
-        && entry.project.info.generation === policy.snapshot.generation
-        && entry.project.info.eventSequence === policy.snapshot.eventSequence;
-    });
+    const checks: (() => boolean)[] = [];
+    for (const [project, group] of groups) {
+      const connection = group.tree.connection, endpoint = connection.sources;
+      if (!endpoint) throw new ExplorerError('incompatible');
+      const generation = project.info.generation, sequence = project.info.eventSequence, revision = connection.sourceRevision;
+      if (project.info.requiresRefresh || project.info.requiresReopen) throw new ExplorerError('sourceChanged');
+      const client = new SourceAccess(endpoint, () => ({ sessionId: group.tree.session.sessionId, projectId: project.info.projectId, generation }));
+      for (let offset = 0; offset < group.relative.length; offset += endpoint.limits.maxPaths) {
+        const files = group.relative.slice(offset, offset + endpoint.limits.maxPaths).map(value => ({ path: { value, encoding: 'utf-8' as const }, userReadOnly: false }));
+        if ((await client.protection(files, enabled)).some(state => !state.writable)) throw new ExplorerError('sourceChanged');
+      }
+      checks.push(() => connection.sources === endpoint && connection.sourceRevision === revision
+        && project.info.generation === generation && project.info.eventSequence === sequence
+        && !project.info.requiresRefresh && !project.info.requiresReopen);
+    }
+    const current = (): boolean => !this.stopped && epoch === this.epoch && enabled === this.enabled && checks.every(check => check());
     if (!current()) throw new ExplorerError('sourceChanged');
     return current;
+  }
+
+  /** ESKA selects the retained query owner or exact supplied dirty buffer; the adapter never reads source bytes from disk. */
+  async readSource(path: string): Promise<Awaited<ReturnType<SourceAccess['read']>> | undefined> {
+    const entry = this.locate(path);
+    if (!entry || this.stopped) return undefined;
+    const { tree, project } = entry, endpoint = tree.connection.sources;
+    if (!endpoint) throw new ExplorerError('incompatible');
+    const generation = project.info.generation, revision = tree.connection.sourceRevision;
+    const uri = vscode.Uri.file(path).toString();
+    const document = vscode.workspace.textDocuments.find(value => value.uri.toString() === uri && !value.isClosed);
+    const version = document?.version, dirty = document && nativeDirty(document);
+    const client = new SourceAccess(endpoint, () => ({ sessionId: tree.session.sessionId, projectId: project.info.projectId, generation }));
+    const result = await client.read({ value: entry.relative, encoding: 'utf-8' }, dirty
+      ? { version: String(version), text: document.getText(), userReadOnly: false } : undefined);
+    const current = this.locate(path);
+    const newer = vscode.workspace.textDocuments.find(value => value.uri.toString() === uri && !value.isClosed);
+    if (tree.connection.sources !== endpoint || tree.connection.sourceRevision !== revision
+      || current?.tree !== tree || current.project !== project
+      || (dirty && (document.isClosed || document.version !== version))
+      || (newer && nativeDirty(newer) && (newer !== document || newer.version !== version))) throw new ExplorerError('sourceChanged');
+    return result;
   }
 
   /** Native file opens use the same immutable provider; dirty buffers are never discarded or replaced. */
@@ -274,6 +313,11 @@ export class SupportController implements vscode.FileDecorationProvider {
     if (!this.targeted || this.stopped || !this.enabled) return;
     const tree = [this.tree, ...this.additional].find(tree => tree?.projects.includes(entry.project));
     if (!tree) return;
+    if (tree.connection.state.kind === 'ready' && tree.connection.state.supportObjects) {
+      if (entry.node.id.kind !== 'collection') this.objectQueue.enqueue(tree, entry.project,
+        entry.node.id.kind === 'object' ? entry.node.id.objectId : entry.node.id.owner);
+      return;
+    }
     const key = JSON.stringify([entry.project.key, entry.node.id]);
     if (this.requestedEntries.has(key)) return;
     this.requestedEntries.add(key);
@@ -289,6 +333,16 @@ export class SupportController implements vscode.FileDecorationProvider {
         this.queueFile(join(nativePath(entry.project.info.sourcePath), local));
       }
     }).catch(error => this.log(`support_object_failed ${String(error)}`));
+  }
+
+  /** Display policy never writes readonly settings or replaces a concurrently checked file snapshot. */
+  private publishObjects(project: ProjectTree, snapshot: ObjectSnapshot): void {
+    const previous = this.objectSnapshots.get(project);
+    const current = previous?.generation === snapshot.generation && previous.eventSequence === snapshot.eventSequence;
+    this.objectSnapshots.set(project, current ? { ...snapshot, objects: new Map([...previous.objects, ...snapshot.objects]) } : snapshot);
+    const entries = [...project.nodes.values()].filter(entry => entry.node.id.kind !== 'collection'
+      && snapshot.objects.has(entry.node.id.kind === 'object' ? entry.node.id.objectId : entry.node.id.owner));
+    this.repaint(entries);
   }
 
   /** A bounded request returns only touched files; no global inventory or giant settings update is needed. */
@@ -519,6 +573,7 @@ export class SupportController implements vscode.FileDecorationProvider {
   /** Deactivation awaits cleanup; no writeable-in-session command is ever invoked. */
   async shutdown(): Promise<void> {
     this.stopped = true; this.epoch++; clearTimeout(this.timer); clearTimeout(this.fileTimer);
+    await this.objectQueue.shutdown();
     await this.serial;
     await this.apply([]);
     this.subscription.dispose(); this.settingsSubscription.dispose(); this.documentSubscription.dispose(); this.editorSubscription.dispose(); this.changed.dispose();

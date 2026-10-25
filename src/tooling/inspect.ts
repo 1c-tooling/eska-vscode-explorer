@@ -1,7 +1,7 @@
 import { access, realpath, stat } from "node:fs/promises";
 import { constants } from "node:fs";
 import { delimiter, isAbsolute, join } from "node:path";
-import { API_VERSION, ExplorerError, parseHandshake } from "../protocol.js";
+import { BASE_API_VERSION, ExplorerError, parseHandshake } from "../protocol.js";
 import { BackendProcess } from "../process.js";
 import { runProbe } from "../installation.js";
 import type { DiagnosticLog } from "../diagnostics.js";
@@ -37,7 +37,8 @@ export async function inspectProject(path: string, cwd: string, log: DiagnosticL
   assertCurrent(signal);
   const child = new BackendProcess({ executable: path, cwd, args: ["serve", "--stdio"], log, failed() {}, ...(signal ? { signal } : {}) });
   try {
-    const hello = await child.request("initialize", { apiVersion: API_VERSION, client: { name: "eska-explorer", version: "tool-probe" },
+    // Probe the minimum tree contract; a connected session negotiates optional query capabilities.
+    const hello = await child.request("initialize", { apiVersion: BASE_API_VERSION, client: { name: "eska-explorer", version: "tool-probe" },
       locale: "en-US", allowPropertyEdits: true }, 10_000);
     assertCurrent(signal);
     const version = parseHandshake(hello);

@@ -5,9 +5,9 @@
 ## Разработка
 
 Зависимости закреплены в `bun.lock`: TypeScript 7.0.2, API VS Code 1.109.0,
-типы Node 22.20.3. Инструменты проверены 2026-09-18; Bun — 1.4.2.
+типы Node 22.20.5. Зависимости обновлены 2026-10-25; Bun — 1.4.4.
 Production-код работает в Node Extension Host. `yauzl` 3.4.0, `vscode-languageclient`
-10.1.2 и их зависимости включаются в bundle через esbuild 0.28.2; npm modules из checkout
+11.0.0 и их зависимости включаются в bundle через esbuild 0.28.2; npm modules из checkout
 установленному VSIX не нужны. Bun используется для инструментов проекта.
 
 ```bash
@@ -23,6 +23,144 @@ ESKA_TEST_ROOT="$(realpath ../eska-playground)" bun test
 ```bash
 node --test test/*.test.mjs
 ```
+
+Клиент query RPC находится в `src/query/`: планы исходников используют API 1.13,
+общее восстановление — API 1.14, устойчивые сессии — API 1.16. Рабочий адаптер
+запрашивает 1.25. После явного ответа о поддержке более ранней версии из диапазона
+1.12–1.24 подключение согласует доступные capabilities. Пакетная индикация
+поддержки использует `supportObjects` из 1.25; без неё сохраняется прежняя
+адресная проверка. Обратная навигация и
+поиск BSL-владельца требуют `sourceNavigation` из 1.24; клиентского обхода
+Designer XML или файлового fallback нет.
+Предварительная проверка executable требует минимальный контракт дерева 1.12.
+`query/open` всегда получает точный текст и версию редактора: дисковый BOM
+не добавляется к `TextDocument.getText()`. Снимок приложения и снимок generated
+analyzer config — разные контракты.
+
+`QueryDocument` хранит неизменяемую привязку владельца. Query RPC не повторяются
+автоматически после смены поколения метаданных. Большие owner/draft передаются
+последовательными UTF-8 chunks по 128 KiB с SHA-256; handles освобождаются также
+после отмены и ошибок. План проверяется по диапазонам UTF-8/UTF-16 и хэшу полного
+результата до передачи редактору. Клиент не записывает XML/BSL и не запускает
+анализатор. Вкладки, сохранение и восстановление T101 проверяются отдельно.
+
+`QueryRecovery` передаёт четыре компонента checkpoint в общий backend:
+metadata, полный owner, исходный запрос и черновик. Неизменённые owner/base
+переиспользуются по подтверждённым длинам и hashes. Запросы сериализованы в один
+upload; быстрая серия правок заменяет pending-текст, сохраняя последний.
+Формат файла, квоты, atomic replace, сравнение revision и проверка private
+каталога принадлежат Rust. `create` отделён от `save`: запоздалое обновление
+закрытой сессии не создаёт checkpoint заново.
+
+Recovery endpoint привязан к экземпляру процесса, без `sessionId` и generation.
+Он появляется после initialize и остаётся доступным при ошибке открытия manifest.
+Перед остановкой процесса `Connection.beforeStop` дожидается записей. Замена
+backend сохраняет прежние подтверждённые revisions: новое окно не выдаёт себе
+право перезаписать чужой checkpoint. Закрытия чистых вкладок при отключении
+удаляются после подключения с той же проверкой revision. Доменная модель сессии,
+временная защита, проверка конфликтов и разрешение Apply принадлежат ESKA.
+Адаптер управляет нативными вкладками и применяет проверенный план через Undo/Redo.
+BSL Apply включён; он возвращает изменённый несохранённый модуль.
+
+```sh
+ESKA_TEST_BINARY="$(realpath ../eska/target/debug/eska-project)" \
+ESKA_TEST_ROOT="$(realpath ../eska/../eska-playground)" \
+node --test test/query-client.test.mjs test/query-integration.test.mjs test/query-recovery.test.mjs
+```
+
+Процессные проверки включают совместимость 1.12, отмену после выделения handle,
+обрыв загрузки и смену поколения. Настоящий backend проверяет обе локали,
+dirty XML больше лимита inline, наборы СКД и union, несколько ручных списков,
+отсутствие фиктивного автоматического запроса, карты, no-op, планы и внешний
+конфликт; файлы создаются только в собственном каталоге playground.
+[Результаты клиентской части T101 и нативного save-прототипа](measurements/t101-query-client.json).
+
+Для физического стиля новых строк `QueryDocument.plan` принимает четвёртым
+аргументом `{lineEnding: "lf" | "crlf", signal?}`; перед отправкой проверяется
+`queryEditing.editorLineEndings`. Стиль берётся из `TextDocument.eol` владельца.
+Чистый XML-запрос остаётся LF; CRLF не добавляется к SDBL для управления XML.
+Нативная проверка в development host сопоставляет хэш и projected map с реально
+изменённым буфером для LF, CRLF и первого перевода строки, затем проверяет BOM:
+
+```sh
+ESKA_TEST_BINARY="$(realpath ../eska/target/debug/eska-project)" \
+ESKA_TEST_ROOT="$(realpath ../eska/../eska-playground)" \
+ESKA_HOST_SUPPORT_DISABLED=1 VSCODE_EXECUTABLE=codium \
+node test/run-host.mjs test/query-eol-host.cjs
+```
+
+Этот тест использует скомпилированный клиент из checkout; готовые вкладки
+и установленный VSIX им не принимаются. Для VS Code замените `codium` на `code`.
+
+`src/query/tabs.ts` предоставляет `eska-query:` и одну сессию на XML-владельца.
+`query/recovery.ts` атомарно хранит снимок владельца и обе ревизии SDBL вне
+проекта; очередь объединяет ожидающие записи. Открытие и сохранение используют
+короткоживущие backend documents, свежие policy/контекст и отдельный хэш
+дескриптора. Ошибка не запускает перезапись владельца дисковой копией.
+
+```sh
+ESKA_TEST_BINARY="$(realpath ../eska/target/debug/eska-project)" \
+ESKA_TEST_ROOT="$(realpath ../eska/../eska-playground)" \
+ESKA_HOST_SUPPORT_DISABLED=1 ESKA_HOST_QUERY_RESTART=1 \
+ESKA_HOST_LOCALE=en VSCODE_EXECUTABLE=codium \
+node test/run-host.mjs test/query-tabs-host.cjs
+```
+
+Два запуска используют один приватный профиль. Первый проверяет дерево,
+сохранение clean/dirty XML, Undo/Redo, ручные списки и внешний конфликт; второй —
+холодное восстановление dirty-черновика, read-only снимок владельца, отказ до
+явного продолжения и применение после проверки новой версии редактора.
+`ESKA_HOST_LOCALE=ru` проверяет фактическую русскую UI-локаль. Для нового профиля
+передайте `ESKA_HOST_LANGUAGE_PACK_VSIX` с абсолютным путём к совместимому
+русскому языковому пакету. Runner установит его только в приватный профиль
+и выполнит отдельный обычный запуск для регистрации переводов. Этот запуск
+не считается проверкой ru; оба последующих сценария требуют фактический `ru`.
+`ESKA_TEST_VSIX` включает тот же сценарий на установленном пакете;
+скрытые модули checkout ему не нужны.
+
+Исторический прототип T102 проверяет публичные команды session-readonly на clean/dirty,
+split и повторно открытом native-документе. Это наблюдение API, а не приёмка
+готового BSL-редактора:
+
+```sh
+ESKA_TEST_BINARY="$(realpath ../eska/target/debug/eska-project)" \
+ESKA_HOST_GLOBAL_BINARY="$(realpath ../eska/target/debug/eska-project)" \
+ESKA_HOST_SUPPORT_DISABLED=1 VSCODE_EXECUTABLE=codium \
+node test/run-host.mjs test/query-lock-host.cjs
+```
+
+`query-lock-restart-host.cjs` с `ESKA_HOST_RESTART=1` запускается в обычном
+development host, внутри первого запуска перезапускает настоящий Extension Host,
+затем наблюдает отдельный запуск окна. `passed` означает завершённое наблюдение;
+значения `builtinWritableBypassesSessionLock`, `resetClearsPreexistingSessionReadonly`
+и `nativeHotExitRetainedOwner` нужно оценивать отдельно. Проверенные способы
+ещё не обеспечивают снятие только собственной блокировки с сохранением прежнего
+session override пользователя. Пустой `TextEditor.edit`, native `FileStat`
+и `isWritableFileSystem` прежний режим не определяют. После перезапуска host
+session-readonly сохраняется; автоматическая очистка не является свойством
+самой команды. В быстром закрытии development host native hot exit не сохранил
+dirty-буфер. Эти прототипы описывают прежние ограничения API, а не текущее
+состояние T102. В действующей реализации ESKA хранит проверенный снимок,
+а адаптер заменяет вкладки родителя дочерним редактором после нативного решения
+Save / Don't Save / Cancel.
+
+`query-lock-overrides-host.cjs` проверяет ещё два исходно редактируемых режима:
+наследование пользовательских настроек и явный native Writeable. Проверенные
+getter-поля в них совпадают. После временной блокировки Reset теряет прежний
+Writeable, а принудительный Writeable теряет наследование будущего read-only
+настройки. Это контрпримеры двух вариантов очистки, а не доказательство
+невозможности любого публичного механизма. Тест временно меняет только
+`files.readonlyInclude` собственного workspace в приватном профиле и в конце
+восстанавливает исходные bytes settings; исходник и права ОС остаются прежними.
+Запуск аналогичен первому прототипу с заменой имени сценария.
+
+Текущая приёмка модальности — `query-modal-host.cjs`; настоящие решения
+Save / Don't Save / Cancel и сохранность native read-only проверяет
+`query-modal-normal-host.cjs` с `ESKA_HOST_NORMAL=1` и свободным
+`ESKA_HOST_DEBUG_PORT`. Для установленного пакета задайте `ESKA_TEST_VSIX`.
+Прежний `query-bsl-host.cjs` ожидает редактируемого dirty-родителя одновременно
+с запросом и несовместим с принятым модальным контрактом. Он сохранён как
+исторический сценарий и не заменяет эти две проверки.
 
 Интеграционная проверка использует существующий бинарник CLI и создаёт только
 собственный временный каталог внутри соседнего `eska-playground`:
@@ -88,6 +226,7 @@ VSCodium 1.109.5 (Node 22.21.1) подтвердил активацию, под�
 - `process.ts`: bounded queues, таймауты, stdout/stderr и завершение своего child.
 - `connection.ts`: handshake, один discovery context, защита от устаревших ответов.
 - `tree.ts`: ленивые ветви, стабильные идентификаторы и проверка поколений/событий.
+- `reveal.ts`: один `metadata/revealSource` и выбор UI-строки из готового пути ESKA.
 - `icons.ts`, `resources/icons`: таблица видов/ролей и локальные SVG четырёх тем.
 - `filter.ts`: фильтрация по состояниям backend и сохранение выбора каждого проекта.
 - `search.ts`, `search-view.ts`: отменяемый поиск, прогресс индекса, проверяемый reveal и Quick Pick.
@@ -100,6 +239,28 @@ VSCodium 1.109.5 (Node 22.21.1) подтвердил активацию, под�
 Решения API опираются на официальные [Extension Host](https://code.visualstudio.com/api/advanced-topics/extension-host),
 [Remote Development](https://code.visualstudio.com/api/advanced-topics/remote-extensions)
 и [Workspace Trust](https://code.visualstudio.com/api/extension-guides/workspace-trust).
+
+Для замера обратной навигации используйте оптимизированный backend:
+
+```sh
+ESKA_TEST_BINARY="$(realpath ../eska/target/dist/eska-project)" \
+ESKA_TEST_ROOT="$(realpath ../eska-playground)" node test/reveal-performance.mjs
+```
+
+Стенд создаёт только собственные проекты на 100, 2 000 и 10 000 объявлений,
+делает пять подключений и по 31 переходу. Первый переход измеряется с пустым
+деревом адаптера; запуск процесса и `workspace/open` уже завершены. Вывод JSONL
+содержит время, число RPC и удерживаемых узлов; отрисовка VS Code не измеряется.
+Нативную команду и сохранность dirty-буфера проверяет `source-navigation-host.cjs`:
+
+```sh
+ESKA_TEST_BINARY="$(realpath ../eska/target/dist/eska-project)" \
+ESKA_TEST_ROOT="$(realpath ../eska-playground)" VSCODE_EXECUTABLE=codium \
+node test/run-host.mjs test/source-navigation-host.cjs
+```
+
+`ESKA_HOST_PROJECT_TYPE` выбирает configuration, extension, processing или report;
+`ESKA_TEST_VSIX` запускает тот же сценарий из установленного пакета.
 
 Проверка прямого открытия модулей, вложенности сервисов и источников формы
 в нативном Extension Host:

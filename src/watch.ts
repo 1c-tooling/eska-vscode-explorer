@@ -8,6 +8,7 @@ export function watchSourceFiles(source: string, observed: (path: string) => voi
   const watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(vscode.Uri.file(source), "**/*"));
   /** Directory events matter too; cache/Git writes must never feed analysis invalidation loops. */
   const changed = (uri: vscode.Uri): void => {
+    if (uri.scheme !== "file") return;
     const path = relative(source, uri.fsPath), components = path.split(sep);
     if (!path || isAbsolute(path) || components.includes("..") || components.includes(".git") || components.includes(".eska")) return;
     observed(uri.fsPath);
@@ -112,7 +113,10 @@ export function watchManifests(start: string, projects: readonly ProjectTree[], 
   const watchers = [...folders].map((path) => {
     const watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(vscode.Uri.file(path), "eska.toml"));
     /** Replace the discovery session once after a burst of manifest changes. */
-    const update = (): void => { observed(); clearTimeout(timer); timer = setTimeout(changed, 150); };
+    const update = (uri: vscode.Uri): void => {
+      if (uri.scheme !== "file") return;
+      observed(); clearTimeout(timer); timer = setTimeout(changed, 150);
+    };
     watcher.onDidCreate(update); watcher.onDidChange(update); watcher.onDidDelete(update);
     return watcher;
   });
@@ -124,7 +128,8 @@ export function watchDirectory(path: string, changed: () => void): vscode.Dispos
   const watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(vscode.Uri.file(path), "*"));
   let timer: NodeJS.Timeout | undefined;
   /** A burst invalidates one shallow directory snapshot. */
-  const update = (): void => {
+  const update = (uri: vscode.Uri): void => {
+    if (uri.scheme !== "file") return;
     clearTimeout(timer);
     timer = setTimeout(changed, 100);
   };

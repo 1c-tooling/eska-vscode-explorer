@@ -22,7 +22,7 @@ function fixture({ available = false, enabled = true, hold, outside = false, sta
     session: { sessionId: "session", projects: [{ projectId: "project", rootPath: wire(root), sourcePath: wire(join(root, "src")) }] } };
   const sourceRoot = outside ? join(root, "other") : root;
   const dto = { schema_version: 1, kind: "analyzer-configuration", status: status ?? (hold === "analyzer/configPrepare" ? "missing" : "current"), path: wire(join(root, "bsl-analyzer.toml")),
-    preview_token: "a".repeat(64), ownership: { schema_version: 1, generator_version: 1, analyzer_version: "0.3.2", context: outside ? "two" : null,
+    preview_token: "a".repeat(64), ownership: { schema_version: 1, generator_version: 1, analyzer_version: "0.4.0", context: outside ? "two" : null,
       input_fingerprint: "b".repeat(64), body_sha256: "c".repeat(64) } };
   const connection = { state: ready, onNotification(listener) { notifications.add(listener); return { dispose() { notifications.delete(listener); } }; }, async analyzerRequest(method, _params, signal) {
     if (method === "analyzer/acquire") { assert.equal(signal, undefined); leased = true; }
@@ -34,7 +34,7 @@ function fixture({ available = false, enabled = true, hold, outside = false, sta
     return method === "analyzer/acquire" ? { ...dto, leaseId: "d".repeat(64), ...(changedLease ? { preview_token: "e".repeat(64) } : {}) } : dto;
   } };
   const tooling = { states: { analyzer: { phase: "missing" } }, analyzerState(phase, detail) { this.states.analyzer.phase = phase; this.states.analyzer.detail = detail; },
-    async ensureAnalyzer(_signal, offer) { await checkpoint(offer ? "ensureAnalyzer" : "inspect-only"); return { path: join(root, "analyzer"), version: "0.3.2" }; } };
+    async ensureAnalyzer(_signal, offer) { await checkpoint(offer ? "ensureAnalyzer" : "inspect-only"); return { path: join(root, "analyzer"), version: "0.4.0" }; } };
   const vscode = {
     env: { language: "en-US" }, CancellationError: class extends Error {}, RelativePattern: class {},
     CancellationTokenSource: class {
@@ -55,7 +55,9 @@ function fixture({ available = false, enabled = true, hold, outside = false, sta
       onDidChangeTextDocument(callback) { changed = callback; return { dispose() { changed = undefined; } }; },
       createFileSystemWatcher() { const callbacks = new Set(), watcher = {
         onDidCreate(callback) { callbacks.add(callback); }, onDidChange(callback) { callbacks.add(callback); }, onDidDelete(callback) { callbacks.add(callback); },
-        fire(uri) { for (const callback of callbacks) callback(uri); }, dispose() { callbacks.clear(); this.disposed = true; } };
+        /** Native watcher callbacks always receive a URI and can also see virtual schemes. */
+        fire(uri = {}) { for (const callback of callbacks) callback({ scheme: "file", ...uri }); },
+        dispose() { callbacks.clear(); this.disposed = true; } };
         watchers.push(watcher); return watcher;
       } },
     extensions: { getExtension(id) { assert.equal(id, ID); return conflict ? { id, isActive: false, activate() { assert.fail("foreign activation"); } } : undefined; },
@@ -70,7 +72,7 @@ function fixture({ available = false, enabled = true, hold, outside = false, sta
       this.diagnostics = { clear() { calls.push("diagnostics.clear"); diagnostics.clear(); }, delete(uri) { diagnostics.delete(uri.toString()); },
         set(uri, values) { diagnostics.set(uri.toString(), { uri, values }); }, get(uri) { return diagnostics.get(uri.toString())?.values; },
         forEach(callback) { for (const { uri, values } of diagnostics.values()) callback(uri, values); } }; clients.push(this); }
-    async start() { await this.startServer(); await checkpoint("client.start"); this.initializeResult = { serverInfo: { name: "bsl-analyzer", version: "0.3.2" }, capabilities: {} }; }
+    async start() { await this.startServer(); await checkpoint("client.start"); this.initializeResult = { serverInfo: { name: "bsl-analyzer", version: "0.4.0" }, capabilities: {} }; }
     async stop() { this.stopped = true; } async dispose() { this.disposed = true; }
   }
   class FakeOwner { constructor() { this.child = { pid: 100 + owners.length, stdout: {}, stdin: {} }; owners.push(this); } async stop() { this.stopped = true; } }
@@ -199,8 +201,10 @@ test("buffer edits reject old reads without publishing an artificial empty diagn
   const middleware = client.clientOptions.middleware;
   middleware.handleDiagnostics(uri, ["original"], (uri, values) => client.diagnostics.set(uri, values));
   let requestToken;
+  const started = barrier();
   const reply = middleware.sendRequest("textDocument/definition", { textDocument: { uri: uri.toString() } }, undefined,
-    (_type, _params, token) => { requestToken = token; return held.promise; });
+    (_type, _params, token) => { requestToken = token; started.release(); return held.promise; });
+  await started.promise;
   assert.equal(requestToken.isCancellationRequested, false);
   f.changeDocument();
   assert.equal(requestToken.isCancellationRequested, true, "obsolete work is cancelled before the upstream response");
@@ -415,4 +419,46 @@ test("application sources outside metadata selection receive scoped observers wi
   f.watchers[2].fire(); await configurationSettled(f.service);
   assert.equal(f.owners.length, 2); assert.equal(f.owners[0].stopped, true);
   assert.ok(f.watchers.slice(0, 3).every(watcher => watcher.disposed), "old session observers are all released");
+});
+
+/** Virtual file providers must not trigger configuration reloads or native source invalidation through matching fsPath values. */
+test("protected view events cannot invalidate analyzer configuration or uncovered sources", async t => {
+  const f = fixture({ outside: true }); t.after(() => f.service.shutdown()); f.connect(); await settled(f.service);
+  const model = f.service.modelRevision, checks = f.calls.filter(value => value === "analyzer/configStatus").length;
+  f.watchers[0].fire({ scheme: "eska-protected", fsPath: join(f.root, "bsl-analyzer.toml") });
+  f.watchers[1].fire({ scheme: "eska-protected", fsPath: join(f.sourceRoot, "src", "Catalogs", "Item.xml") });
+  f.watchers[2].fire({ scheme: "eska-protected", fsPath: join(f.sourceRoot, "eska.toml") });
+  await configurationSettled(f.service);
+  assert.equal(f.service.modelRevision, model);
+  assert.equal(f.service.configurationPending, false);
+  assert.equal(f.calls.filter(value => value === "analyzer/configStatus").length, checks);
+  assert.equal(f.owners.length, 1);
+});
+
+test("a projection and restore invalidate an ordinary read even when its native owner version never changes", async t => {
+  const f = fixture(); t.after(() => f.service.shutdown()); f.connect(); await settled(f.service);
+  const client = f.clients[0], held = barrier(), started = barrier();
+  const stream = { epoch: 1, projected: () => false, settled: async () => {} };
+  f.service.session.documents = stream;
+  const reply = client.clientOptions.middleware.sendRequest("textDocument/definition", { textDocument: { uri: "file:///same.bsl" } }, undefined,
+    () => { started.release(); return held.promise; });
+  await started.promise;
+  stream.epoch += 2;
+  held.release("offsets from the previous projected model");
+  await assert.rejects(reply, error => error.code === LSPErrorCodes.RequestCancelled);
+});
+
+test("restored native symbols cannot share the in-flight result from a previous projection model", async t => {
+  const f = fixture(); t.after(() => f.service.shutdown()); f.connect(); await settled(f.service);
+  const middleware = f.clients[0].clientOptions.middleware, held = barrier(), started = barrier();
+  const stream = { epoch: 1, projected: () => false, settled: async () => {} };
+  f.service.session.documents = stream;
+  const params = { textDocument: { uri: "file:///same.bsl" } };
+  let calls = 0;
+  const old = middleware.sendRequest("textDocument/documentSymbol", params, undefined,
+    () => { calls++; started.release(); return held.promise; });
+  await started.promise; stream.epoch += 2;
+  const fresh = await middleware.sendRequest("textDocument/documentSymbol", params, undefined, async () => { calls++; return ["current symbols"]; });
+  assert.deepEqual(Array.from(fresh), ["current symbols"]); assert.equal(calls, 2);
+  held.release(["old symbols"]); await assert.rejects(old, error => error.code === LSPErrorCodes.RequestCancelled);
 });

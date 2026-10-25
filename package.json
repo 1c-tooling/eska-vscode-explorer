@@ -20,6 +20,7 @@
     "workspace"
   ],
   "activationEvents": [
+    "onFileSystem:eska-query",
     "onFileSystem:eska-protected",
     "onView:eska.explorer.projects",
     "workspaceContains:**/eska.toml",
@@ -46,10 +47,10 @@
     "package": "bun run --bun compile && bun run --bun vsce package --no-dependencies --no-rewrite-relative-links"
   },
   "devDependencies": {
-    "@types/node": "22.20.3",
+    "@types/node": "22.20.5",
     "@types/vscode": "1.109.0",
     "@vscode/vsce": "4.0.0",
-    "ovsx": "1.2.0",
+    "ovsx": "1.3.0",
     "typescript": "7.0.2",
     "@types/yauzl": "3.4.0",
     "esbuild": "0.28.2"
@@ -184,6 +185,54 @@
         "command": "eska.explorer.selectAnalysisContext",
         "title": "%selectAnalysisContext%",
         "category": "ESKA Explorer"
+      },
+      {
+        "command": "eska.explorer.openQuery",
+        "title": "%queryOpen%",
+        "category": "ESKA Explorer"
+      },
+      {
+        "command": "eska.explorer.resumeQuery",
+        "title": "%queryResume%",
+        "category": "ESKA Explorer",
+        "icon": "$(debug-continue)"
+      },
+      {
+        "command": "eska.explorer.compareQueryOwner",
+        "title": "%queryCompare%",
+        "category": "ESKA Explorer",
+        "icon": "$(diff)"
+      },
+      {
+        "command": "eska.explorer.editBslQuery",
+        "title": "%queryEditBsl%",
+        "category": "ESKA Explorer"
+      },
+      {
+        "command": "eska.explorer.applyQuery",
+        "title": "%queryApply%",
+        "category": "ESKA Explorer",
+        "icon": "$(check)",
+        "enablement": "eska.queryBsl"
+      },
+      {
+        "command": "eska.explorer.cancelQuery",
+        "title": "%queryCancel%",
+        "category": "ESKA Explorer",
+        "icon": "$(close)",
+        "enablement": "eska.queryBsl"
+      },
+      {
+        "command": "eska.explorer.queryConstructor",
+        "title": "%command.queryConstructor%",
+        "category": "ESKA",
+        "icon": "$(table)"
+      },
+      {
+        "command": "eska.explorer.placeQueryComments",
+        "title": "%command.placeQueryComments%",
+        "category": "ESKA",
+        "icon": "$(comment-discussion)"
       }
     ],
     "views": {
@@ -197,6 +246,33 @@
       ]
     },
     "menus": {
+      "editor/title": [
+        {
+          "command": "eska.explorer.resumeQuery",
+          "when": "resourceScheme == eska-query",
+          "group": "navigation@1"
+        },
+        {
+          "command": "eska.explorer.compareQueryOwner",
+          "when": "resourceScheme == eska-query",
+          "group": "navigation@2"
+        },
+        {
+          "command": "eska.explorer.applyQuery",
+          "when": "resourceScheme == eska-query && eska.queryBsl",
+          "group": "navigation@0"
+        },
+        {
+          "command": "eska.explorer.cancelQuery",
+          "when": "resourceScheme == eska-query && eska.queryBsl",
+          "group": "navigation@3"
+        },
+        {
+          "command": "eska.explorer.queryConstructor",
+          "when": "resourceScheme == eska-query && resourceExtname == .sdbl",
+          "group": "navigation@5"
+        }
+      ],
       "view/title": [
         {
           "command": "eska.explorer.connect",
@@ -278,6 +354,18 @@
       ],
       "commandPalette": [
         {
+          "command": "eska.explorer.openQuery",
+          "when": "false"
+        },
+        {
+          "command": "eska.explorer.resumeQuery",
+          "when": "resourceScheme == eska-query"
+        },
+        {
+          "command": "eska.explorer.compareQueryOwner",
+          "when": "resourceScheme == eska-query"
+        },
+        {
           "command": "eska.explorer.properties",
           "when": "false"
         },
@@ -312,6 +400,23 @@
         {
           "command": "eska.explorer.resetSortOrder",
           "when": "false"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "eska.explorer.editBslQuery",
+          "when": "editorLangId == bsl && (resourceScheme == file || resourceScheme == eska-protected)",
+          "group": "eska@1"
+        },
+        {
+          "command": "eska.explorer.queryConstructor",
+          "when": "resourceScheme == eska-query && resourceExtname == .sdbl",
+          "group": "eska@4"
+        },
+        {
+          "command": "eska.explorer.placeQueryComments",
+          "when": "resourceScheme == eska-query && resourceExtname == .sdbl",
+          "group": "eska@5"
         }
       ]
     },
@@ -465,6 +570,6 @@
   "icon": "resources/icon.png",
   "dependencies": {
     "yauzl": "3.4.0",
-    "vscode-languageclient": "10.1.2"
+    "vscode-languageclient": "11.0.0"
   }
 }

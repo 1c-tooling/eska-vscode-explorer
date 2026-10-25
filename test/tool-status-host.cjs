@@ -19,7 +19,7 @@ exports.run = async function () {
   await until(() => !!explorer.tooling.states.analyzer.info, "Analyzer binary verified");
   const project = explorer.status, analyzer = explorer.tooling.analyzerStatus;
   assert.equal(project.text, `ESKA v${explorer.connection.state.version}`);
-  assert.match(analyzer.text, /^BSL Analyzer v0\.3\.2 · /);
+  assert.match(analyzer.text, /^BSL Analyzer v0\.4\.0 · /);
   assert.ok(project.tooltip.includes(explorer.connection.state.target.executable));
   assert.ok(analyzer.tooltip.includes(process.env.ESKA_TEST_ANALYZER_BINARY));
   assert.notEqual(project.id, analyzer.id);
@@ -41,7 +41,7 @@ exports.run = async function () {
   await vscode.commands.executeCommand("eska.explorer.disconnect");
   assert.match(project.text, /^ESKA · /);
   assert.ok(!project.text.includes(explorer.tooling.states.analyzer.info.version));
-  assert.match(analyzer.text, /^BSL Analyzer v0\.3\.2 · /);
+  assert.match(analyzer.text, /^BSL Analyzer v0\.4\.0 · /);
   assert.equal(explorer.tooling.states.analyzer.phase, "suspended");
   await fs.writeFile(path.join(fixture.root, "host-result.json"), JSON.stringify({ passed: true, suite: "tool-status",
     vscode: vscode.version, node: process.versions.node, project: readyText, analyzer: analyzer.text,

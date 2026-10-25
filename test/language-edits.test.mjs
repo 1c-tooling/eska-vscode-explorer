@@ -60,10 +60,13 @@ async function fixture(t) {
     async sendRequest(method) { return method === "textDocument/rename" ? reply.rename : reply.actions; } };
   const support = { async languageWriteAccess(paths) { await authorize(); if (paths.some(path => policy.has(path))) throw new Error("locked"); return () => !paths.some(path => policy.has(path)); } };
   const adapter = { exports: {} }, require = createRequire(new URL("../out/language/edits.js", import.meta.url));
+  const policyModule = { exports: {} };
+  runInNewContext(`(function(require,module,exports){${readFileSync(new URL("../out/editor-policy.js", import.meta.url), "utf8")}\n})`, {})(
+    name => name === "vscode" ? vscode : require(name), policyModule, policyModule.exports);
   runInNewContext(`(function(require,module,exports){${readFileSync(new URL("../out/language/edits.js", import.meta.url), "utf8")}\n})`, {
     process, structuredClone, setTimeout(callback) { timers.add(callback); return callback; }, clearTimeout(callback) { timers.delete(callback); },
   })(
-    name => name === "vscode" ? vscode : require(name), adapter, adapter.exports);
+    name => name === "vscode" ? vscode : name === "../editor-policy.js" ? policyModule.exports : require(name), adapter, adapter.exports);
   const edits = new adapter.exports.LanguageEdits(client, { sources: [{ source }] }, support, () => active, () => {}, () => model);
   t.after(() => edits.shutdown());
   const change = (index, version = opened[index].version) => ({ textDocument: { uri: opened[index].uri.toString(), version },

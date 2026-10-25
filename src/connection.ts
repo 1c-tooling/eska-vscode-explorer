@@ -1,12 +1,16 @@
 import { isAbsolute } from "node:path";
 import { diagnostic, errorContext, type DiagnosticLog } from "./diagnostics.js";
 import { BackendProcess, type ProcessOptions } from "./process.js";
-import { API_VERSION, LEGACY_API_VERSION, ExplorerError, isRecord, parseHandshake, parseWorkspace, type BackendKind, type WorkspaceSession } from "./protocol.js";
+import { API_VERSION, BASE_API_VERSION, QUERY_API_VERSION, RECOVERY_API_VERSION, SESSION_API_VERSION, LEGACY_API_VERSION, ExplorerError, isRecord, parseHandshake, parseWorkspace, type BackendKind, type WorkspaceSession } from "./protocol.js";
+import { queryCapabilities, type QueryCapabilities } from "./query/protocol.js";
+import { recoveryCapabilities, type RecoveryEndpoint } from "./query/recovery-protocol.js";
+import { querySessionCapabilities } from "./query/session-protocol.js";
+import { sourceCapabilities, type SourceEndpoint } from "./source-access.js";
 
 export interface ConnectionTarget { executable: string; path: string; name: string; locale: "ru-RU" | "en-US"; backend?: BackendKind }
 export type ConnectionState =
   | { kind: "disconnected" | "connecting" | "stopping" }
-  | { kind: "ready"; session: WorkspaceSession; version: string; supportPolicy: boolean; supportFiles: boolean; analyzerConfiguration: boolean; target: ConnectionTarget }
+  | { kind: "ready"; session: WorkspaceSession; version: string; supportPolicy: boolean; supportFiles: boolean; supportObjects: boolean; sourceNavigation: boolean; analyzerConfiguration: boolean; queryEditing: QueryCapabilities | undefined; target: ConnectionTarget }
   | { kind: "error"; error: ExplorerError };
 
 /** Own the lifecycle independently of VS Code so restarts can be tested with real pipes. */
@@ -19,6 +23,13 @@ export class Connection {
   private lastTarget: ConnectionTarget | undefined;
   private structuralRequest: Promise<unknown> | undefined;
   private readonly listeners = new Set<(method: string, params: unknown) => void>();
+  private readonly sourceListeners = new Set<() => void>();
+  private recoveryEndpoint: RecoveryEndpoint | undefined;
+  private sourceEndpoint: SourceEndpoint | undefined;
+  private sourceEra: object = {};
+  private readonly recoveryListeners = new Set<(endpoint: RecoveryEndpoint | undefined) => void>();
+  private readonly stopListeners = new Set<() => Promise<void>>();
+  private stoppingChild: { child: BackendProcess; pending: Promise<void> } | undefined;
 
   constructor(
     private readonly version: string,
@@ -30,6 +41,21 @@ export class Connection {
   /** Read immutable snapshots; failed or obsolete sessions are never exposed as ready. */
   get state(): ConnectionState { return this.current; }
   get target(): ConnectionTarget | undefined { return this.lastTarget; }
+  get recovery(): RecoveryEndpoint | undefined { return this.recoveryEndpoint; }
+  get sources(): SourceEndpoint | undefined { return this.sourceEndpoint; }
+  get sourceRevision(): object { return this.sourceEra; }
+
+  /** Recovery follows the initialized process, including a process whose metadata workspace failed to open. */
+  onRecovery(listener: (endpoint: RecoveryEndpoint | undefined) => void): { dispose(): void } {
+    this.recoveryListeners.add(listener);
+    return { dispose: () => { this.recoveryListeners.delete(listener); } };
+  }
+
+  /** Checkpoint acknowledgements must finish before restart/disconnect can terminate their process. */
+  beforeStop(listener: () => Promise<void>): { dispose(): void } {
+    this.stopListeners.add(listener);
+    return { dispose: () => { this.stopListeners.delete(listener); } };
+  }
 
   /** A replaced session cannot publish responses into the replacement tree. */
   async request(sessionId: string, method: string, params: Record<string, unknown> = {}, signal?: AbortSignal): Promise<unknown> {
@@ -38,6 +64,7 @@ export class Connection {
       if (signal?.aborted) throw new ExplorerError("cancelled");
     }
     const child = this.sessionChild(sessionId);
+    const sourceMutation = this.sourceMutation(method);
     const structural = ["metadata/renamePreview", "metadata/renameApply", "metadata/undoProperty"].includes(method)
       || (method === "metadata/updateProperty" && typeof params?.contextSnapshot === "string");
     // Backend scans cannot stop midway. Keep the barrier until their actual reply, even if a tab closes.
@@ -45,7 +72,10 @@ export class Connection {
     if (structural) this.structuralRequest = pending;
     let result: unknown;
     try { result = await pending; }
-    finally { if (this.structuralRequest === pending) this.structuralRequest = undefined; }
+    finally {
+      if (this.structuralRequest === pending) this.structuralRequest = undefined;
+      if (sourceMutation && this.child === child) for (const listener of this.sourceListeners) listener();
+    }
     if (signal?.aborted) throw new ExplorerError("cancelled");
     if (child !== this.sessionChild(sessionId)) throw new ExplorerError("obsolete");
     return result;
@@ -60,6 +90,12 @@ export class Connection {
   onNotification(listener: (method: string, params: unknown) => void): { dispose(): void } {
     this.listeners.add(listener);
     return { dispose: () => { this.listeners.delete(listener); } };
+  }
+
+  /** Protected native views refresh only after the backend has completed its source ownership change. */
+  onSourceChange(listener: () => void): { dispose(): void } {
+    this.sourceListeners.add(listener);
+    return { dispose: () => { this.sourceListeners.delete(listener); } };
   }
 
   /** Analyzer RPCs use their own input schema and lease, without a metadata generation or injected sessionId. */
@@ -88,9 +124,12 @@ export class Connection {
     const revision = ++this.revision;
     this.lastTarget = target;
     diagnostic(this.log, "connection_connect", { clientVersion: this.version, executable: target.executable, cwd: target.path, locale: target.locale });
+    this.recoveryEndpoint = undefined;
+    this.sourceEndpoint = undefined;
+    this.sourceEra = {};
     this.set({ kind: "connecting" });
     // Interrupt a slow open instead of waiting its full timeout before switching folders.
-    void this.child?.stop("restart").catch(() => this.log("process_cleanup_failed"));
+    void this.stopChild("restart").catch(() => this.log("process_cleanup_failed"));
     this.queue = this.queue.then(async () => {
       let negotiated = false;
       try {
@@ -109,16 +148,52 @@ export class Connection {
             if (revision === this.revision) for (const listener of this.listeners) listener(method, params);
           },
           failed: (error) => {
-            if (negotiated && revision === this.revision) this.set({ kind: "error", error });
+            if (negotiated && revision === this.revision) {
+              this.recoveryEndpoint = undefined;
+              this.sourceEndpoint = undefined;
+              this.sourceEra = {};
+              this.set({ kind: "error", error });
+            }
           },
         });
         this.child = child;
-        const response = await child.request("initialize", {
-          apiVersion: backend === "legacy" ? LEGACY_API_VERSION : API_VERSION, client: { name: "eska-explorer", version: this.version }, locale: target.locale, allowPropertyEdits: true,
+        const initialize = (apiVersion: { major: number; minor: number }): Promise<unknown> => child.request("initialize", {
+          apiVersion, client: { name: "eska-explorer", version: this.version }, locale: target.locale, allowPropertyEdits: true,
         }, 10_000);
+        let response: unknown;
+        try { response = await initialize(backend === "legacy" ? LEGACY_API_VERSION : API_VERSION); }
+        catch (error) {
+          const supported = error instanceof ExplorerError ? error.details?.supported : undefined;
+          if (backend !== "project" || !(error instanceof ExplorerError) || error.domain !== "unsupported_version"
+            || !isRecord(supported) || supported.major !== 1
+            || typeof supported.minor !== "number" || ![12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24].includes(supported.minor)) throw error;
+          response = await initialize(supported.minor >= 17 ? { major: 1, minor: supported.minor } : supported.minor === 16 ? SESSION_API_VERSION : supported.minor >= 14 ? RECOVERY_API_VERSION
+            : supported.minor === QUERY_API_VERSION.minor ? QUERY_API_VERSION : BASE_API_VERSION);
+        }
         const version = parseHandshake(response, backend);
+        const queries = backend === "project" ? queryCapabilities(response) : undefined;
+        const recovery = backend === "project" ? recoveryCapabilities(response) : undefined;
+        const sessions = backend === "project" ? querySessionCapabilities(response) : undefined;
+        const sources = backend === "project" ? sourceCapabilities(response) : undefined;
         negotiated = true;
         if (revision !== this.revision) return;
+        const request = async (method: string, params: Record<string, unknown>): Promise<unknown> => {
+          if (this.child !== child) throw new ExplorerError("obsolete");
+          const sourceMutation = this.sourceMutation(method);
+          // Metadata authority is deliberately absent; even a failed manifest can retain an inert draft.
+          let result: unknown;
+          try { result = await child.request(method, params); }
+          finally { if (sourceMutation && this.child === child) for (const listener of this.sourceListeners) listener(); }
+          if (this.child !== child) throw new ExplorerError("obsolete");
+          return result;
+        };
+        if (sources) this.sourceEndpoint = { limits: sources, request };
+        if (recovery) {
+          const endpoint: RecoveryEndpoint = { capabilities: recovery, request,
+            ...(sessions ? { sessions: { capabilities: sessions, request } } : {}) };
+          this.recoveryEndpoint = endpoint;
+          this.publishRecovery();
+        }
         const session = parseWorkspace(await child.request("workspace/open", {
           start: { value: target.path, encoding: "utf-8" }, selection: { kind: "current" }, diskCache: true,
         }));
@@ -126,17 +201,26 @@ export class Connection {
           diagnostic(this.log, "connection_ready", { backendVersion: version, sessionId: session.sessionId,
             projects: session.projects.map((project) => ({ projectId: project.projectId, type: project.type,
               rootPath: project.rootPath, sourcePath: project.sourcePath, generation: project.generation })) });
-          this.set({ kind: "ready", session, version, supportPolicy: isRecord(response) && isRecord(response.capabilities) && response.capabilities.supportPolicy === true,
+          this.set({ kind: "ready", session, version, sourceNavigation: isRecord(response) && isRecord(response.capabilities) && response.capabilities.sourceNavigation === true,
+            supportPolicy: isRecord(response) && isRecord(response.capabilities) && response.capabilities.supportPolicy === true,
             supportFiles: isRecord(response) && isRecord(response.capabilities) && response.capabilities.supportFiles === true,
-            analyzerConfiguration: isRecord(response) && isRecord(response.capabilities) && response.capabilities.analyzerConfiguration === true, target });
+            supportObjects: isRecord(response) && isRecord(response.capabilities) && response.capabilities.supportObjects === true,
+            analyzerConfiguration: isRecord(response) && isRecord(response.capabilities) && response.capabilities.analyzerConfiguration === true,
+            queryEditing: queries, target });
         }
       } catch (error) {
         if (!negotiated && error instanceof ExplorerError
           && ["connectionLost", "protocolInvalid"].includes(error.code)) {
           error = new ExplorerError("handshakeFailed");
         }
-        try { await this.stopChild(); }
-        catch { error = new ExplorerError("cleanupFailed"); }
+        const keepRecovery = negotiated && this.recoveryEndpoint && error instanceof ExplorerError
+          && ["manifestMissing", "manifestInvalid", "selectionInvalid", "sourceInvalid", "rootInvalid"].includes(error.code);
+        if (!keepRecovery) {
+          this.recoveryEndpoint = undefined;
+          this.sourceEndpoint = undefined;
+          try { await this.stopChild(); }
+          catch { error = new ExplorerError("cleanupFailed"); }
+        }
         if (revision === this.revision) {
           this.set({ kind: "error", error: error instanceof ExplorerError ? error : new ExplorerError("spawnFailed") });
         }
@@ -148,8 +232,11 @@ export class Connection {
   /** Disconnect also invalidates pending connects and waits for the owned process to exit. */
   disconnect(): Promise<void> {
     const revision = ++this.revision;
+    this.recoveryEndpoint = undefined;
+    this.sourceEndpoint = undefined;
+    this.sourceEra = {};
     this.set({ kind: "stopping" });
-    void this.child?.stop("disconnect").catch(() => this.log("process_cleanup_failed"));
+    void this.stopChild("disconnect").catch(() => this.log("process_cleanup_failed"));
     this.queue = this.queue.then(async () => {
       try {
         await this.stopChild();
@@ -164,10 +251,30 @@ export class Connection {
   /** Deactivation awaits cleanup; no child is detached or unref'ed. */
   dispose(): Promise<void> { this.disposed = true; return this.disconnect(); }
 
+  /** Native authorization snapshots expire before any queued request can change source ownership in this process. */
+  private sourceMutation(method: string): boolean {
+    if ((method.startsWith("query/session") && !["query/sessionGet", "query/sessionComments"].includes(method))
+      || ["workspace/close", "query/recoveryOpen", "query/recoveryClose", "query/recoveryRemove"].includes(method)) {
+      this.sourceEra = {};
+      return true;
+    }
+    return false;
+  }
+
   /** Retain the child reference if cleanup fails, preventing an overlapping replacement. */
-  private async stopChild(): Promise<void> {
-    await this.child?.stop();
-    this.child = undefined;
+  private async stopChild(reason?: string): Promise<void> {
+    const child = this.child;
+    if (!child) return;
+    if (this.stoppingChild?.child === child) return this.stoppingChild.pending;
+    const pending = (async () => {
+      const results = await Promise.allSettled([...this.stopListeners].map(listener => listener()));
+      await child.stop(reason);
+      if (this.child === child) this.child = undefined;
+      for (const result of results) if (result.status === "rejected") throw result.reason;
+    })();
+    this.stoppingChild = { child, pending };
+    try { await pending; }
+    finally { if (this.stoppingChild?.pending === pending) this.stoppingChild = undefined; }
   }
 
   /** Publish one state transition to the adapter. */
@@ -176,5 +283,9 @@ export class Connection {
     diagnostic(this.log, "connection_state", { state: state.kind, ...(state.kind === "error" ? errorContext(state.error) : {}) });
     this.current = state;
     this.changed(state);
+    this.publishRecovery();
   }
+
+  /** A capability may arrive before the metadata tree or remain available alongside its error. */
+  private publishRecovery(): void { for (const listener of this.recoveryListeners) listener(this.recoveryEndpoint); }
 }

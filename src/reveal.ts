@@ -2,10 +2,7 @@ import { isAbsolute, relative, sep } from "node:path";
 import { ExplorerError, isRecord, isWirePath } from "./protocol.js";
 import { nativePath, directModuleRole, isForm, isFormPayload } from "./source.js";
 import type { FormSource } from "./forms.js";
-import type { MetadataTree, TreeEntry } from "./tree.js";
-
-/** Keep comparisons consistent with the host filesystem's usual casing rules. */
-function comparable(value: string): string { return process.platform === "win32" ? value.toLowerCase() : value; }
+import { nodeKey, type MetadataTree, type TreeEntry } from "./tree.js";
 
 /** Reject sibling prefixes and paths outside the selected project. */
 export function relativeFile(root: string, file: string): string | undefined {
@@ -13,49 +10,26 @@ export function relativeFile(root: string, file: string): string | undefined {
   return path && !isAbsolute(path) && !path.split(sep).includes("..") ? path : undefined;
 }
 
-/** Use Designer XML names only as traversal hints; authoritative source mappings decide the match. */
+/** ESKA resolves declared ownership and ancestry; the adapter selects only the corresponding UI row. */
 export async function revealFile(tree: MetadataTree, file: string): Promise<TreeEntry | FormSource | undefined> {
   for (const project of tree.projects) {
     const path = relativeFile(nativePath(project.info.sourcePath), file);
     if (!path) continue;
-    const targetPath = comparable(path);
-    const names = new Set(path.split(sep).map(part => comparable(part.replace(/\.xml$/i, ""))));
-    const generation = project.info.generation;
-    const visited = new Set<string>();
-    /** Follow virtual groups and matching names without indexing unrelated descriptors. */
-    async function visit(entry: TreeEntry, depth: number): Promise<TreeEntry | FormSource | undefined> {
-      if (project.info.generation !== generation) throw new ExplorerError("sourceChanged");
-      if (depth > 128 || visited.has(entry.key)) return undefined;
-      visited.add(entry.key);
-      if (entry.node.id.kind === "module") return undefined;
-      if (entry.node.id.kind === "object") {
-        const result = await tree.request(project, "metadata/source", { node: entry.node.id });
-        if (!Array.isArray(result.sources)) throw new ExplorerError("protocolInvalid");
-        const source = result.sources.find(source => isRecord(source) && isWirePath(source.path)
-          && comparable(nativePath(source.path)) === targetPath);
-        if (isRecord(source) && isRecord(source.role)) {
-          if (isForm(entry) && (isFormPayload(source) || source.role.kind === "module")) {
-            return { owner: entry, target: source.role.kind === "module" ? "form-module" : "form" };
-          }
-          if (source.role.kind !== "module" || directModuleRole(entry) === source.role.role) return entry;
-          const role = source.role.role;
-          const groups = await tree.children(entry);
-          const modules = groups.find(child => child.node.id.kind === "collection" && child.node.id.collection.kind === "modules");
-          if (modules) return (await tree.children(modules)).find(child => child.node.id.kind === "module" && child.node.id.role === role);
-          return undefined;
-        }
-      }
-      for (const child of await tree.children(entry)) {
-        if (child.node.id.kind === "collection" || (child.node.label.kind === "name" && names.has(comparable(child.node.label.text)))) {
-          const found = await visit(child, depth + 1);
-          if (found) return found;
-        }
-      }
-      return undefined;
+    const state = tree.connection.state;
+    if (state.kind !== "ready" || !state.sourceNavigation) throw new ExplorerError("incompatible");
+    const result = await tree.request(project, "metadata/revealSource", { path: { value: path, encoding: "utf-8" } });
+    if (result.source === null && Array.isArray(result.nodes) && !result.nodes.length) continue;
+    if (!isRecord(result.source) || !isWirePath(result.source.path) || !isRecord(result.source.role)
+      || nativePath(result.source.path) !== path || !["descriptor", "module", "payload"].includes(String(result.source.role.kind))) throw new ExplorerError("protocolInvalid");
+    const entry = tree.acceptAncestry(project, result.nodes);
+    if (result.source.role.kind === "module" ? entry.node.id.kind !== "module" || result.source.role.role !== entry.node.id.role
+      : entry.node.id.kind !== "object") throw new ExplorerError("protocolInvalid");
+    const owner = entry.node.id.kind === "module" ? project.nodes.get(nodeKey({ kind: "object", objectId: entry.node.id.owner })) : entry;
+    if (!owner || owner.node.id.kind !== "object") throw new ExplorerError("protocolInvalid");
+    if (isForm(owner) && (isFormPayload(result.source) || entry.node.id.kind === "module")) {
+      return { owner, target: entry.node.id.kind === "module" ? "form-module" : "form" };
     }
-    const found = await visit(await tree.root(project), 0);
-    if (project.info.generation !== generation) throw new ExplorerError("sourceChanged");
-    if (found) return found;
+    return entry.node.id.kind === "module" && directModuleRole(owner) === entry.node.id.role ? owner : entry;
   }
   return undefined;
 }

@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { configuredReadOnly } from "../editor-policy.js";
 import { realpath, stat } from "node:fs/promises";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -9,7 +10,7 @@ import { message, type MessageKey } from "../messages.js";
 import { isRecord } from "../protocol.js";
 import type { AnalysisContext } from "./context.js";
 
-type Reason = "readonly" | "stale" | "resource" | "invalid" | "command";
+type Reason = "readonly" | "stale" | "resource" | "invalid" | "command" | "backend";
 interface Origin { documents: Map<string, { document: vscode.TextDocument; version: number }>; model: number; token?: vscode.CancellationToken }
 interface Target { document: vscode.TextDocument; version: number; path: string; stamp: string }
 interface Prepared { edit: ProtocolEdit; targets: Target[]; valid: () => boolean }
@@ -136,15 +137,6 @@ export class LanguageEdits implements vscode.Disposable {
     });
   }
 
-  /** Read-only include/exclude rules are evaluated by the editor's own public glob matcher. */
-  private configuredReadonly(document: vscode.TextDocument): boolean {
-    const configuration = vscode.workspace.getConfiguration("files", document.uri), folder = vscode.workspace.getWorkspaceFolder(document.uri);
-    const matches = (key: string): boolean => Object.entries(configuration.get<Record<string, boolean>>(key, {})).some(([pattern, value]) => value === true
-      && (vscode.languages.match({ scheme: "file", pattern }, document) > 0
-        || !!folder && vscode.languages.match({ scheme: "file", pattern: new vscode.RelativePattern(folder, pattern) }, document) > 0));
-    return matches("readonlyInclude") && !matches("readonlyExclude");
-  }
-
   /** Only ordinary canonical files in the selected context may enter a text edit, including through another URI spelling. */
   private async target(value: string): Promise<Target> {
     const uri = vscode.Uri.parse(value, true);
@@ -155,9 +147,9 @@ export class LanguageEdits implements vscode.Disposable {
     const same = process.platform === "win32" ? canonical.toLowerCase() === resolve(uri.fsPath).toLowerCase() : canonical === resolve(uri.fsPath);
     if (!same) throw new Rejected("readonly");
     const document = await vscode.workspace.openTextDocument(uri);
-    if (this.configuredReadonly(document)) throw new Rejected("readonly");
+    if (configuredReadOnly(document)) throw new Rejected("readonly");
     const metadata = await stat(canonical, { bigint: true });
-    if (!metadata.isFile() || (metadata.mode & 0o222n) === 0n) throw new Rejected("readonly");
+    if (!metadata.isFile()) throw new Rejected("readonly");
     return { document, version: document.version, path: canonical,
       stamp: `${metadata.dev}:${metadata.ino}:${metadata.size}:${metadata.mtimeNs}:${metadata.ctimeNs}` };
   }
@@ -193,7 +185,7 @@ export class LanguageEdits implements vscode.Disposable {
     }
     let valid: () => boolean;
     try { valid = await this.support.languageWriteAccess(targets.map(target => target.path)); }
-    catch { throw new Rejected("readonly"); }
+    catch (error) { throw new Rejected(isRecord(error) && error.code === "incompatible" ? "backend" : "readonly"); }
     const prepared = { edit, targets, valid };
     await this.recheck(prepared, origin);
     return prepared;
@@ -232,7 +224,7 @@ export class LanguageEdits implements vscode.Disposable {
   private assertPrepared(prepared: Prepared, origin: Origin): void {
     this.assertOrigin(origin);
     if (!prepared.valid() || prepared.targets.some(target => target.document.isClosed || target.document.version !== target.version
-      || this.configuredReadonly(target.document))) throw new Rejected("stale");
+      || configuredReadOnly(target.document))) throw new Rejected("stale");
   }
 
   /** Resource edits are excluded, so the public API supplies one all-or-nothing text transaction. */
@@ -264,7 +256,7 @@ export class LanguageEdits implements vscode.Disposable {
   /** Translate policy categories without exposing internal DTOs or file contents in user flows. */
   private reasonText(reason: Reason): string {
     const keys: Record<Reason, MessageKey> = { readonly: "languageEditReadonly", stale: "sourceChanged", resource: "languageEditResource",
-      invalid: "languageEditInvalid", command: "languageEditCommand" };
+      invalid: "languageEditInvalid", command: "languageEditCommand", backend: "languageEditBackend" };
     return message(vscode.env.language, keys[reason]);
   }
 

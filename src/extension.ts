@@ -1,3 +1,4 @@
+import { QueryDesigner } from "./query/designer.js";
 import { SupportContexts } from "./support-contexts.js";
 import { SupportController } from "./support.js";
 import { PROTECTED_SOURCE_SCHEME, ProtectedSources } from "./protected-source.js";
@@ -7,6 +8,7 @@ import { BackendSetup } from "./backend-setup.js";
 import { ToolingSetup } from "./tooling/setup.js";
 import { ToolFailure } from "./tooling/contracts.js";
 import { LanguageService } from "./language/service.js";
+import { QueryLanguage } from "./query/language.js";
 import { GitDecorations } from "./decorations.js";
 import { revealFile, relativeFile } from "./reveal.js";
 import { iconName } from "./icons.js";
@@ -22,12 +24,16 @@ import { ProjectSorting, type SortOrder } from "./sorting.js";
 import { ProjectFilters, isHiddenSection, supportsRootFilter } from "./filter.js";
 import { nativePath, isCommonModule, directModuleRole, isModuleLeaf, isForm, resolveSource, resolveTreeSource, resolvePropertySource, type SourceTarget } from "./source.js";
 import { FormSources, type FormSource } from "./forms.js";
+import { QueryTabs } from "./query/tabs.js";
+import { SourceAccess } from "./source-access.js";
+import { isXmlQueryOwner } from "./query/owner.js";
+import { queryBranches, queryLabel, queryLeaf, type QueryEntry } from "./query/tree.js";
 import { WorkspaceFiles, fileName, type WorkspaceEntry } from "./workspace-files.js";
 import { ProjectWatcher, watchManifests, watchDirectory } from "./watch.js";
 import { basename } from "node:path";
 
 interface Notice { label: string; loading?: boolean; supportFailure?: boolean; project?: ProjectTree; parent?: Element }
-type Element = TreeEntry | Notice | FormSource | WorkspaceEntry;
+type Element = TreeEntry | Notice | FormSource | WorkspaceEntry | QueryEntry;
 
 let active: Explorer | undefined;
 
@@ -54,12 +60,15 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
   private readonly setup: BackendSetup;
   private readonly tooling: ToolingSetup;
   private readonly language: LanguageService;
+  private readonly queryDesigner: QueryDesigner;
   private readonly legacyNotices = new Set<string>();
   private readonly view: vscode.TreeView<Element>;
   private readonly status = vscode.window.createStatusBarItem("eska.explorer.connection", vscode.StatusBarAlignment.Right, 0);
   private readonly disposables: vscode.Disposable[] = [];
   readonly support: SupportController;
-  private readonly protectedSources = new ProtectedSources();
+  private readonly protectedSources = new ProtectedSources(source => this.readProtectedSource(source), error =>
+    this.output.warn(JSON.stringify({ event: "protected_source_read_failed", code: error instanceof ExplorerError ? error.code : "requestFailed",
+      domain: error instanceof ExplorerError ? error.domain : undefined })));
   private readonly supportContexts: SupportContexts;
   private tree: MetadataTree | undefined;
   private files: WorkspaceFiles | undefined;
@@ -71,6 +80,7 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
   private readonly expanded = new Map<string, boolean>();
   private readonly forms = new FormSources();
   private readonly propertiesTabs: PropertyTabs;
+  private readonly queries: QueryTabs;
   private readonly recovering = new Set<ProjectTree>();
   private treeLanguage = this.resolveTreeLanguage();
   private opening = 0;
@@ -88,7 +98,7 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
   private supportContextsPending: Promise<void> = Promise.resolve();
 
   constructor(private readonly context: vscode.ExtensionContext) {
-    this.support = new SupportController(context, () => this.supportRepaint(), text => this.output.warn(text));
+    this.support = new SupportController(context, entries => this.supportRepaint(entries), text => this.output.warn(text));
     this.supportContexts = new SupportContexts(String(context.extension.packageJSON.version), (trees, pending) => {
       this.additionalPolicyTrees = trees; this.support.setAdditionalTrees(trees, pending);
     }, () => this.support.invalidate(), text => this.output.info(text));
@@ -103,6 +113,7 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
     this.disposables.push(this.propertiesTabs);
     this.connection = new Connection(String(context.extension.packageJSON.version),
       (state) => this.update(state), (text, level) => this.output[level ?? "info"](text));
+    this.disposables.push(this.connection.onSourceChange(() => this.protectedSources.refresh()));
     this.tooling = new ToolingSetup(context, (text, level) => { if (!this.disposed) this.output[level ?? "info"](text); },
       () => this.renderProjectStatus(), async kind => { if (kind === "project") await this.disconnect(); else await this.language.stop(); },
       async kind => { if (kind === "project") await this.connect(false); else await this.language.restart(false); });
@@ -110,6 +121,10 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
     this.language = new LanguageService(context, this.connection, this.tooling, this.output, (text, level) => this.output[level ?? "info"](text),
       this.support, roots => this.registerLanguagePolicyRoots(roots));
     this.disposables.push(this.language);
+    this.queries = new QueryTabs(context, this.connection, () => this.tree, () => this.language.selectedApplication,
+      entry => { if (!this.disposed) this.changed.fire(entry); }, value => this.output.warn(value));
+    this.language.attachQueries(new QueryLanguage(this.queries, value => this.output.warn(value)));
+    this.queryDesigner = new QueryDesigner(context, this.queries, value => this.output.warn(value));
     this.setup = new BackendSetup(context, (text, level) => { if (!this.disposed) this.output[level ?? "info"](text); },
       () => this.connection.disconnect(), () => this.connect(false));
     this.disposables.push(this.setup);
@@ -139,6 +154,40 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
     this.disposables.push(vscode.commands.registerCommand("eska.explorer.properties", (entry: TreeEntry) => this.showProperties(entry)));
     this.disposables.push(vscode.commands.registerCommand("eska.explorer.openFormSource", (entry: FormSource) =>
       this.open(entry.owner, entry.target)));
+    this.disposables.push(vscode.commands.registerCommand("eska.explorer.openQuery", async (entry: QueryEntry) => {
+      if (!this.tree || entry?.queryKind !== "query") return;
+      try { await this.queries.show(this.tree, entry.owner, entry.header.identity); }
+      catch (error) { this.queries.explain(error); }
+    }));
+    this.disposables.push(vscode.commands.registerCommand("eska.explorer.editBslQuery", async () => {
+      const editor = vscode.window.activeTextEditor;
+      try { if (!this.tree) await this.connect(false); await this.queries.showBsl(editor); }
+      catch (error) { this.queries.explain(error); }
+    }));
+    this.disposables.push(vscode.commands.registerCommand("eska.explorer.queryConstructor", async (uri?: vscode.Uri) => {
+      try { await this.queryDesigner.show(uri); }
+      catch (error) { this.queries.explain(error); }
+    }));
+    this.disposables.push(vscode.commands.registerCommand("eska.explorer.placeQueryComments", async () => {
+      try { await this.queries.placeComments(); }
+      catch (error) { this.queries.explain(error); }
+    }));
+    this.disposables.push(vscode.commands.registerCommand("eska.explorer.applyQuery", async (uri?: vscode.Uri) => {
+      try { await this.queries.apply(uri); }
+      catch (error) { this.queries.explain(error); }
+    }));
+    this.disposables.push(vscode.commands.registerCommand("eska.explorer.cancelQuery", async (uri?: vscode.Uri) => {
+      try { await this.queries.cancel(uri); }
+      catch (error) { this.queries.explain(error); }
+    }));
+    this.disposables.push(vscode.commands.registerCommand("eska.explorer.resumeQuery", async () => {
+      try { await this.queries.resume(); }
+      catch (error) { this.queries.explain(error); }
+    }));
+    this.disposables.push(vscode.commands.registerCommand("eska.explorer.compareQueryOwner", async () => {
+      try { await this.queries.compare(); }
+      catch (error) { this.queries.explain(error); }
+    }));
     this.disposables.push(vscode.commands.registerCommand("eska.explorer.openFile", (entry: WorkspaceEntry) => this.openFile(entry)));
     for (const name of ["hideEmptyGroups", "showEmptyGroups", "resetRootFilter"] as const) {
       this.disposables.push(vscode.commands.registerCommand(`eska.explorer.${name}`, (entry: Element) =>
@@ -221,6 +270,7 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
     const tree = this.tree;
     if (tree) {
       try {
+        if (entry && "queryKind" in entry) return entry.queryKind === "branch" ? [queryLeaf(entry)] : [];
         if (entry && "fileKind" in entry) {
           const children = await this.files?.children(entry) ?? [];
           return tree === this.tree ? children : [];
@@ -228,8 +278,9 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
         if (entry && (!("node" in entry) || isModuleLeaf(entry))) return [];
         if (entry && isForm(entry)) {
           const rows = await this.forms.children(tree, entry);
-          return tree === this.tree ? this.sorting.rows(entry.project, rows, this.treeLanguage,
-            row => message(this.treeLanguage, row.target === "form" ? "formSource" : "formModule")) : [];
+          const queries = await this.queryRows(tree, entry);
+          return tree === this.tree ? [...this.sorting.rows(entry.project, rows, this.treeLanguage,
+            row => message(this.treeLanguage, row.target === "form" ? "formSource" : "formModule")), ...queries] : [];
         }
         const children: Element[] = [];
         if (entry) {
@@ -237,6 +288,7 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
           const hide = this.hideEmptyGroups(entry.project);
           children.push(...this.sorting.children(entry.project, all, this.treeLanguage).filter((child) => !isHiddenSection(child, hide)
             && !(directModuleRole(entry) && child.node.id.kind === "collection" && child.node.id.collection.kind === "modules")));
+          children.push(...await this.queryRows(tree, entry));
         }
         else for (const project of tree.projects) {
           try { children.push(await tree.root(project)); }
@@ -258,8 +310,27 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
     return [{ label: this.text(state.kind === "error" ? state.error.code : state.kind === "ready" ? "connecting" : state.kind) }];
   }
 
+  /** Discover persisted query identities through the backend while leaving unsupported template payloads alone. */
+  private async queryRows(tree: MetadataTree, entry: TreeEntry): Promise<QueryEntry[]> {
+    if (!isXmlQueryOwner(entry) || this.connection.state.kind !== "ready" || !this.connection.state.queryEditing) return [];
+    try { return queryBranches(entry, await this.queries.discover(tree, entry)); }
+    catch (error) {
+      if (error instanceof ExplorerError && error.domain === "query_failed" && error.details?.reason === "unsupported_structure") return [];
+      throw error;
+    }
+  }
+
   /** Native TreeItems inherit zoom, keyboard navigation, themes and accessible text from VS Code. */
   getTreeItem(entry: Element): vscode.TreeItem {
+    if ("queryKind" in entry) {
+      const item = new vscode.TreeItem(entry.queryKind === "branch" ? queryLabel(entry.header.identity) : this.text("queryText"),
+        entry.queryKind === "branch" ? vscode.TreeItemCollapsibleState.Collapsed : vscode.TreeItemCollapsibleState.None);
+      item.id = entry.key;
+      item.contextValue = entry.queryKind === "branch" ? "eskaQueryDataSet" : "eskaQuery";
+      item.iconPath = new vscode.ThemeIcon(entry.queryKind === "branch" ? "database" : "code");
+      if (entry.queryKind === "query") item.command = { command: "eska.explorer.openQuery", title: this.text("queryOpen"), arguments: [entry] };
+      return item;
+    }
     if ("fileKind" in entry) {
       const label = entry.fileKind === "group" ? message(this.treeLanguage, entry.kind) : fileName(entry);
       const item = new vscode.TreeItem(label, entry.fileKind === "entry" && !entry.directory ? vscode.TreeItemCollapsibleState.None
@@ -307,7 +378,8 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
       : node.label.translations[this.treeLanguage];
     const commonModule = isCommonModule(entry);
     const expanded = this.expanded.get(entry.key) ?? node.expandedByDefault;
-    const item = new vscode.TreeItem(label, isModuleLeaf(entry) || (node.parent && node.state === "empty" && !isForm(entry)) ? vscode.TreeItemCollapsibleState.None
+    const item = new vscode.TreeItem(label, isModuleLeaf(entry) || (node.parent && node.state === "empty" && !isForm(entry)
+      && !(isXmlQueryOwner(entry) && this.connection.state.kind === "ready" && this.connection.state.queryEditing)) ? vscode.TreeItemCollapsibleState.None
       : expanded ? vscode.TreeItemCollapsibleState.Expanded : vscode.TreeItemCollapsibleState.Collapsed);
     item.id = entry.key;
     item.resourceUri = this.decorations.resource(entry);
@@ -347,6 +419,7 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
 
   /** Native reveal uses backend-provided ancestry already present in the lazy tree. */
   getParent(entry: Element): Element | undefined {
+    if ("queryKind" in entry) return entry.queryKind === "query" ? entry.parent : entry.owner;
     if ("fileKind" in entry) {
       if (entry.fileKind === "entry") return entry.parent;
       return entry.scope.project?.info.scope.kind === "member" ? entry.scope.project.root : undefined;
@@ -417,7 +490,11 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
   }
 
   /** Preserve native selection while the support preloader temporarily replaces the roots. */
-  private supportRepaint(): void {
+  private supportRepaint(entries?: TreeEntry[]): void {
+    if (entries) {
+      if (entries.length) this.changed.fire(entries);
+      return;
+    }
     const selected = this.view?.selection[0];
     if (this.support.loading && !this.supportSelection && this.tree && selected && "node" in selected) {
       this.supportSelection = { tree: this.tree, entry: selected };
@@ -603,6 +680,32 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
     else await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(uri), { preview: true });
   }
 
+  /** Restoration waits for the existing process; unclassified views remain rooted read-only previews owned by ESKA. */
+  private async readProtectedSource(source: vscode.Uri): Promise<Awaited<ReturnType<SourceAccess['read']>>> {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      await this.connectionAttempt;
+      await this.supportContextsPending;
+      if (this.disposed) throw new ExplorerError("obsolete");
+      try {
+        const view = await this.support.readSource(source.fsPath);
+        if (view) return view;
+      } catch (error) {
+        if (error instanceof ExplorerError && error.domain === "source_view_failed" && error.details?.reason === "unknown_source") break;
+        if (!(error instanceof ExplorerError) || attempt === 2
+          || (error.domain !== "stale_generation" && error.code !== "sourceChanged")) throw error;
+        // Ordered metadata/native events can supersede a readonly capture; retry only that read under its new context.
+        await new Promise(resolve => setTimeout(resolve, 0));
+        continue;
+      }
+      break;
+    }
+    const endpoint = this.connection.sources, target = this.connection.target;
+    if (!endpoint || !target) throw new ExplorerError("incompatible");
+    const path = relativeFile(target.path, source.fsPath);
+    if (!path) throw new ExplorerError("sourceMissing");
+    return new SourceAccess(endpoint).preview({ value: path, encoding: "utf-8" });
+  }
+
   /** Invalidate preflight as well as the protocol connection so late probes cannot reconnect. */
   private async disconnect(): Promise<void> {
     this.connecting?.abort();
@@ -690,10 +793,11 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
       });
       if (!covered && !targets.has(root)) targets.set(root, { ...state.target, path: root, name: basename(root) });
     }
+    if (!this.support.enabled) for (const path of targets.keys()) if (!this.languagePolicyRoots.includes(path)) targets.delete(path);
     const key = JSON.stringify([state.session.sessionId, this.support.enabled, [...targets.keys()].sort()]);
     if (this.supportContextsKey === key) return this.supportContextsPending;
     this.supportContextsKey = key;
-    this.supportContextsPending = this.supportContexts.start([...targets.values()]).catch(error => {
+    this.supportContextsPending = this.supportContexts.start([...targets.values()], this.languagePolicyRoots.length > 0).catch(error => {
       if (!this.disposed) this.output.warn(JSON.stringify({ event: "support_context_failed", code: error instanceof ExplorerError ? error.code : "requestFailed" }));
     });
     return this.supportContextsPending;
@@ -709,6 +813,7 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
   /** Process logs never become the view's labels or user-facing error text. */
   private update(state: ConnectionState): void {
     if (this.disposed) return;
+    this.queries.stale();
     this.supportContextsPending = this.supportContexts.stop(); this.supportContextsKey = undefined;
     if (state.kind !== "ready") this.languagePolicyRoots = [];
     this.searchView?.dispose();
@@ -723,6 +828,7 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
     if (state.kind === "ready") {
       const tree = new MetadataTree(this.connection, state.session,
         (entries) => { this.support.invalidate(); this.decorations.invalidate(); this.propertiesTabs.changed(tree, entries);
+          this.protectedSources.refresh();
           void this.repaint(entries); }, (project, reopen) => this.recover(project, reopen));
       this.tree = tree;
       this.files = new WorkspaceFiles(tree.projects, state.target.path, watchDirectory, entry => {
@@ -737,6 +843,7 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
       } catch (error) { this.showError(error instanceof ExplorerError ? error : new ExplorerError("unsupportedPath")); }
     }
     this.support.setTree(this.tree, state.kind === "ready" && state.supportPolicy, state.kind === "disconnected" || state.kind === "stopping", state.kind === "ready" && state.supportFiles);
+    this.protectedSources.refresh();
     if (state.kind === "ready") {
       void this.refreshSupportContexts();
     }
@@ -796,10 +903,12 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
       this.view.dispose();
       this.changed.dispose();
       const other = Promise.allSettled([this.supportContexts.stop(), this.support.shutdown(), this.setup.shutdown(), this.tooling.shutdown()]);
+      const queries = this.queryDesigner.shutdown().then(() => Promise.allSettled([this.queries.shutdown()]));
       this.stopping = (async () => {
         const language = await Promise.allSettled([this.language.shutdown()]);
+        const queryResults = await queries;
         const metadata = await Promise.allSettled([this.connection.dispose()]);
-        for (const result of [...language, ...metadata, ...await other]) if (result.status === "rejected") throw result.reason;
+        for (const result of [...language, ...queryResults, ...metadata, ...await other]) if (result.status === "rejected") throw result.reason;
       })().finally(() => this.output.dispose());
     }
     return this.stopping;

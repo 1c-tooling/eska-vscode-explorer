@@ -46,7 +46,7 @@ test("strict JSON and portable paths reject ambiguous installation instructions"
 test("release selection never substitutes the monolith or an unverified analyzer version/asset", () => {
   const target = hostTarget(), value = { draft: false, prerelease: false, tag_name: "v0.14.3", assets: [] };
   assert.match(parseRelease("project", target, value).restriction, /^missing-asset:/);
-  assert.equal(parseRelease("analyzer", target, { ...value, tag_name: "v0.3.3" }).restriction, "supported-analyzer-0.3.2");
+  assert.equal(parseRelease("analyzer", target, { ...value, tag_name: "v0.4.1" }).restriction, "supported-analyzer-0.4.0");
   const name = `eska-project-0.14.3-${target}.zip`;
   value.assets.push({ name, size: 1, state: "uploaded", digest: "sha256:" + "a".repeat(64), browser_download_url: `https://github.com/1c-tooling/eska/releases/download/v0.14.3/${name}` });
   assert.equal(parseRelease("project", target, value).asset.sha256, "a".repeat(64));
@@ -158,12 +158,12 @@ test("real upstream app installs independently and verifies all five notices wit
 }, async t => {
   const root = await fixture(t), prefix = join(root, "install"), data = await readFile(process.env.ESKA_TEST_ANALYZER_BINARY);
   await mkdir(join(prefix, "bin"), { recursive: true }); await writeFile(join(prefix, "bin/eska-project"), "custom project");
-  const release = { kind: "analyzer", version: "0.3.2", target: hostTarget(), asset: { name: "upstream-fixture", url: "https://example.invalid/analyzer", sha256: createHash("sha256").update(data).digest("hex"), size: data.length } };
+  const release = { kind: "analyzer", version: "0.4.0", target: hostTarget(), asset: { name: "upstream-fixture", url: "https://example.invalid/analyzer", sha256: createHash("sha256").update(data).digest("hex"), size: data.length } };
   const info = await installAnalyzer(prefix, data, release, join(repository, "resources/analyzer-notices"));
-  assert.equal(info.path, managedPath(prefix, "analyzer")); assert.equal(info.version, "0.3.2");
+  assert.equal(info.path, managedPath(prefix, "analyzer")); assert.equal(info.version, "0.4.0");
   assert.equal(await readFile(join(prefix, "bin/eska-project"), "utf8"), "custom project");
-  assert.equal(await managedVersion(prefix, "analyzer"), "0.3.2");
-  assert.equal((await installAnalyzer(prefix, data, release, join(repository, "resources/analyzer-notices"))).version, "0.3.2");
+  assert.equal(await managedVersion(prefix, "analyzer"), "0.4.0");
+  assert.equal((await installAnalyzer(prefix, data, release, join(repository, "resources/analyzer-notices"))).version, "0.4.0");
   await writeFile(info.path, "user modification");
   await assert.rejects(installAnalyzer(prefix, data, release, join(repository, "resources/analyzer-notices")), { code: "modified" });
 });

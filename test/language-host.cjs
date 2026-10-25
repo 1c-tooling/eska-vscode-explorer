@@ -47,7 +47,7 @@ exports.run = async function () {
   const session = explorer.language.session, pid = session.owner.child.pid;
   const capabilities = session.client.initializeResult.capabilities;
   assert.equal(session.client.initializeResult.serverInfo.name, "bsl-analyzer");
-  assert.equal(session.client.initializeResult.serverInfo.version, "0.3.2");
+  assert.equal(session.client.initializeResult.serverInfo.version, "0.4.0");
   const generated = await fs.readFile(path.join(fixture.root, "bsl-analyzer.toml"), "utf8");
   assert.ok(generated.startsWith("# eska-generated "));
   assert.ok(session.lease);

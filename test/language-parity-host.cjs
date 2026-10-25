@@ -79,7 +79,7 @@ async function run() {
   assert.equal(russian.exit, english.exit);
   const report = JSON.parse(russian.stdout);
   assert.equal(report.complete, true); assert.equal(report.scope, "full");
-  assert.equal(report.analyzer.version, "0.3.2");
+  assert.equal(report.analyzer.version, "0.4.0");
   assert.equal(report.context.root.value, explorer.language.session.context.root);
   assert.equal(report.context.application, explorer.language.session.context.name);
   assert.deepEqual(report.files.map(file => file.path.value).sort(), [...files].sort(), "the whole selected BSL set is analyzed");

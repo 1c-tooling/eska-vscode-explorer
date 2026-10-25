@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, mkdir, writeFile, chmod, rm, realpath } from "node:fs/promises";
 import { join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { projectContract, analyzerContract, nativeTarget, analyzerAsset, ToolFailure } from "../out/tooling/contracts.js";
 import { findTool, inspectProject, inspectAnalyzer, inspectProjectContract } from "../out/tooling/inspect.js";
 
@@ -13,8 +14,9 @@ function contract() {
 
 /** Assertions cover the declared flags actually used by check/configuration, not a list of names alone. */
 function analyzer() {
-  return { build_version: "0.3.2", contract_version: "3.4", cli: { commands: [
-    { name: "lsp", args: [] }, { name: "check-config", args: [{ name: "config", required: true, takes_value: true }] },
+  return { build_version: "0.4.0", contract_version: "3.5", cli: { commands: [
+    { name: "lsp", args: [{ name: "mode", takes_value: true, values: ["auto", "stdio"] }] },
+    { name: "check-config", args: [{ name: "config", required: true, takes_value: true }] },
     { name: "analyze", args: [{ name: "format", takes_value: true, values: ["console", "jsonl"] }] },
   ] } };
 }
@@ -32,9 +34,10 @@ test("project compatibility checks complete fields, config, bridge and target in
 });
 
 test("analyzer contract rejects unsupported versions, incomplete commands and missing configuration flags", () => {
-  assert.equal(analyzerContract(analyzer()), "0.3.2");
-  for (const mutate of [value => { value.build_version = "0.3.3"; }, value => { value.contract_version = "3.5"; },
+  assert.equal(analyzerContract(analyzer()), "0.4.0");
+  for (const mutate of [value => { value.build_version = "0.3.2"; }, value => { value.contract_version = "3.4"; },
     value => { value.cli.commands[0].args = undefined; }, value => { value.cli.commands[1].args = []; },
+    value => { value.cli.commands[0].args[0].values = ["auto"]; },
     value => { value.cli.commands[2].args[0].values = ["console"]; }]) {
     const value = analyzer(); mutate(value);
     assert.throws(() => analyzerContract(value), ToolFailure);
@@ -81,12 +84,23 @@ test("real project inspection negotiates its API and validates the installed con
   await assert.rejects(inspectProject(path, root, () => {}, AbortSignal.abort()), { code: "cancelled" });
 });
 
+/** Discovery must not reject a usable API 1.12 executable before Connection can negotiate its optional features. */
+test("project preflight accepts the minimum tree API without query support", { skip: process.platform === "win32" }, async t => {
+  const root = await mkdtemp(join(process.env.ESKA_TEST_ROOT ?? resolve("../eska-playground"), "explorer-tool-api12-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const path = join(root, "eska-project");
+  const peer = fileURLToPath(new URL("fake-backend.mjs", import.meta.url));
+  await writeFile(path, `#!${process.execPath}\nprocess.argv[2] = "api12"; import(${JSON.stringify(peer)});\n`);
+  await chmod(path, 0o755);
+  assert.deepEqual(await inspectProject(path, root, () => {}), { kind: "project", path, version: "test" });
+});
+
 test("real analyzer inspection verifies both bounded processes against the pinned CLI contract", {
   skip: !process.env.ESKA_TEST_ANALYZER_BINARY,
 }, async t => {
   const root = await mkdtemp(join(process.env.ESKA_TEST_ROOT ?? resolve("../eska-playground"), "explorer-tool-analyzer-"));
   t.after(() => rm(root, { recursive: true, force: true }));
   const info = await inspectAnalyzer(process.env.ESKA_TEST_ANALYZER_BINARY, root);
-  assert.equal(info.version, "0.3.2"); assert.equal(info.kind, "analyzer");
+  assert.equal(info.version, "0.4.0"); assert.equal(info.kind, "analyzer");
   await assert.rejects(inspectAnalyzer(process.env.ESKA_TEST_ANALYZER_BINARY, root, AbortSignal.abort()), { code: "cancelled" });
 });

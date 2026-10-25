@@ -90,14 +90,20 @@ function connection(t, mode = "ok") {
   const children = [];
   const states = [];
   const starts = [];
+  const versions = [];
   const value = new Connection("0", (state) => states.push(state), () => {}, (options) => {
     starts.push(options.args);
     const peer = new BackendProcess({ ...options, executable: process.execPath, args: [fixture, mode] });
+    const request = peer.request.bind(peer);
+    peer.request = (method, params, ...rest) => {
+      if (method === "initialize") versions.push(params.apiVersion.minor);
+      return request(method, params, ...rest);
+    };
     children.push(peer);
     return peer;
   });
   t.after(() => value.dispose());
-  return { value, children, states, starts };
+  return { value, children, states, starts, versions };
 }
 
 const target = { executable: process.execPath, path: process.cwd(), name: "test", locale: "ru-RU" };
@@ -125,6 +131,58 @@ test("incompatible API is rejected before workspace/open", async (t) => {
   assert.equal(value.state.kind, "error");
   assert.equal(value.state.error.code, "incompatible");
   exited(children[0].pid);
+});
+
+/** Retry only an explicit compatible minor rejection, retaining the same process and project transport. */
+test("API 1.12 keeps the tree without claiming query editing", async t => {
+  const { value, children, starts } = connection(t, "api12");
+  await value.connect(target);
+  assert.equal(value.state.kind, "ready", JSON.stringify(value.state));
+  assert.equal(value.state.analyzerConfiguration, true);
+  assert.equal(value.state.queryEditing, undefined);
+  assert.equal(children.length, 1);
+  assert.deepEqual(starts, [["serve", "--stdio"]]);
+});
+
+/** Recovery absence is not a reason to disable an otherwise compatible project tree. */
+test("API 1.13 is negotiated on the same process without claiming common recovery", async t => {
+  const { value, children, starts } = connection(t, "api13");
+  await value.connect(target);
+  assert.equal(value.state.kind, "ready", JSON.stringify(value.state));
+  assert.equal(value.recovery, undefined);
+  assert.equal(children.length, 1);
+  assert.deepEqual(starts, [["serve", "--stdio"]]);
+});
+
+// Older durable-storage backends keep their tree without admitting a memory-only source session.
+for (const minor of [14, 15]) {
+  test(`API 1.${minor} falls back to 1.14 on the same process`, async t => {
+    const { value, children, versions } = connection(t, `api${minor}`);
+    await value.connect(target);
+    assert.equal(value.state.kind, "ready", JSON.stringify(value.state));
+    assert.deepEqual(versions, [API_VERSION.minor, 14]);
+    assert.equal(value.recovery?.sessions, undefined);
+    assert.equal(children.length, 1);
+  });
+}
+
+/** The durable XML lifecycle remains available without claiming the newer protected-source contract. */
+test("API 1.16 is retained on the same process without claiming source snapshots", async t => {
+  const { value, children, versions } = connection(t, "api16");
+  await value.connect(target);
+  assert.equal(value.state.kind, "ready", JSON.stringify(value.state));
+  assert.deepEqual(versions, [API_VERSION.minor, 16]);
+  assert.equal(value.sources, undefined);
+  assert.equal(children.length, 1);
+});
+
+/** Existing project-bound source APIs remain usable when unclassified restoration is unavailable. */
+test("API 1.17 fallback stays on the same process", async t => {
+  const { value, children, versions } = connection(t, "api17");
+  await value.connect(target);
+  assert.equal(value.state.kind, "ready", JSON.stringify(value.state));
+  assert.deepEqual(versions, [API_VERSION.minor, 17]);
+  assert.equal(children.length, 1);
 });
 
 test("structured manifest error reaches UI category without server text", async (t) => {

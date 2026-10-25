@@ -3,6 +3,8 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const vscode = require('vscode');
 const { revealFile } = require('../out/reveal.js');
+const trace = [];
+let currentExplorer;
 
 /** Wait for the real backend and editor to publish a new support state. */
 async function until(predicate, reason) {
@@ -30,6 +32,31 @@ exports.run = async function () {
   const moduleUri = vscode.Uri.file(fixture.module);
   const original = await fs.readFile(fixture.module, 'utf8');
   const explorer = await vscode.extensions.all.find(extension => extension.packageJSON.name === 'eska-explorer').activate();
+  currentExplorer = explorer;
+  const notify = explorer.connection.notify.bind(explorer.connection);
+  explorer.connection.notify = (...args) => {
+    if (args[1] === 'workspace/didChangeFiles' && trace.length < 80) trace.push({ fileEvent: args[2] });
+    notify(...args);
+  };
+  explorer.connection.onNotification((method, params) => {
+    if (method === 'metadata/changed' && trace.length < 80) trace.push({ changed: params });
+  });
+  const request = explorer.connection.request.bind(explorer.connection);
+  explorer.connection.request = async (...args) => {
+    const result = await request(...args);
+    if (args[1] === 'metadata/supportFiles' && trace.length < 80) trace.push({ support: result });
+    return result;
+  };
+  const warn = explorer.output.warn.bind(explorer.output);
+  explorer.output.warn = (...values) => { if (trace.length < 80) trace.push(values[0]); warn(...values); };
+  const showError = explorer.showError.bind(explorer);
+  explorer.showError = error => { if (trace.length < 80) trace.push({ code: error.code, domain: error.domain, details: error.details }); showError(error); };
+  const resolveUri = explorer.support.resolveUri.bind(explorer.support);
+  explorer.support.resolveUri = async (...args) => {
+    const uri = await resolveUri(...args);
+    if (trace.length < 80) trace.push({ source: path.basename(args[0]), scheme: uri.scheme });
+    return uri;
+  };
   await vscode.commands.executeCommand('eska.explorer.connect');
   /** Report backend policy when the fixture cannot confirm a lock. */
   const supportStatus = () => ({
@@ -51,6 +78,18 @@ exports.run = async function () {
   let editor = vscode.window.activeTextEditor;
   assert.equal(editor.document.uri.scheme, 'eska-protected');
   assert.equal(editor.document.getText(), original);
+  for (const watcher of explorer.watchers) if (typeof watcher.flush === 'function') await watcher.flush();
+  const generation = explorer.tree.projects[0].info.generation;
+  const eventCount = trace.filter(value => value?.fileEvent).length;
+  let virtualEvents = 0;
+  const probe = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(vscode.Uri.file(fixture.source), '**/*'));
+  probe.onDidChange(uri => { if (uri.scheme === 'eska-protected') virtualEvents++; });
+  explorer.protectedSources.refresh(moduleUri);
+  await until(() => virtualEvents > 0, 'the native path-only watcher receives the virtual provider event');
+  await new Promise(resolve => setTimeout(resolve, 250));
+  probe.dispose();
+  assert.equal(trace.filter(value => value?.fileEvent).length, eventCount, 'virtual updates are not native source changes');
+  assert.equal(explorer.tree.projects[0].info.generation, generation, 'a protected refresh cannot invalidate the metadata project');
   await vscode.commands.executeCommand('type', { text: '// blocked\n' });
   assert.equal(editor.document.getText(), original);
   await vscode.commands.executeCommand('workbench.action.files.setActiveEditorWriteableInSession');
@@ -80,7 +119,7 @@ exports.run = async function () {
 
   await fs.writeFile(rules, support(1));
   await until(() => explorer.support.provideFileDecoration(moduleUri)?.badge === 'S' && !explorer.support.loading,
-    'support permits editing');
+    () => `support permits editing: ${JSON.stringify(supportStatus())}`);
   const files = vscode.workspace.getConfiguration('files', moduleUri);
   await files.update('readonlyInclude', { ...files.get('readonlyInclude'), '**/*.bsl': true }, vscode.ConfigurationTarget.Workspace);
   await until(async () => {
@@ -100,5 +139,22 @@ exports.run = async function () {
   await vscode.commands.executeCommand('workbench.action.revertAndCloseActiveEditor');
   await vscode.commands.executeCommand('eska.explorer.disconnect');
   await fs.writeFile(path.join(fixture.root, 'host-result.json'), JSON.stringify({ passed: true,
-    vscode: vscode.version, protectedSessionOverride: true, protectedXml: true, sourceRefresh: true, voluntaryLock: true }));
+    vscode: vscode.version, locale: vscode.env.language, protectedSessionOverride: true, protectedXml: true, sourceRefresh: true,
+    voluntaryLock: true, virtualEventsObserved: virtualEvents, virtualEventsDoNotInvalidateSource: true }));
+};
+
+const scenario = exports.run;
+/** Preserve bounded production diagnostics before the isolated runner removes its fixture. */
+exports.run = async function () {
+  try { await scenario(); }
+  catch (error) {
+    const fixture = JSON.parse(process.env.ESKA_HOST_FIXTURE);
+    let freshPolicy;
+    try {
+      const tree = currentExplorer?.tree, project = tree?.projects[0];
+      if (project) freshPolicy = await tree.request(project, 'metadata/supportFiles', { paths: [{ value: path.relative(fixture.source, fixture.module), encoding: 'utf-8' }] });
+    } catch (failure) { freshPolicy = { code: failure.code, domain: failure.domain, details: failure.details }; }
+    await fs.writeFile(path.join(fixture.root, 'host-result.json'), JSON.stringify({ passed: false, error: String(error.stack ?? error), trace, freshPolicy }));
+    throw error;
+  }
 };
