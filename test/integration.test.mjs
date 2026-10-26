@@ -48,7 +48,7 @@ test("real eska: four project types, two workspace members, errors and restarts"
   const workspace = join(root, "workspace");
   await project(join(workspace, "first"), "processing");
   await project(join(workspace, "second"), "report");
-  await writeFile(join(workspace, "eska.toml"), "[workspace]\nmembers=['first','second']\n");
+  await writeFile(join(workspace, "eska.toml"), "[workspace]\n[workspace.members.app]\nexternal_objects=['first','second']\n");
   const state = await open(workspace, "en-US");
   assert.equal(state.kind, "ready", JSON.stringify(state));
   assert.deepEqual(state.session.projects.map((p) => p.scope.name).sort(), ["first", "second"]);

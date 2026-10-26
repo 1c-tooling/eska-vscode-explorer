@@ -56,7 +56,7 @@ test("release selection never substitutes the monolith or an unverified analyzer
 
 test("ZIP validation rejects traversal, links, undeclared members, lengths and corrupt payloads", async t => {
   const root = await fixture(t), binary = join(root, "fixture"); await writeFile(binary, "fixture");
-  const contract = { schema_version: 2, tool: "eska-project", target: hostTarget(), version: "0.14.3", config_schema: "designer-xml-1", bridge_schema: 1, metadata_api: { major: 1, minor: 12 } };
+  const contract = { schema_version: 2, tool: "eska-project", target: hostTarget(), version: "0.14.3", config_schema: "designer-xml-2", bridge_schema: 1, metadata_api: { major: 1, minor: 12 } };
   const packed = await archive(root, binary, contract);
   const program = "import json,sys,zipfile\nwith zipfile.ZipFile(sys.argv[1]) as z: items=[(i,z.read(i)) for i in z.infolist()]\nmode=sys.argv[3]\nwith zipfile.ZipFile(sys.argv[2],'w') as z:\n for info,data in items:\n  if info.filename=='package.json':\n   v=json.loads(data)\n   if mode=='length': v['files'][0]['size']+=1\n   if mode=='checksum': v['files'][0]['sha256']='0'*64\n   if mode=='schema': v['contract']['bridge_schema']=99\n   data=json.dumps(v).encode()\n  elif mode=='link' and info.filename.startswith('bin/'):\n   info.external_attr=0o120777<<16\n  z.writestr(info,data)\n if mode=='traversal': z.writestr('../escape',b'escape')\n if mode=='extra': z.writestr('extra',b'extra')\n if mode=='duplicate': z.writestr('package.json',b'{}')";
   for (const mode of ["traversal", "link", "extra", "length", "checksum", "schema", "duplicate"]) {

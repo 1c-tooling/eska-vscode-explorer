@@ -19,7 +19,10 @@ const playground = process.env.ESKA_TEST_ROOT ?? resolve(repository, "../eska-pl
 if (!isAbsolute(playground)) throw new Error("ESKA_TEST_ROOT must be absolute.");
 const root = await mkdtemp(join(playground, "explorer-host-"));
 try {
-  const fixture = await createTreeProject(join(root, "project"), process.env.ESKA_HOST_PROJECT_TYPE ?? "configuration");
+  const fixture = await createTreeProject(join(root, "project"), basename(suite) === "language-reference-host.cjs" ? "processing" : process.env.ESKA_HOST_PROJECT_TYPE ?? "configuration");
+  if (basename(suite) === "language-reference-host.cjs") {
+    fixture.reference = await (await import("./language-fixture.mjs")).createReferenceSource(fixture, root);
+  }
   if (["query-advanced-host.cjs", "query-package-host.cjs", "query-having-host.cjs", "query-total-sections-host.cjs", "query-dcs-host.cjs"].includes(basename(suite))) {
     await (await import("./query-advanced-fixture.mjs")).addQueryRegister(fixture);
     fixture.query = await (await import("./query-fixture.mjs")).createQuerySource(fixture);

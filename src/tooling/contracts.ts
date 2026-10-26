@@ -4,7 +4,7 @@ export type ToolKind = "project" | "analyzer";
 export const TOOL_NAMES = { project: "eska-project", analyzer: "bsl-analyzer-app" } as const;
 export const ANALYZER_VERSION = "0.4.0";
 export const ANALYZER_CONTRACT = "3.5";
-export const PROJECT_CONFIG = "designer-xml-1";
+export const PROJECT_CONFIG = "designer-xml-2";
 export const TARGETS = ["aarch64-apple-darwin", "aarch64-unknown-linux-gnu", "aarch64-unknown-linux-musl",
   "x86_64-apple-darwin", "x86_64-unknown-linux-gnu", "x86_64-unknown-linux-musl", "x86_64-pc-windows-msvc"] as const;
 export type NativeTarget = typeof TARGETS[number];

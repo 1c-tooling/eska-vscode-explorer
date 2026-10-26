@@ -34,6 +34,6 @@ export async function createQueryLanguageContexts(fixture) {
     await writeFile(member.module, language.text.replaceAll("Товар.Ар", "Товар.Only"));
     members[name] = member;
   }
-  await writeFile(join(fixture.root, "eska.toml"), "[workspace]\nmembers=['one','two']\n[analysis]\ndefault_application='one'\n[applications.one]\nconfiguration='one'\n[applications.two]\nconfiguration='two'\n");
+  await writeFile(join(fixture.root, "eska.toml"), "[workspace]\n[analysis]\ndefault_application='one'\n[workspace.members.one]\nconfiguration='one'\n[workspace.members.two]\nconfiguration='two'\n");
   return members;
 }

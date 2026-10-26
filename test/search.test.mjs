@@ -121,7 +121,7 @@ test('real workspace search retains project identities, reports truncation and a
   const first = await createTreeProject(join(root, 'first'));
   await createTreeProject(join(root, 'second'));
   for (const member of ['first', 'second']) await writeFile(join(root, member, 'eska.toml'), `[project]\nname='${member}'\ntype='configuration'\n`);
-  await writeFile(join(root, 'eska.toml'), "[workspace]\nmembers=['first','second']\n");
+  await writeFile(join(root, 'eska.toml'), "[workspace]\n[workspace.members.first]\nconfiguration='first'\n[workspace.members.second]\nconfiguration='second'\n");
   const xml = await readFile(first.descriptor, 'utf8');
   const many = Array.from({ length: 60 }, (_, i) => `<Attribute uuid="55555555-5555-5555-5555-${String(i).padStart(12, "0")}"><Properties><Name>Артикул${i}</Name></Properties></Attribute>`).join('');
   await writeFile(first.descriptor, xml.replace('<ChildObjects>', '<ChildObjects>' + many));

@@ -1,8 +1,18 @@
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { addCommonModules } from "./fixture.mjs";
+import { addCommonModules, createTreeProject } from "./fixture.mjs";
 
 export const LANGUAGE_TEXT = "// Возвращает переданное значение.\nФункция Проверка(Значение) Экспорт\n    Возврат Значение;\nКонецФункции\n\nРезультат = Проверка(\"текст\");\n";
+
+/** A raw reference dump outside the EPF has no ESKA manifest and must never become a writable workspace member. */
+export async function createReferenceSource(fixture, owner) {
+  const base = await createTreeProject(join(owner, "База с БСП"));
+  const language = await createLanguageSource(base);
+  await rm(join(base.root, "eska.toml"));
+  await writeFile(join(fixture.root, "eska.toml"), `[project]\ntype='processing'\n[analysis.configuration]\nsource=${JSON.stringify(base.source)}\n[tools.bsl-analyzer.diagnostics.parameters]\nLineLength=false\n`);
+  await writeFile(fixture.module, "Процедура Использовать()\n    Значение = Обмен.Проверка(1);\nКонецПроцедуры\n");
+  return { ...base, definition: language.file };
+}
 
 /** Keep protocol fixtures independent of a platform installation while retaining ordinary Designer XML properties. */
 export async function createLanguageSource(fixture) {
