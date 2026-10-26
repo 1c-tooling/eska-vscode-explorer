@@ -1,6 +1,7 @@
 /* This renderer owns presentation only. ESKA supplies metadata, bindings, syntax and every accepted model. */
 import { ConstructorLayout } from './layout.mjs';
 import { itemTable } from './items.mjs';
+import { expressionTools } from './expression.mjs';
 
 (() => {
   const api = acquireVsCodeApi(), root = document.getElementById("root");
@@ -508,6 +509,7 @@ import { itemTable } from './items.mjs';
     });
     form.append(accept, button(l.close, () => { editing = undefined; render(); }));
     if (editing.expression) form.append(button(editing.raw ? l.visualEditor : l.rawExpression, () => { editing.raw = !editing.raw; render(); }));
+    expressionTools(form, {element,button,labels:l,fields:[...new Set(state.metadata.fields.flatMap(source=>source.fields.map(name)))]});
     root.append(form);
   }
 

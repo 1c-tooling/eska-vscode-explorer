@@ -93,3 +93,6 @@ body.vscode-high-contrast [role=separator], body.vscode-high-contrast-light [rol
 .cell-value { display: block; background: transparent; color: inherit; border: 0; padding: 0; text-align: left; width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .item-table td > input:not([type=checkbox]), .item-table td > select { width: 100%; padding: 0; }
 .add-source-field { display: block; margin-left: 24px; max-width: calc(100% - 24px); text-align: left; }
+
+.expression-tools { flex-basis: 100%; min-width: 0; }
+.expression-choices { max-height: 120px; overflow: auto; display: flex; flex-wrap: wrap; gap: 4px; }
