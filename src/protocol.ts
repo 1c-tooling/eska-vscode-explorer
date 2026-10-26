@@ -12,7 +12,7 @@ export const MAX_REQUEST = 1_048_576;
 export const MAX_RESPONSE = 67_108_864;
 
 export type FailureCode =
-  | "updateFailed" | "updateBusy" | "cliPathConflict"
+  | "updateFailed" | "updateBusy" | "cliPathConflict" | "analyzerVersionMismatch"
   | "executableMissing" | "spawnFailed" | "connectionLost" | "protocolInvalid"
   | "handshakeFailed" | "timeout" | "resourceLimit" | "incompatible" | "manifestMissing"
   | "manifestInvalid" | "selectionInvalid" | "sourceInvalid" | "rootInvalid"

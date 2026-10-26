@@ -42,7 +42,7 @@ try {
 
   }
   // These scenarios exercise language lifecycle, not concurrent mutation of XML during workspace/open.
-  if (["language-host.cjs", "language-cancellation-host.cjs"].includes(basename(suite))) {
+  if (["language-host.cjs", "language-cancellation-host.cjs", "bundle-update-host.cjs"].includes(basename(suite))) {
     fixture.languageSource = await (await import("./language-fixture.mjs")).createLanguageSource(fixture);
   }
   // Reload tests need a stable root descriptor before workspaceContains can activate the extension.

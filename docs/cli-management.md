@@ -6,12 +6,14 @@
 По умолчанию `eska.explorer.backend = "project"`: запускается `eska-project serve --stdio`,
 проверяется identity `eska-project`, Metadata API 1.12 и capability
 `analyzerConfiguration`, а также прежние capabilities дерева/свойств.
-Полная ESKA и анализатор для дерева не требуются. Project и опубликованный
-Analyzer устанавливаются и обновляются раздельно: [компоненты Explorer](component-setup.md).
+Полная ESKA и анализатор для дерева не требуются. Отдельно установленный project
+и опубликованный Analyzer обновляются независимо. Project из полного комплекта
+cargo-dist обновляется вместе с остальными ESKA-командами через `eska update`:
+[компоненты Explorer](component-setup.md).
 Стандартное имя project ищется сначала в `~/.eska/bin`, затем в абсолютных PATH
 entries; явный путь не имеет fallback. Project receipt и архив совместимы с
-Python CLI T97. Пользовательский бинарник не перезаписывается. На 2026-10-21
-публичный project ZIP ещё не опубликован; доступны локальная сборка/пакет T97.
+Python CLI T97. Пользовательский бинарник не перезаписывается. Компонентные ZIP
+публикуются начиная с ESKA 0.15.0.
 
 ## Явный legacy
 
