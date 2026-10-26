@@ -4,7 +4,7 @@ const path = require('node:path');
 const vscode = require('vscode');
 const { connect } = require('./query-constructor-dom.cjs');
 const { until, parentTabs, returned } = require('./query-modal-host.cjs');
-const { ready, form } = require('./query-builder-host.cjs');
+const { ready, form, editFirstField } = require('./query-builder-host.cjs');
 
 /** A package property changes only through ordinary DOM input and submit events. */
 async function destination(client, name) {
@@ -39,7 +39,7 @@ exports.run = async function () {
       if(!row)throw Error('temporary catalog');row.querySelector('.table-add').click();`);
     await until(() => client.evaluate('!!document.querySelector(".source-tree .field-choice")'), 'temporary fields'); await ready(client);
     assert.equal(await client.evaluate('[...document.querySelectorAll(".field-choice")].some(node=>node.textContent==="Temp.Value")'), true);
-    await client.evaluate('document.querySelector("[data-section=fields] .controls button").click()');
+    await editFirstField(client);
     await form(client, { expression: 'Temp.Value', alias: 'Value' });
     await client.evaluate('document.getElementById("tab-packages").click();document.querySelector(".package-settings > .row button").click()');
     await until(() => client.evaluate('document.querySelector(".temporary-destination input")?.value === "Temp"'), 'producer selected'); await ready(client);

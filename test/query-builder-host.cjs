@@ -21,6 +21,13 @@ async function form(client, values) {
 exports.ready = ready;
 exports.form = form;
 
+/** Select the first row through the current table UI while retaining old-capability acceptance. */
+exports.editFirstField = async function(client) {
+  await client.evaluate(`{const section=document.querySelector('[data-section=fields]');
+    if(section.querySelector('tbody')){section.querySelector('tbody input').click();document.querySelector('[data-section=fields] .edit-selected').click();}
+    else section.querySelector('.controls button').click();}`);
+};
+
 /** Pick real metadata and a field by actual native-rendered buttons, never through a second catalog or SQL generator. */
 async function pick(client) {
   await client.evaluate(`const row=[...document.querySelectorAll('.metadata-table')].find(row=>row.querySelector('.table-name').textContent==='Товары');
@@ -44,6 +51,7 @@ exports.run = async function () {
     editor.selection = new vscode.Selection(at, at); await vscode.commands.executeCommand('eska.explorer.editBslQuery');
     const draft = await until(() => vscode.window.activeTextEditor?.document.uri.scheme === 'eska-query' && vscode.window.activeTextEditor.document, 'query');
     const before = draft.getText(); await vscode.commands.executeCommand('eska.explorer.queryConstructor', draft.uri); client = await connect(until);
+    if(process.env.ESKA_EXPECT_CONSTRUCTOR_LEGACY_TOOLS==='1')assert.equal(await client.evaluate('document.querySelectorAll(".query-settings,.text-tools,.item-table").length'),0);
     assert.equal(await client.evaluate('document.querySelectorAll("[role=tab]").length'), Number(process.env.ESKA_EXPECT_CONSTRUCTOR_PAGES ?? 9));
     assert.equal(await client.evaluate('document.querySelector("[role=tab]").textContent'), vscode.env.language === 'ru' ? 'Таблицы и поля' : 'Tables and fields');
     await pick(client);

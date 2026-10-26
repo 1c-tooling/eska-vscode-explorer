@@ -20,7 +20,7 @@ if (!isAbsolute(playground)) throw new Error("ESKA_TEST_ROOT must be absolute.")
 const root = await mkdtemp(join(playground, "explorer-host-"));
 try {
   const fixture = await createTreeProject(join(root, "project"), basename(suite) === "language-reference-host.cjs" ? "processing" : process.env.ESKA_HOST_PROJECT_TYPE ?? "configuration");
-  if (basename(suite) === "query-layout-host.cjs") {
+  if (["query-layout-host.cjs", "query-compact-performance-host.cjs"].includes(basename(suite))) {
     fixture.query = await (await import("./query-fixture.mjs")).createQuerySource(fixture);
     const fields = Array.from({ length: 48 }, (_, index) => `${index} AS КолонкаРезультата${index}WithLongEnglishName`).join(',\r\n|');
     await writeFile(fixture.module, `\ufeffПроцедура Test()\r\nQ = "SELECT ${fields}\r\n|FROM (SELECT 1 AS NestedValue) AS Child";\r\nКонецПроцедуры\r\n`);
@@ -46,7 +46,8 @@ try {
     fixture.query = await (await import("./query-fixture.mjs")).createQuerySource(fixture);
     await writeFile(fixture.module, '\ufeff// owner 😀\r\nПроцедура Test()\r\nQ = "SELECT 1 AS A,\r\n|// field B 😀\r\n|2 AS B";\r\nOther = 42;\r\nКонецПроцедуры\r\n');
     const schema = await readFile(fixture.query.schemaPath, "utf8");
-    await writeFile(fixture.query.schemaPath, schema.replace('<query><!--keep--><![CDATA[SELECT 1;\r\n// пакет 😀\r\nSELECT 77]]></query>', '<query>SELECT Lo<!--source 😀-->ng</query>'));
+    const querySchema=schema.replace('<query><!--keep--><![CDATA[SELECT 1;\r\n// пакет 😀\r\nSELECT 77]]></query>', '<query>SELECT Lo<!--source 😀-->ng</query>');
+    await writeFile(fixture.query.schemaPath,basename(suite)==='query-constructor-host.cjs'?querySchema.replace('<other>before</other>','<other>prior input 😀</other>'):querySchema);
 
   }
   // These scenarios exercise language lifecycle, not concurrent mutation of XML during workspace/open.

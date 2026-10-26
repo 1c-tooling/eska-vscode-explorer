@@ -65,7 +65,7 @@ exports.connect = async function (until) {
     if (value.exceptionDetails) throw new Error(JSON.stringify(value.exceptionDetails)); return value.result.value;
   };
   await until(async () => await evaluate('document.getElementById("root").getAttribute("aria-busy") !== "true"'), 'constructor metadata controls ready');
-  return { evaluate, close: () => { for (const connection of connections.values()) connection.close(); },
+  return { evaluate, memory: () => found.connection.request('Runtime.getHeapUsage'), close: () => { for (const connection of connections.values()) connection.close(); },
     pointer: (type, x, y) => found.connection.request('Input.dispatchMouseEvent', { type, x, y, button: 'left', buttons: type === 'mouseReleased' ? 0 : 1, clickCount: 1 }),
     screenshot: async file => {
       const [connection] = connections.values(); await connection.request('Page.enable');
@@ -87,7 +87,7 @@ exports.exercise = async function ({ explorer, view, until, locale }) {
     await client.evaluate(`document.querySelector('[data-section="fields"] .action-add').click()`);
     await client.evaluate(`for (const [key,value] of [["expression","99"],["alias","BrowserField"]]) { const input=document.querySelector('.expression [name="'+key+'"]'); input.value=value; input.dispatchEvent(new Event("input",{bubbles:true})); } document.querySelector(".expression").requestSubmit();`);
     await until(() => view.binding.core.model.revision !== before && !view.busy, 'DOM expression reached ESKA');
-    await until(async () => await client.evaluate(`document.querySelector('[data-section="fields"]').textContent.includes("99 AS BrowserField")`), 'acknowledged DOM row');
+    await until(async () => await client.evaluate(`document.querySelector('.query-preview pre').textContent.includes("99 AS BrowserField")`), 'acknowledged DOM row');
     assert.equal(await client.evaluate('document.querySelectorAll("#root img").length'), 0);
     const stand = process.env.ESKA_HOST_DOM_ARTIFACTS;
     if (stand) { await fs.mkdir(stand, { recursive: true }); await client.screenshot(path.join(stand, `constructor-${locale}.png`)); }
