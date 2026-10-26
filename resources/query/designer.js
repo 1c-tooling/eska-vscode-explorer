@@ -2,6 +2,7 @@
 import { ConstructorLayout } from './layout.mjs';
 import { itemTable } from './items.mjs';
 import { expressionTools } from './expression.mjs';
+import { predicateForm, emptyPredicate } from './predicates.mjs';
 
 (() => {
   const api = acquireVsCodeApi(), root = document.getElementById("root");
@@ -120,11 +121,19 @@ import { expressionTools } from './expression.mjs';
     const l = state.labels, node = panel(title), add = button(l.add, () => { const value = blank(kind); if (page === "group" && kind === "fields") value.aggregate = "sum"; begin({ kind: "append", statement: statement(kind).index, clause: kind }, value); }, unavailable(kind), "action-add");
     node.dataset.section = kind; node.querySelector(".section-title").append(add);
     if (kind === "joins" && state.features.nestedQueries) node.querySelector(".section-title").append(button(l.nested, () => begin({ kind: "append", statement: selected, clause: kind }, { kind: "subqueryJoin", alias: "", join: "left", left: chosenField, comparison: "equal", right: "" }), unavailable(kind), "add-nested"));
+    if(state.features.predicates&&['conditions','having'].includes(kind))node.querySelector('.section-title').append(button(l.editPredicate,()=>{const clause=statement(kind).clauses.find(clause=>clause.kind===kind);editing={predicate:structuredClone(clause?.predicate??emptyPredicate()),action:{kind:'setPredicate',statement:statement(kind).index,clause:kind,selection:null}};render();},unavailable(kind),'edit-predicate'));
     const entries = rows(kind).filter(row => !filter || filter(row.item));
     if (state.features.bulkItems && !["joins", "conditions", "having"].includes(kind)) { node.append(table(entries)); return node; }
     for (const row of entries) {
       const item = element("div", undefined, "row"), text = element("pre", row.item.preview); text.title = row.item.preview;
-      item.append(text, controls(row)); node.append(item);
+      item.append(text, controls(row));
+      if(state.features.predicates&&kind==='joins'){
+        const relation=row.clause.join;
+        if(relation){item.prepend(element('small',`${relation.left.join(', ')} → ${relation.right}`));const picker=select(item,l.joins,'joinKind',{joinKind:relation.kind},['inner','left','right','full'].map(kind=>[kind,l[kind]]));picker.disabled||=!state.model.writable||state.paused;picker.addEventListener('change',()=>send({kind:'setJoinKind',selection:row.selection,join:picker.value}));}
+        item.append(button(l.editPredicate,()=>{editing={predicate:structuredClone(row.clause.predicate??emptyPredicate()),action:{kind:'setPredicate',statement:row.selection.statement,clause:'joins',selection:row.selection}};render();},row.item.unavailable.replace,'edit-predicate'));
+      }
+      if(state.features.predicates&&['conditions','having'].includes(kind))item.append(button(kind==='conditions'?l.moveHaving:l.moveWhere,()=>send({kind:'movePredicate',selection:row.selection,target:kind==='conditions'?'having':'conditions'}),row.item.unavailable.remove,'move-predicate'));
+      node.append(item);
     }
     if (!entries.length) node.append(element("p", l.noRows, "empty"));
     return node;
@@ -485,6 +494,13 @@ import { expressionTools } from './expression.mjs';
 
   /** Expression mode is an explicit escape hatch; switching modes never reparses text in the renderer. */
   function renderEditor() {
+    if(editing.predicate){
+      const form=element('form',undefined,'expression predicate-expression');
+      predicateForm(form,editing.predicate,{element,button,input,select,labels:state.labels,draw:render,update:value=>{editing.predicate=value;}});
+      const accept=button(state.labels.submit,()=>{});accept.type='submit';form.append(accept,button(state.labels.close,()=>{editing=undefined;render();}));
+      form.addEventListener('submit',event=>{event.preventDefault();if(!state.busy&&!state.paused&&form.reportValidity())send({...editing.action,predicate:structuredClone(editing.predicate)});});
+      expressionTools(form,{element,button,labels:state.labels,fields:[...new Set(state.metadata.fields.flatMap(source=>source.fields.map(name)))]});root.append(form);return;
+    }
     if (editing.dcs) { dcsForm(); return; }
     const l = state.labels, form = element("form", undefined, "expression"); form.append(element("h2", l.edit));
     if (editing.raw) {

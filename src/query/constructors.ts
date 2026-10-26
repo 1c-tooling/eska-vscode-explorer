@@ -9,7 +9,7 @@ export const PACKAGE_CLAUSES = [...CLAUSES, "into", "destroy", "index"] as const
 export const HAVING_CLAUSES = [...PACKAGE_CLAUSES, "having"] as const;
 export type ConstructorClauseKind = typeof HAVING_CLAUSES[number];
 export type ConstructorMethod = "query/constructorOpen" | "query/constructorPlan" | "query/constructorModel" | "query/constructorAction" | "query/constructorFinish" | "query/constructorCancel" | "query/constructorCatalog";
-export interface ConstructorLimits { maxExpression: number; maxModel: number; visual?: boolean; virtualTables?: boolean; nestedQueries?: boolean; unions?: boolean; totals?: boolean; packages?: boolean; having?: boolean; totalSections?: boolean; maxTotalSections?: number; dcs?: boolean; bulkItems?: boolean; maxBulkItems?: number; addSourceFields?: boolean }
+export interface ConstructorLimits { maxExpression: number; maxModel: number; visual?: boolean; virtualTables?: boolean; nestedQueries?: boolean; unions?: boolean; totals?: boolean; packages?: boolean; having?: boolean; totalSections?: boolean; maxTotalSections?: number; dcs?: boolean; bulkItems?: boolean; maxBulkItems?: number; addSourceFields?: boolean; predicates?: boolean }
 export interface ConstructorSelection { statement: number; clause: number; item: number }
 export type Comparison = "equal" | "notEqual" | "less" | "lessOrEqual" | "greater" | "greaterOrEqual" | "like" | "in" | "inHierarchy";
 export type Aggregate = "sum" | "count" | "minimum" | "maximum" | "average" | null;
@@ -31,7 +31,11 @@ export interface CatalogTable { name: string; category: string; russian: string;
 export interface CatalogField { russian: string; english: string }
 export interface CatalogPage { tables: CatalogTable[]; fields: CatalogField[]; parameters?: CatalogParameter[]; temporaryTables?: { name: string; scope: number; statement: number }[]; nextOffset: number | null; found: boolean; limitedContext: boolean; contextFingerprint: string }
 export interface CatalogQuery { search?: string; offset?: number; limit?: number; table?: string; qualifier?: string; virtualTables?: boolean; source?: ConstructorSelection; scope?: number; atStatement?: number }
-export type ConstructorAction = { kind: "compose"; statement: number; selection: ConstructorSelection | null; expression: VisualExpression }
+export type Predicate = {kind:'all'|'any';children:Predicate[]}|{kind:'not';child:Predicate}|{kind:'compare';left:string;comparison:Comparison;right:string}|{kind:'between';expression:string;begin:string;end:string}|{kind:'isNull';expression:string;negated:boolean}|{kind:'raw';expression:string};
+export type ConstructorAction = {kind:'setJoinKind';selection:ConstructorSelection;join:'inner'|'left'|'right'|'full'}
+  | {kind:'setPredicate';statement:number;clause:'conditions'|'having'|'joins';selection:ConstructorSelection|null;predicate:Predicate}
+  | {kind:'movePredicate';selection:ConstructorSelection;target:'conditions'|'having'}
+  | { kind: "compose"; statement: number; selection: ConstructorSelection | null; expression: VisualExpression }
   | { kind: "editItems"; statement: number; clause: number; items: number[]; operation: { kind: "remove" } | { kind: "move" | "copy"; to: number }; comments?: "keep" | "discard" }
   | { kind: "addSourceFields"; statement: number; source: VisualExpression; fields: string[] }
   | { kind: "setDcs"; statement: number; node: number | null; target: DcsKind; values: DcsValue[]; enabled: boolean; comments?: "keep" | "discard" }
@@ -56,7 +60,7 @@ export interface ConstructorItem {
   visual?: VisualExpression | null;
   children?: number[]; moveUp?: boolean; moveDown?: boolean;
 }
-export interface ConstructorClause { index: number; kind: ConstructorClauseKind; header: string; items: ConstructorItem[] }
+export interface ConstructorClause { index: number; kind: ConstructorClauseKind; header: string; items: ConstructorItem[]; predicate?:Predicate|null;join?:{kind:'inner'|'left'|'right'|'full';left:string[];right:string}|null }
 export interface ConstructorStatement {
   index: number; range: ByteRange; unavailable: string | null; preview: string; clauses: ConstructorClause[];
   append: { kind: ConstructorClauseKind; unavailable: string | null }[];
@@ -125,6 +129,7 @@ export function constructorCapabilities(hello: unknown): ConstructorLimits | und
       || !unsigned(value.maxBulkItems) || value.maxBulkItems === 0 || value.maxBulkItems > 512) invalid();
     flags.bulkItems = true; flags.addSourceFields = true; flags.maxBulkItems = value.maxBulkItems;
   }
+  if(value.predicates!==undefined) {if(hello.apiVersion.minor<32||value.predicates!==true)invalid();flags.predicates=true;}
   const clauses = flags.having ? HAVING_CLAUSES : flags.packages ? PACKAGE_CLAUSES : flags.totals ? CLAUSES : BASE_CLAUSES;
   if (value.clauses.length !== clauses.length || !value.clauses.every((kind, index) => kind === clauses[index])) invalid();
   const visual = value.visualExpressions !== undefined || value.metadataCatalog !== undefined;
@@ -157,6 +162,10 @@ export function constructorModel(raw: unknown, limits: ConstructorLimits, id?: s
     for (const [index, clause] of statement.clauses.entries()) {
       if (!isRecord(clause) || clause.index !== index || !(clauses as readonly unknown[]).includes(clause.kind)
         || typeof clause.header !== "string" || !Array.isArray(clause.items) || (clause.items.length === 0 && clause.kind !== "totals")) invalid();
+      if(limits.predicates) {
+        if(clause.predicate!==null&&!predicateValue(clause.predicate))invalid();
+        if(clause.join!==null&&(!isRecord(clause.join)||!['inner','left','right','full'].includes(String(clause.join.kind))||!Array.isArray(clause.join.left)||!clause.join.left.every(shortText)||!shortText(clause.join.right)))invalid();
+      }
       for (const [index, item] of clause.items.entries()) {
         if (++entries > 65_536 || !isRecord(item) || item.index !== index || !isByteRange(item.range, raw.bytes)
           || item.range.start < statement.range.start || item.range.end > statement.range.end || typeof item.preview !== "string"
@@ -224,6 +233,7 @@ export class QueryConstructor {
 
   /** Stale indices are rejected by ESKA, including parallel actions captured before the previous reply. */
   async action(action: ConstructorAction): Promise<void> {
+    if (["setJoinKind","setPredicate","movePredicate"].includes(action.kind)&&!this.limits.predicates)throw new ExplorerError("incompatible");
     if (action.kind === "editItems" && !this.limits.bulkItems || action.kind === "addSourceFields" && !this.limits.addSourceFields) throw new ExplorerError("incompatible");
     if (action.kind === "setDcs" && !this.limits.dcs) throw new ExplorerError("incompatible");
     if (["setInto", "addStatement", "removeStatement", "moveStatement"].includes(action.kind) && !this.limits.packages) throw new ExplorerError("incompatible");
@@ -385,4 +395,15 @@ function validateScopes(raw: Record<string, unknown>): void {
       for (const item of clause.items) if (!isRecord(item) || !Array.isArray(item.children) || !item.children.every(scopeIndex)) invalid();
     }
   }
+}
+
+/** Bound the recursive DTO before the renderer can traverse it; this is shape validation, not a resolver. */
+function predicateValue(value:unknown,depth=0,budget={nodes:0}):value is Predicate {
+ if(++budget.nodes>512||depth>32||!isRecord(value))return false;
+ if(value.kind==='all'||value.kind==='any')return Array.isArray(value.children)&&value.children.length>0&&value.children.every(child=>predicateValue(child,depth+1,budget));
+ if(value.kind==='not')return predicateValue(value.child,depth+1,budget);
+ if(value.kind==='compare')return visualExpression({kind:'condition',left:value.left,comparison:value.comparison,right:value.right});
+ if(value.kind==='between')return [value.expression,value.begin,value.end].every(value=>typeof value==='string'&&Buffer.byteLength(value)<=16384);
+ if(value.kind==='isNull')return typeof value.expression==='string'&&Buffer.byteLength(value.expression)<=16384&&typeof value.negated==='boolean';
+ return value.kind==='raw'&&typeof value.expression==='string'&&Buffer.byteLength(value.expression)<=16384;
 }

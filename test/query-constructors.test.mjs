@@ -358,3 +358,18 @@ for (const locale of ['ru-RU','en-US']) {
     await core.cancel();assert.equal(f.source.record.draft,before);
   });
 }
+
+for(const locale of ['ru-RU','en-US']) {
+ /** Full-snapshot predicates remain private and malformed recursive DTOs cannot reach the renderer. */
+ test(`structured boolean conditions are checked by the real backend (${locale})`,{skip:!executable},async t=>{
+  const f=await fixture(t,locale),core=await f.source.openConstructor();assert.equal(core.limits.predicates,true);
+  const predicate={kind:'any',children:[{kind:'between',expression:'A',begin:'1',end:'3'},{kind:'not',child:{kind:'isNull',expression:'B',negated:false}}]};
+  await core.action({kind:'setPredicate',statement:0,clause:'conditions',selection:null,predicate});
+  assert.deepEqual(core.model.statements[0].clauses.at(-1).predicate,predicate);
+  const before=structuredClone(core.model);await core.action({kind:'setPredicate',statement:0,clause:'conditions',selection:null,predicate});assert.deepEqual(core.model,before);
+  const malformed=structuredClone(core.model);malformed.statements[0].clauses.at(-1).predicate={kind:'not',child:{kind:'bad'}};
+  assert.throws(()=>constructorModel(malformed,core.limits),{code:'protocolInvalid'});
+  await assert.rejects(core.action({kind:'setPredicate',statement:0,clause:'conditions',selection:null,predicate:{kind:'compare',left:'SUM(A)',comparison:'greater',right:'0'}}));assert.deepEqual(core.model,before);
+  await core.cancel();assert.equal(await readFile(f.files.module,'utf8'),f.owner);
+ });
+}

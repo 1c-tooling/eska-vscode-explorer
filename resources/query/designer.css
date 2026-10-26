@@ -96,3 +96,6 @@ body.vscode-high-contrast [role=separator], body.vscode-high-contrast-light [rol
 
 .expression-tools { flex-basis: 100%; min-width: 0; }
 .expression-choices { max-height: 120px; overflow: auto; display: flex; flex-wrap: wrap; gap: 4px; }
+
+.predicate-node { min-width: 0; flex-basis: 100%; display: flex; flex-wrap: wrap; gap: 6px; border: 1px solid var(--vscode-panel-border); padding: 6px; }
+.predicate-node .predicate-node { margin-left: 12px; flex-basis: calc(100% - 12px); }
