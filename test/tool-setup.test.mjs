@@ -8,6 +8,8 @@ import { runInNewContext } from "node:vm";
 
 const require = createRequire(import.meta.url), os = require("node:os");
 const releases = require("../out/tooling/releases.js"), installation = require("../out/tooling/install.js");
+const bundle = require("../out/tooling/bundle.js");
+const updateTask = { async runUpdateTask() { assert.fail("unexpected bundle task"); } };
 const originalManagedVersion = installation.managedVersion, originalLatestToolRelease = releases.latestToolRelease;
 const ui = { approved: false, cancelled: false, messages: [], settings: {}, bars: [] };
 const vscode = {
@@ -24,7 +26,7 @@ const vscode = {
 };
 const adapter = { exports: {} }, setupRequire = createRequire(new URL("../out/tooling/setup.js", import.meta.url));
 runInNewContext(`(function(require,module,exports){${readFileSync(new URL("../out/tooling/setup.js", import.meta.url), "utf8")}\n})`, { AbortController, AbortSignal, process, Date })(
-  name => name === "vscode" ? vscode : setupRequire(name), adapter, adapter.exports);
+  name => name === "vscode" ? vscode : name === "./update-task.js" ? updateTask : setupRequire(name), adapter, adapter.exports);
 const { ToolingSetup } = adapter.exports;
 const restorations = new WeakMap();
 
@@ -190,3 +192,40 @@ test("UI scenarios restore shared module functions for following test files", ()
   assert.equal(installation.managedVersion, originalManagedVersion);
   assert.equal(releases.latestToolRelease, originalLatestToolRelease);
 });
+
+for (const scenario of ["success", "failure", "custom", "declined", "current", "disconnected"]) {
+  test(`cargo-dist project updates preserve the original channel and session: ${scenario}`, async t => {
+    const { setup, actions } = await fixture(t);
+    const update = { cli: join(setup.root, "bin/eska"), project: installation.managedPath(setup.root, "project"),
+      version: "0.15.2", available: scenario === "current" ? "0.15.2" : "0.16.0", identity: "receipt-and-hashes" };
+    const selected = scenario === "custom" ? join(setup.root, "custom-project") : update.project;
+    if (scenario !== "disconnected") setup.states.project.info = { kind: "project", path: selected, version: "0.15.2" };
+    setup.analyzerState("suspended-conflict", "foreign extension");
+    replace(t, installation, "managedVersion", async () => undefined);
+    replace(t, bundle, "inspectBundle", async () => update);
+    replace(t, releases, "latestToolRelease", async () => assert.fail("bundle update queried component assets"));
+    replace(t, releases, "downloadAsset", async () => assert.fail("bundle update downloaded component archive"));
+    let installed = 0;
+    replace(t, bundle, "installBundle", async (_root, candidate, execute) => {
+      assert.equal(candidate, update); installed++;
+      await execute(update.cli, ["update", "--target-version", update.available, "--format", "json"]);
+      if (scenario === "failure") throw new Error("installer failed");
+      return { kind: "project", path: update.project, version: update.available };
+    });
+    replace(t, updateTask, "runUpdateTask", async (cli, args) => {
+      assert.equal(cli, update.cli); assert.deepEqual(args, ["update", "--target-version", "0.16.0", "--format", "json"]);
+    });
+    ui.approved = scenario !== "declined";
+    await setup.check("project");
+    const attempted = !["current", "declined"].includes(scenario);
+    assert.equal(installed, attempted ? 1 : 0);
+    assert.deepEqual(actions, scenario === "disconnected" ? [["restart", "project"]] : attempted && scenario !== "custom" ? [["stop", "project"], ["restart", "project"]] : []);
+    assert.equal(setup.states.project.info.path, selected);
+    assert.equal(setup.states.project.info.version, ["success", "disconnected"].includes(scenario) ? "0.16.0" : "0.15.2");
+    assert.equal(setup.states.project.activity, undefined);
+    assert.equal(setup.states.analyzer.phase, "suspended-conflict");
+    assert.equal(setup.states.analyzer.detail, "foreign extension");
+    if (scenario !== "current") assert.ok(ui.messages.some(text => text.includes("entire ESKA bundle") && text.includes(scenario === "disconnected" ? "not installed" : selected)));
+    if (scenario === "failure") assert.ok(ui.messages.at(-1).includes("failed"));
+  });
+}

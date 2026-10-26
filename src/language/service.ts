@@ -521,9 +521,11 @@ export class LanguageService implements vscode.Disposable {
   private failure(error: unknown): void {
     if (this.disposed) return;
     const code = analyzerFailure(error) ?? (error instanceof ToolFailure ? error.detail || error.code : error instanceof ExplorerError ? error.code : "language");
-    this.log(JSON.stringify({ event: "language_failed", code }), "error");
+    this.log(JSON.stringify({ event: "language_failed", code, ...(error instanceof ExplorerError && error.code === "analyzerVersionMismatch"
+      ? { backendAnalyzer: error.details?.backendAnalyzer, expectedAnalyzer: error.details?.expectedAnalyzer } : {}) }), "error");
     if (this.refreshConflict()) { this.showConflictState(); return; }
-    const detail = code === "migration_required" ? this.text("languageMigrationRequired") : code === "managed_conflict" ? this.text("languageManagedConflict") : this.text("languageFailed", code);
+    const detail = code === "analyzerVersionMismatch" ? this.text("analyzerVersionMismatch")
+      : code === "migration_required" ? this.text("languageMigrationRequired") : code === "managed_conflict" ? this.text("languageManagedConflict") : this.text("languageFailed", code);
     this.tooling.analyzerState("error", detail);
     void vscode.window.showErrorMessage(detail);
   }

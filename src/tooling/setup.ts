@@ -11,6 +11,8 @@ import { findTool, inspectAnalyzer, type ToolInfo } from "./inspect.js";
 import { installAnalyzer, installProject, managedPath, managedVersion, recoverInstallation } from "./install.js";
 import { downloadAsset, latestToolRelease, type ToolRelease } from "./releases.js";
 import { cancellableChoice } from "./choice.js";
+import { inspectBundle, installBundle, type BundleUpdate } from "./bundle.js";
+import { runUpdateTask } from "./update-task.js";
 
 export interface ToolState {
   info?: ToolInfo;
@@ -134,18 +136,33 @@ export class ToolingSetup implements vscode.Disposable {
     const controller = new AbortController(), signal = AbortSignal.any([controller.signal, this.lifetime.signal]);
     state.activity = "checking"; this.render(kind);
     try {
-      const load = async (): Promise<[ToolRelease, string | undefined]> => {
+      const load = async (): Promise<{ bundle: BundleUpdate } | { release: ToolRelease; installed: string | undefined }> => {
         const installed = await managedVersion(this.root, kind);
         assertCurrent(signal);
-        return [await latestToolRelease(kind, undefined, signal), installed];
+        const bundle = kind === "project" && !installed ? await inspectBundle(this.root, signal) : undefined;
+        if (bundle) return { bundle };
+        return { release: await latestToolRelease(kind, undefined, signal), installed };
       };
-      const [release, installed] = await this.track(manual
+      const result = await this.track(manual
         ? vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, cancellable: true, title: this.text("toolChecking", TOOL_NAMES[kind]) }, async (_progress, token) => {
           const subscription = token.onCancellationRequested(() => controller.abort());
           try { if (token.isCancellationRequested) controller.abort(); return await load(); }
           finally { subscription.dispose(); }
         }) : load());
       assertCurrent(signal);
+      if ("bundle" in result) {
+        const update = result.bundle;
+        state.available = update.available;
+        if (compareVersions(update.available, update.version) <= 0) {
+          if (manual) void vscode.window.showInformationMessage(this.text("toolCurrent", "ESKA", update.version));
+          return;
+        }
+        const choice = await cancellableChoice(vscode.window.showInformationMessage(this.text("toolBundleUpdateOffer", update.version, update.available,
+          update.cli, state.info ? `${state.info.version} · ${state.info.path}` : this.text("toolMissing")), this.text("toolInstall")), signal);
+        if (choice && !this.disposed && !signal.aborted) await this.performBundle(update);
+        return;
+      }
+      const { release, installed } = result;
       state.available = release.version;
       if (installed && compareVersions(release.version, installed) <= 0) {
         if (manual) void vscode.window.showInformationMessage(this.text("toolCurrent", TOOL_NAMES[kind], installed));
@@ -163,6 +180,32 @@ export class ToolingSetup implements vscode.Disposable {
     finally {
       delete this.states[kind].activity;
       this.checking.delete(kind); this.render(kind);
+    }
+  }
+
+  /** A cargo-dist bundle owns all ESKA commands; only its selected project session is restarted. */
+  private async performBundle(update: BundleUpdate): Promise<void> {
+    if (this.installing.has("project")) throw new ToolFailure("busy", "project");
+    this.installing.add("project");
+    this.states.project.activity = "installing"; this.render("project");
+    const selected = this.states.project.info?.path;
+    const used = !selected || resolve(selected) === resolve(update.project);
+    let reconnect = false;
+    try {
+      const info = await this.track(vscode.window.withProgress({ location: vscode.ProgressLocation.Notification,
+        title: this.text("toolInstalling", "ESKA", update.available) }, async () => {
+        if (used && selected) { await this.stop("project"); reconnect = true; }
+        return installBundle(this.root, update, (cli, args) => {
+          this.log(JSON.stringify({ event: "bundle_update_start", executable: cli, args }));
+          return runUpdateTask(cli, args, this.text("toolInstalling", "ESKA", update.available), this.lifetime.signal);
+        }, this.log, this.lifetime.signal);
+      }));
+      if (used) { this.states.project = { info, phase: "disconnected" }; reconnect = true; }
+      this.log(JSON.stringify({ event: "bundle_update_completed", path: info.path, version: info.version }));
+      if (!this.disposed) void vscode.window.showInformationMessage(this.text("toolInstalled", "ESKA", info.version));
+    } finally {
+      try { if (reconnect && !this.disposed) await this.restart("project"); }
+      finally { this.installing.delete("project"); delete this.states.project.activity; this.render("project"); }
     }
   }
 

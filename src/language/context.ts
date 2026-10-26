@@ -48,7 +48,8 @@ export function analyzerConfiguration(value: unknown): AnalyzerConfiguration {
   if (!isRecord(value) || value.schema_version !== 1 || value.kind !== "analyzer-configuration"
     || !["current", "missing", "stale", "migration_required", "managed_conflict", "context_conflict"].includes(value.status as string)
     || !isRecord(value.ownership) || value.ownership.schema_version !== 1 || value.ownership.generator_version !== 1
-    || value.ownership.analyzer_version !== ANALYZER_VERSION) throw new ExplorerError("protocolInvalid");
+    || typeof value.ownership.analyzer_version !== "string"
+    || !/^\d+\.\d+\.\d+$/.test(value.ownership.analyzer_version)) throw new ExplorerError("protocolInvalid");
   const ownership = value.ownership;
   for (const hash of [value.preview_token, ownership.input_fingerprint, ownership.body_sha256]) {
     if (typeof hash !== "string" || !/^[0-9a-f]{64}$/.test(hash)) throw new ExplorerError("protocolInvalid");
@@ -56,9 +57,12 @@ export function analyzerConfiguration(value: unknown): AnalyzerConfiguration {
   if (value.leaseId !== undefined && (value.status !== "current" || typeof value.leaseId !== "string" || !/^[0-9a-f]{64}$/.test(value.leaseId))) {
     throw new ExplorerError("protocolInvalid");
   }
-  return { path: absolute(value.path), status: value.status as ConfigStatus, token: value.preview_token as string,
+  const config = { path: absolute(value.path), status: value.status as ConfigStatus, token: value.preview_token as string,
     context: name(ownership.context), fingerprint: ownership.input_fingerprint as string, body: ownership.body_sha256 as string,
     ...(value.leaseId === undefined ? {} : { lease: value.leaseId as string }) };
+  if (ownership.analyzer_version !== ANALYZER_VERSION) throw new ExplorerError("analyzerVersionMismatch", undefined,
+    { backendAnalyzer: ownership.analyzer_version, expectedAnalyzer: ANALYZER_VERSION });
+  return config;
 }
 
 /** Domain codes remain machine identities and are translated by the language controller's UI. */
