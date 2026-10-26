@@ -388,3 +388,12 @@ test('read-only constructor refuses preview without allocating a new revision',{
  const f=await fixture(t,'en-US',true),core=await f.source.openConstructor(),before=structuredClone(core.model);
  await assert.rejects(core.preview({kind:'editItems',statement:0,clause:0,items:[0],operation:{kind:'copy',to:2}}),error=>error.details?.reason==='user_read_only');assert.deepEqual(core.model,before);await core.cancel();
 });
+
+/** Root copies get a separate destination and ESKA supplies both lexical breadcrumbs and lifetime-bound definitions. */
+test('package tree copy allocates a new table and keeps original consumer definitions',{skip:!executable},async t=>{
+ const f=await fixture(t,'ru-RU'),text='SELECT Q.N AS N INTO Tmp FROM (SELECT 7 AS N) AS Q; SELECT Tmp.N FROM Tmp; DROP Tmp';await f.store.saveDraft(f.source.record.id,text);
+ const core=await f.source.openConstructor(),before=structuredClone(core.model),preview=await core.preview({kind:'copyStatement',statement:0});assert.match(preview.text,/INTO Tmp2/);assert.deepEqual(core.model,before);
+ await core.action({kind:'copyStatement',statement:0});const owner=core.model.statements[core.model.focus];assert.equal(owner.package.destination,'Tmp2');assert.equal(owner.package.copy,true);
+ const consumer=core.model.statements.find(owner=>owner.sources.some(source=>source.table==='Tmp'));assert.equal(consumer.sources[0].temporaryDefinition,0);
+ const nested=core.model.statements.find(owner=>owner.nested);assert.deepEqual(nested.path,[0,nested.index]);assert.deepEqual(core.model.issues,[]);await core.cancel();assert.equal(f.source.record.draft,text);
+});

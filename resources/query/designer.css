@@ -109,3 +109,13 @@ body.vscode-high-contrast [role=separator], body.vscode-high-contrast-light [rol
 .preview-diff { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; width: 100%; flex: 1 1 100%; min-height: 0; }
 .preview-diff > div { min-width: 0; overflow: auto; }
 .preview-diff pre { white-space: pre; max-height: 65vh; overflow: auto; }
+
+.package-tree { padding-left: 18px; margin: 2px 0 6px; list-style: none; }
+.package-tree button { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
+.scope-path { display: flex; min-width: 0; overflow-x: auto; max-width: 30%; }
+.scope-crumb { max-width: 160px; overflow: hidden; text-overflow: ellipsis; }
+.virtual-parameters { border-collapse: collapse; flex-basis: 100%; width: 100%; }
+.virtual-parameters td { border-bottom: 1px solid var(--vscode-panel-border); padding: 2px 4px; }
+.virtual-parameters td:first-child { width: 28px; }
+.virtual-parameters label { flex-direction: row; align-items: center; gap: 8px; }
+.virtual-parameters input { flex: 1; min-width: 0; }

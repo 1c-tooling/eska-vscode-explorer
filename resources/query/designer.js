@@ -212,6 +212,7 @@ import { predicateForm, emptyPredicate } from './predicates.mjs';
       tree.dataset.source = source.alias;
       tree.addEventListener("toggle", () => { if (tree.open && !source.loaded && !state.busy) api.postMessage({ type: "fields", table: source.table, alias: source.alias, clause: source.clause, item: source.item }); });
       tree.append(element("summary", source.alias), element("small", source.table));
+      if(state.features.packageTree&&source.temporaryDefinition!==null&&source.temporaryDefinition!==undefined)tree.append(button(l.openDefinition,()=>navigate(source.temporaryDefinition),null,'temporary-definition'));
       if (choose === "fields" && source.fields.length) {
         tree.append(button(l.allFields, () => send({ kind: "appendFields", statement: selected, fields: source.fields.map(name) }),
           source.fields.length > 512 ? "model_limit" : unavailable("fields"), "all-fields"));
@@ -296,9 +297,11 @@ import { predicateForm, emptyPredicate } from './predicates.mjs';
     for (const scope of state.model.scopes.filter(scope => scope.parent === null)) {
       const value = state.model.statements[scope.branches[0]], row = element("div", undefined, "row"), controls = value.package;
       row.append(button(`${l.statement} ${controls.position + 1}`, () => navigate(value.index)), element("pre", value.preview));
+      if(state.features.copyStatement)row.append(button(l.copy,()=>api.postMessage({type:'preview',action:{kind:'copyStatement',statement:value.index}}),controls.copy?null:'unsupported','copy-statement'));
       row.append(button(l.remove, () => send({ kind: "removeStatement", statement: value.index }), !controls.remove ? "required_item" : null, "remove-statement"));
       for (const [key, label] of [["moveUp", "↑"], ["moveDown", "↓"]]) row.append(button(label, () => send({ kind: "moveStatement", statement: value.index, to: controls[key] }), controls[key] === null ? "unsupported" : null));
       node.append(row);
+      if(state.features.packageTree)node.append(packageChildren(scope));
     }
     if (permissions.operation === "select") {
       const form = element("form", undefined, "temporary-destination"), value = { name: permissions.destination ?? "" };
@@ -313,6 +316,18 @@ import { predicateForm, emptyPredicate } from './predicates.mjs';
     const submit = button(l.destroyTable, () => {}, !permissions.add ? "unsupported" : null, "add-destroy"); submit.type = "submit";
     drop.addEventListener("submit", event => { event.preventDefault(); if (!state.busy && !state.paused && drop.reportValidity()) send({ kind: "addStatement", statement: selected, operation: "destroy", name: drop.querySelector("input").value }); });
     drop.append(submit); node.append(drop); return node;
+  }
+
+  /** ESKA supplies the scope graph; this tree follows edges without reconstructing query ownership. */
+  function packageChildren(scope){
+    const list=element('ul',undefined,'package-tree');
+    for(const id of scope.branches){
+      const owner=state.model.statements[id],row=element('li');
+      row.append(button(`${state.labels.branch} ${owner.branch+1} · ${owner.preview.slice(0,70)}`,()=>navigate(id),null,'tree-branch'));
+      for(const child of state.model.scopes.filter(child=>child.parent===id)){const nested=element('details');nested.dataset.scope=String(child.index);nested.open=true;nested.append(element('summary',state.labels.nested),packageChildren(child));row.append(nested);}
+      list.append(row);
+    }
+    return list;
   }
 
   /** Overall totals and ordinary groups share one backend-owned section. */
@@ -447,13 +462,16 @@ import { predicateForm, emptyPredicate } from './predicates.mjs';
     form.append(element("h3", l.parameters));
     if (!detail) return;
     if (!detail.parameters?.length) form.append(element("p", l.noParameters, "notice"));
+    const table=element('table',undefined,'virtual-parameters');
     for (const [index, parameter] of (detail.parameters ?? []).entries()) {
+      const row=element('tr'),position=element('td',String(index+1)),cell=element('td');row.append(position,cell);table.append(row);
       const data = { value: value.parameters[index] ?? "" }, list = `parameter-choices-${index}`;
-      const node = input(form, l[`parameter${parameter.key[0].toUpperCase()}${parameter.key.slice(1)}`] ?? parameter.key, `parameter-${index}`, { [`parameter-${index}`]: data.value }, { required: parameter.required, list });
+      const node = input(cell, l[`parameter${parameter.key[0].toUpperCase()}${parameter.key.slice(1)}`] ?? parameter.key, `parameter-${index}`, { [`parameter-${index}`]: data.value }, { required: parameter.required, list });
       node.addEventListener("input", () => { while (value.parameters.length <= index) value.parameters.push(""); value.parameters[index] = node.value; });
       const choices = element("datalist"); choices.id = list;
-      for (const choice of parameter.choices ?? []) { const option = element("option"); option.value = name(choice); choices.append(option); } form.append(choices);
+      for (const choice of parameter.choices ?? []) { const option = element("option"); option.value = name(choice); choices.append(option); } cell.append(choices);
     }
+    form.append(table);
   }
 
   /** Hierarchy and period options remain enum/value DTOs; ESKA enforces their mutual exclusion. */
@@ -622,6 +640,7 @@ import { predicateForm, emptyPredicate } from './predicates.mjs';
       for (const value of statements) { const option = element("option", `${l.statement} ${value.index + 1} · ${value.preview.slice(0, 50)}`); option.value = String(value.index); picker.append(option); }
       picker.value = String(scope ? scope.branches[0] : selected); picker.addEventListener("change", () => navigate(Number(picker.value))); header.append(picker);
     }
+    if(state.features.packageTree&&statement().path?.length>1){const path=element('nav',undefined,'scope-path');path.setAttribute('aria-label',l.scopePath);for(const id of statement().path)path.append(button(`${state.model.statements[id].preview.slice(0,24)}`,()=>navigate(id),id===selected?'single_item':null,'scope-crumb'));header.append(path);}
     if (scope?.branches.length > 1) {
       const picker = element("select"); picker.setAttribute("aria-label", l.branch); picker.disabled = state.busy || state.paused;
       for (const [index, id] of scope.branches.entries()) { const option = element("option", `${l.branch} ${index + 1}`); option.value = String(id); picker.append(option); }
