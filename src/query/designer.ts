@@ -2,7 +2,7 @@ import * as vscode from "vscode";
 import { randomBytes } from "node:crypto";
 import { ExplorerError, isRecord } from "../protocol.js";
 import { message, type MessageKey } from "../messages.js";
-import type { CatalogPage, CatalogField, CatalogParameter, ConstructorSource, ConstructorAction, ConstructorModel } from "./constructors.js";
+import type { CatalogPage, CatalogField, CatalogParameter, ConstructorSource, ConstructorAction, ConstructorModel, TextLocation, TextTarget, TextDiff, CommentPage, ConstructorSelection } from "./constructors.js";
 import type { NativeQueryConstructor } from "./native-constructor.js";
 import { QUERY_SCHEME, type QueryTabs } from "./tabs.js";
 
@@ -10,6 +10,8 @@ interface View {
   panel: vscode.WebviewPanel; binding: NativeQueryConstructor; busy: boolean; ending: boolean; failedApply: boolean;
   statement: number; catalog?: CatalogPage; search?: string; browsed: Map<string, CatalogPage>;
   catalogKey?: string; fieldsKey?: string; fields?: (ConstructorSource & { fields: CatalogField[]; signature?: CatalogParameter[]; found: boolean; loaded: boolean })[]; metadataFailed?: boolean;
+  locationSerial:number; location?:TextLocation & {serial:number;revision:string;navigate:boolean};
+  comments?:CommentPage;commentsOffset?:number;commentSelection?:ConstructorSelection|null;commentsRevision?:string;diff?:TextDiff;diffRevision?:string;
   preview?: { action:ConstructorAction;model:ConstructorModel;baseRevision:string };
   resultKey?: string; resultFields?: CatalogField[];
 }
@@ -45,7 +47,7 @@ export class QueryDesigner implements vscode.Disposable {
     const roots = [vscode.Uri.joinPath(this.context.extensionUri, "resources", "query")];
     const panel = vscode.window.createWebviewPanel("eska.queryConstructor", this.text("constructorTitle"), vscode.ViewColumn.Active,
       { enableScripts: true, retainContextWhenHidden: true, localResourceRoots: roots });
-    const view: View = { panel, binding, busy: false, ending: false, failedApply: false, statement: 0, browsed: new Map() }; this.views.set(uri.toString(), view);
+    const view: View = { panel, binding, busy: false, ending: false, failedApply: false, statement: 0, locationSerial:0, browsed: new Map() }; this.views.set(uri.toString(), view);
     binding.onReveal(() => { if (!view.ending && !this.disposed && !panel.active) panel.reveal(); });
     panel.webview.html = this.html(panel.webview);
     panel.webview.onDidReceiveMessage(value => { void this.receive(view, value).catch(error => this.failure(view, error)); });
@@ -62,17 +64,28 @@ export class QueryDesigner implements vscode.Disposable {
     if (value.type === "cancel") {
       view.ending = true; try { await view.binding.cancel(); } finally { view.panel.dispose(); } return;
     }
+    if(['cancelPreview','cancelDiff','closeComments'].includes(String(value.type))){if(value.type==='cancelPreview')delete view.preview;else if(value.type==='cancelDiff')delete view.diff;else delete view.comments;await this.publish(view);return;}
     if (!view.binding.current || view.failedApply) throw new ExplorerError("sourceChanged");
-    if(view.preview&&!['applyPreview','cancelPreview','cancel'].includes(String(value.type)))return;
+    const revision=view.binding.core.model.revision;
+    if(['action','preview','apply','locate','textDiff','comments'].includes(String(value.type))&&value.revision!==revision)throw new ExplorerError('obsolete');
+    if((view.preview||view.diff)&&!['applyPreview','cancelPreview','cancelDiff','cancel'].includes(String(value.type)))return;
     view.busy = true; await this.publish(view);
     try {
-      if(value.type==='preview'&&isRecord(value.action)){
+      if(value.type==='locate'&&isRecord(value.target)){
+        const location=await view.binding.core.locate(value.target as unknown as TextTarget);view.location={...location,revision,serial:++view.locationSerial,navigate:value.navigate!==false};
+        if(view.location.navigate){view.statement=location.statement;await this.refreshFields(view);}
+      }else if(value.type==='textDiff'){view.diff=await view.binding.core.diff();view.diffRevision=revision;
+      }else if(value.type==='comments'){
+        const offset=typeof value.offset==='number'?value.offset:0,selection=isRecord(value.selection)?value.selection as unknown as ConstructorSelection:null;
+        view.comments=await view.binding.core.comments(offset,128,selection);view.commentsOffset=offset;view.commentSelection=selection;view.commentsRevision=revision;
+      }else if(value.type==='closeComments'){delete view.comments;
+      }else if(value.type==='preview' &&isRecord(value.action)){
         const action=value.action as unknown as ConstructorAction,baseRevision=view.binding.core.model.revision;
-        const model=await view.binding.core.preview(action);view.preview={action,model,baseRevision};
+        const model=await view.binding.core.preview(action,revision);view.preview={action,model,baseRevision};
       }else if(value.type==='cancelPreview'){delete view.preview;
       }else if(value.type==='applyPreview'&&view.preview){
         const preview=view.preview;if(preview.baseRevision!==view.binding.core.model.revision)throw new ExplorerError('obsolete');
-        await view.binding.core.action(preview.action);delete view.preview;this.followStructuralFocus(view,preview.action);await this.refreshFields(view);
+        await view.binding.core.action(preview.action,preview.baseRevision);delete view.preview;this.followStructuralFocus(view,preview.action);await this.refreshFields(view);
       }else if (value.type === "ready") {
         if (view.binding.core.limits.visual) {
           try { view.catalog = await view.binding.core.catalog(this.virtualCatalog(view)); await this.refreshFields(view); }
@@ -102,16 +115,16 @@ export class QueryDesigner implements vscode.Disposable {
           await this.refreshFields(view);
         }
       } else if (value.type === "apply") {
-        try { await view.binding.finish(); }
+        try { await view.binding.finish(revision); }
         catch (error) { view.failedApply = true; throw error; }
         view.ending = true; view.panel.dispose();
       } else if (value.type === "action" && isRecord(value.action)) {
         const action = value.action as unknown as ConstructorAction;
-        try { await view.binding.core.action(action); this.followStructuralFocus(view, action); await this.refreshFields(view); }
+        try { await view.binding.core.action(action,revision); this.followStructuralFocus(view, action); await this.refreshFields(view); }
         catch (error) {
           if (!["remove", "removeUnion", "removeStatement", "removeTotals", "setDcs", "setInto", "editItems"].includes(action.kind) || !(error instanceof ExplorerError) || error.details?.reason !== "constructor_comments_require_decision") throw error;
           const decision = await this.commentDecision();
-          if (decision && (action.kind === "remove" || action.kind === "removeUnion" || action.kind === "removeStatement" || action.kind === "removeTotals" || action.kind === "setDcs" || action.kind === "setInto" || action.kind === "editItems")) { await view.binding.core.action({ ...action, comments: decision }); this.followStructuralFocus(view, action); await this.refreshFields(view); }
+          if (decision && (action.kind === "remove" || action.kind === "removeUnion" || action.kind === "removeStatement" || action.kind === "removeTotals" || action.kind === "setDcs" || action.kind === "setInto" || action.kind === "editItems")) { await view.binding.core.action({ ...action, comments: decision },revision); this.followStructuralFocus(view, action); await this.refreshFields(view); }
         }
       }
     } finally { view.busy = false; if (!view.ending) await this.publish(view); }
@@ -119,7 +132,7 @@ export class QueryDesigner implements vscode.Disposable {
 
   /** ESKA remaps the active scope after adding/removing a branch; adapters do not infer survivors from shifted indices. */
   private followStructuralFocus(view: View, action: ConstructorAction): void {
-    if ((["addUnion", "removeUnion", "addStatement", "removeStatement", "moveStatement", "editItems", "addSourceFields", "alignUnion", "copyStatement"].includes(action.kind)) && view.binding.core.model.focus !== undefined && view.binding.core.model.focus !== null) view.statement = view.binding.core.model.focus;
+    if ((["addUnion", "removeUnion", "addStatement", "removeStatement", "moveStatement", "editItems", "addSourceFields", "alignUnion", "copyStatement", "setText"].includes(action.kind)) && view.binding.core.model.focus !== undefined && view.binding.core.model.focus !== null) view.statement = view.binding.core.model.focus;
   }
 
   /** Bound field expressions come from ESKA; this view retains only the selected page's presentation data. */
@@ -173,6 +186,9 @@ export class QueryDesigner implements vscode.Disposable {
 
   /** Availability explanations are presentation; all eligibility comes from the core DTO. */
   private async publish(view: View): Promise<void> {
+    if(view.location&&view.location.revision!==view.binding.core.model.revision)delete view.location;
+    if(view.comments&&view.commentsRevision!==view.binding.core.model.revision)delete view.comments;
+    if(view.diff&&view.diffRevision!==view.binding.core.model.revision)delete view.diff;
     const labels: Record<string, string> = {};
     for (const [name, key] of Object.entries({ apply: "constructorApply", cancel: "constructorCancel", add: "constructorAdd", edit: "constructorEdit",
       remove: "constructorRemove", up: "constructorUp", down: "constructorDown", text: "constructorText", expression: "constructorExpression", submit: "constructorSubmit",
@@ -186,13 +202,13 @@ export class QueryDesigner implements vscode.Disposable {
     for (const name of ["unions", "totals", "totalGroups", "overall", "autoTotals", "nested", "editNested", "backParent", "branch", "unionAll", "unionDistinct", "addUnion", "unionMismatch", "parameters", "noParameters", "hierarchy", "onlyHierarchy", "noHierarchy", "periods", "noPeriods", "periodBegin", "periodEnd", "second", "minute", "hour", "day", "week", "tenDays", "month", "quarter", "halfYear", "year", "parameterPeriod", "parameterBeginPeriod", "parameterEndPeriod", "parameterPeriodicity", "parameterComplementMethod", "parameterCondition", "parameterAccountCondition", "parameterExtraDimensions", "parameterCorrespondingAccountCondition", "parameterCorrespondingExtraDimensions", "parameterDebitAccountCondition", "parameterDebitExtraDimensions", "parameterCreditAccountCondition", "parameterCreditExtraDimensions", "parameterOrder", "parameterTop", "parameterMainDimensions", "parameterBaseDimensions", "parameterSlices"] as const) {
       labels[name] = this.text(`constructor${name[0]!.toUpperCase()}${name.slice(1)}` as MessageKey);
     }
-    for (const name of ["settings","distinct","allowed","top","autoOrder","forUpdate","lockSources","lockAllHint","openDefinition", "scopePath", "alignUnion","previewChanges","acceptChanges","beforeChanges","afterChanges","editPredicate","booleanAll","booleanAny","booleanNot","between","isNull","conditionKind","rangeBegin","rangeEnd","moveHaving","moveWhere","insertField", "copy", "selection", "selectAll", "comments", "addSourceField", "working", "opened", "toggleCatalog", "toggleTable", "sections", "resizePanes", "resizeText", "addSection", "dcs", "dcsSelect", "dcsWhere", "dcsOptionalSource", "dcsParameter", "dcsVirtualFilter", "dcsOpaque", "dcsChildren", "dcsEnabled", "dcsNotice", "totalSection", "addTotalSection", "having", "packages", "temporaryTable", "destination", "setDestination", "addStatement", "destroyTable", "packageIssue", "index", "categoryTemporaryTable"] as const) {
+    for (const name of ["textTools","editText","diff","showInText","findInModel","previousFragment","nextFragment","textLimit","settings","distinct","allowed","top","autoOrder","forUpdate","lockSources","lockAllHint","openDefinition", "scopePath", "alignUnion","previewChanges","acceptChanges","beforeChanges","afterChanges","editPredicate","booleanAll","booleanAny","booleanNot","between","isNull","conditionKind","rangeBegin","rangeEnd","moveHaving","moveWhere","insertField", "copy", "selection", "selectAll", "comments", "addSourceField", "working", "opened", "toggleCatalog", "toggleTable", "sections", "resizePanes", "resizeText", "addSection", "dcs", "dcsSelect", "dcsWhere", "dcsOptionalSource", "dcsParameter", "dcsVirtualFilter", "dcsOpaque", "dcsChildren", "dcsEnabled", "dcsNotice", "totalSection", "addTotalSection", "having", "packages", "temporaryTable", "destination", "setDestination", "addStatement", "destroyTable", "packageIssue", "index", "categoryTemporaryTable"] as const) {
       labels[name] = this.text(`constructor${name[0]!.toUpperCase()}${name.slice(1)}` as MessageKey);
     }
     const reasons = Object.fromEntries(["unsupported_statement", "unsupported_construct", "invalid_syntax", "model_limit", "read_only", "required_item", "source_required",
       "join_order_dependency", "single_item", "expression_too_large", "unsupported"].map(reason => [reason, this.reason(reason)]));
     reasons.union_field_count = this.text("constructorUnionMismatch");
-    await view.panel.webview.postMessage({ preview:view.preview?{text:view.preview.model.text,baseRevision:view.preview.baseRevision}:null, type: "model", model: view.binding.core.model, labels, reasons, maxExpression: view.binding.core.limits.maxExpression,
+    await view.panel.webview.postMessage({ location:view.location??null, comments:view.comments?{...view.comments,offset:view.commentsOffset,selection:view.commentSelection}:null,diff:view.diff??null, preview:view.preview?{text:view.preview.model.text,baseRevision:view.preview.baseRevision}:null, type: "model", model: view.binding.core.model, labels, reasons, maxExpression: view.binding.core.limits.maxExpression,
       visual: view.binding.core.limits.visual === true, features: view.binding.core.limits, statement: view.statement,
       metadata: { catalog: view.catalog, details: [...view.browsed], fields: view.fields ?? [], resultFields: view.resultFields ?? [], failed: view.metadataFailed === true },
       busy: view.busy, paused: !view.binding.current || view.failedApply, pausedText: this.text(view.failedApply ? "constructorReceiptFailed" : "constructorChanged") });
@@ -202,7 +218,7 @@ export class QueryDesigner implements vscode.Disposable {
   private async failure(view: View, error: unknown): Promise<void> {
     const reason = error instanceof ExplorerError ? String(error.details?.reason ?? "") : "";
     this.log(`constructor_error ${reason || (error instanceof ExplorerError ? error.code : "io")}`);
-    const text = this.text(view.failedApply ? "constructorReceiptFailed" : error instanceof ExplorerError && error.code === "sourceChanged" ? "constructorChanged"
+    const text = this.text(error instanceof ExplorerError && error.code==="obsolete" ? "constructorModelChanged" : view.failedApply ? "constructorReceiptFailed" : error instanceof ExplorerError && error.code === "sourceChanged" ? "constructorChanged"
       : reason === "constructor_limit" ? "constructorLimit" : reason === "user_read_only" ? "queryReadonly" : "constructorInvalid");
     await view.panel.webview.postMessage({ type: "error", text });
   }

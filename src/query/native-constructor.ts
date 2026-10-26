@@ -74,15 +74,17 @@ export class NativeQueryConstructor {
   }
 
   /** Plan, one native edit and a checked receipt update the same SDBL draft; its module/XML is never touched here. */
-  async finish(): Promise<void> {
+  async finish(expectedRevision=this.core.model.revision): Promise<void> {
     if (!this.current) throw new ExplorerError("sourceChanged");
-    const baseline = querySnapshot(this.before), plan = await this.core.plan(baseline);
+    const baseline = querySnapshot(this.before), plan = await this.core.plan(baseline,expectedRevision);
     if (!this.current) throw new ExplorerError("sourceChanged");
+    if(this.core.model.revision!==expectedRevision)throw new ExplorerError("obsolete");
     this.phase = "applying";
     const editor = await vscode.window.showTextDocument(this.original.uri, { preview: false });
     const document = editor.document, version = document.version;
     this.latest = document;
     if (!this.current || querySnapshot(canonical(document.getText())) !== baseline) throw new ExplorerError("sourceChanged");
+    if(this.core.model.revision!==expectedRevision)throw new ExplorerError("obsolete");
     if (!plan.noOp) {
       const edit = new vscode.WorkspaceEdit();
       for (const replacement of plan.replacements) edit.replace(document.uri, new vscode.Range(replacement.rangeUtf16.start.line,
@@ -91,7 +93,7 @@ export class NativeQueryConstructor {
     }
     if (document.isClosed || document.version !== version + (plan.noOp ? 0 : 1)
       || querySnapshot(canonical(document.getText())) !== plan.outputSnapshot) throw new ExplorerError("sourceChanged");
-    await this.core.finish(baseline, plan.outputSnapshot);
+    await this.core.finish(baseline, plan.outputSnapshot,expectedRevision);
     // Input after the native edit/receipt is newer draft input and must survive the acknowledgement.
     await this.complete(document);
   }

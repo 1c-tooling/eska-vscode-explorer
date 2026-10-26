@@ -1,3 +1,4 @@
+import { withQueryText, type QueryTextInput } from "./text-transfer.js";
 import { sourceCommentState, type SourceCommentState } from "./comments.js";
 import { QueryConstructor, type ConstructorMethod } from "./constructors.js";
 import { ExplorerError, isRecord, isToken } from "../protocol.js";
@@ -53,10 +54,19 @@ export class QuerySessions {
     const context = this.context();
     const value = await this.transport.request(method, { ...context, ...params });
     if (!isRecord(value)) invalid();
-    if (!["query/sessionClose", "query/sessionGet", "query/projectionRead", "query/projectionMap", "query/projectionEdits", "query/projectionClose", "query/constructorModel", "query/constructorPlan", "query/constructorCancel", "query/sessionComments"].includes(method)
+    if (!["query/bufferClose", "query/constructorLocate", "query/constructorText", "query/sessionClose", "query/sessionGet", "query/projectionRead", "query/projectionMap", "query/projectionEdits", "query/projectionClose", "query/constructorModel", "query/constructorPlan", "query/constructorCancel", "query/sessionComments"].includes(method)
       && (value.sessionId !== context.sessionId || value.projectId !== context.projectId || !isToken(value.generation)
         || (!["query/sessionApplied", "query/sessionAbort"].includes(method) && value.generation !== context.generation))) invalid();
     return value;
+  }
+
+  /** Full text uses the same bounded upload framing as owner snapshots, with cleanup on rejection. */
+  async withText<T>(text:string,use:(input:QueryTextInput)=>Promise<T>):Promise<T>{
+    const context=this.context();
+    return withQueryText(text,this.limits,(method,params)=>this.request(method,{...params,...context}),async id=>{
+      const value=await this.request('query/bufferClose',{...context,bufferId:id});
+      if(!isRecord(value)||typeof value.released!=='boolean')invalid();
+    },use);
   }
 
   /** A source handle cannot borrow another checkpoint or a later recovery-store selection. */
@@ -108,7 +118,16 @@ export class QuerySourceSession {
 
   /** Constructor mutation replies adopt the same checkpoint queue and never create an adapter-owned store. */
   private async constructorRequest(method: ConstructorMethod, params: Record<string, unknown>): Promise<unknown> {
-    if (method === "query/constructorCatalog") {
+    if((method==='query/constructorAction'||method==='query/constructorPreview')&&isRecord(params.action)&&params.action.kind==='setText'&&typeof params.action.text==='string'){
+      const {text,...action}=params.action;
+      return this.client.withText(text,input=>this.constructorTransition(method,{...params,action:{...action,...input}}));
+    }
+    return this.constructorTransition(method,params);
+  }
+
+  /** Text inspection adopts no canonical constructor model and cannot allocate a second checkpoint. */
+  private async constructorTransition(method:ConstructorMethod,params:Record<string,unknown>):Promise<unknown>{
+    if (["query/constructorCatalog","query/constructorLocate","query/constructorText"].includes(method)) {
       // Metadata inspection changes neither the checkpoint nor its header; do not rehydrate a large draft for every tree expansion.
       const result = await this.client.request(method, { querySessionId: this.current.querySessionId, ...params });
       if (!isRecord(result) || result.querySessionId !== this.current.querySessionId || result.constructorActive !== true) invalid();

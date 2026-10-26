@@ -8,8 +8,8 @@ export const CLAUSES = [...BASE_CLAUSES, "totals", "totalGroups"] as const;
 export const PACKAGE_CLAUSES = [...CLAUSES, "into", "destroy", "index"] as const;
 export const HAVING_CLAUSES = [...PACKAGE_CLAUSES, "having"] as const;
 export type ConstructorClauseKind = typeof HAVING_CLAUSES[number];
-export type ConstructorMethod = "query/constructorOpen" | "query/constructorPlan" | "query/constructorModel" | "query/constructorAction" | "query/constructorFinish" | "query/constructorCancel" | "query/constructorCatalog" | "query/constructorPreview";
-export interface ConstructorLimits { maxExpression: number; maxModel: number; visual?: boolean; virtualTables?: boolean; nestedQueries?: boolean; unions?: boolean; totals?: boolean; packages?: boolean; having?: boolean; totalSections?: boolean; maxTotalSections?: number; dcs?: boolean; bulkItems?: boolean; maxBulkItems?: number; addSourceFields?: boolean; predicates?: boolean; unionMatrix?:boolean; actionPreview?:boolean; packageTree?:boolean; copyStatement?:boolean; modifiers?:boolean;maxTop?:number;maxLockSources?:number }
+export type ConstructorMethod = "query/constructorOpen" | "query/constructorPlan" | "query/constructorModel" | "query/constructorAction" | "query/constructorFinish" | "query/constructorCancel" | "query/constructorCatalog" | "query/constructorPreview" | "query/constructorLocate" | "query/constructorText";
+export interface ConstructorLimits { maxExpression: number; maxModel: number; visual?: boolean; virtualTables?: boolean; nestedQueries?: boolean; unions?: boolean; totals?: boolean; packages?: boolean; having?: boolean; totalSections?: boolean; maxTotalSections?: number; dcs?: boolean; bulkItems?: boolean; maxBulkItems?: number; addSourceFields?: boolean; predicates?: boolean; unionMatrix?:boolean; actionPreview?:boolean; packageTree?:boolean; copyStatement?:boolean; modifiers?:boolean;maxTop?:number;maxLockSources?:number; linkedText?:boolean;textBuffer?:boolean;maxTextBytes?:number }
 export interface ConstructorSelection { statement: number; clause: number; item: number }
 export type Comparison = "equal" | "notEqual" | "less" | "lessOrEqual" | "greater" | "greaterOrEqual" | "like" | "in" | "inHierarchy";
 export type Aggregate = "sum" | "count" | "minimum" | "maximum" | "average" | null;
@@ -34,7 +34,13 @@ export interface CatalogQuery { search?: string; offset?: number; limit?: number
 export type Predicate = {kind:'all'|'any';children:Predicate[]}|{kind:'not';child:Predicate}|{kind:'compare';left:string;comparison:Comparison;right:string}|{kind:'between';expression:string;begin:string;end:string}|{kind:'isNull';expression:string;negated:boolean}|{kind:'raw';expression:string};
 export interface Modifiers {distinct:boolean;allowed:boolean;top:number|null;autoOrder:boolean;forUpdate:string[]|null}
 export interface ModifierView {value:Modifiers;editable:boolean;autoOrderAvailable:boolean;forUpdateAvailable:boolean;sources:string[]}
-export type ConstructorAction = {kind:'setModifiers';statement:number;modifiers:Modifiers}
+export type TextTarget = {kind:'item';selection:ConstructorSelection}|{kind:'offset';offset:number}|{kind:'range';range:ByteRange};
+export interface TextLocation {statement:number;selection:ConstructorSelection|null;range:ByteRange;utf16:ByteRange}
+export interface TextComment {statement:number|null;selection:ConstructorSelection|null;range:ByteRange;utf16:ByteRange}
+export interface CommentPage {comments:TextComment[];total:number;nextOffset:number|null}
+export interface TextDiff {original:string;change:{before:ByteRange;after:ByteRange;beforeUtf16:ByteRange;afterUtf16:ByteRange}|null}
+export type ConstructorAction = {kind:'setText';text:string;editorNormalized:boolean}
+  | {kind:'setModifiers';statement:number;modifiers:Modifiers}
   | {kind:'copyStatement';statement:number}
   | {kind:'alignUnion';statement:number}
   | {kind:'setJoinKind';selection:ConstructorSelection;join:'inner'|'left'|'right'|'full'}
@@ -141,6 +147,7 @@ export function constructorCapabilities(hello: unknown): ConstructorLimits | und
   if(value.predicates!==undefined) {if(hello.apiVersion.minor<32||value.predicates!==true)invalid();flags.predicates=true;}
   for(const key of ['unionMatrix','actionPreview','packageTree','copyStatement'] as const)if(value[key]!==undefined){if(hello.apiVersion.minor<32||value[key]!==true)invalid();flags[key]=true;}
   if(value.modifiers!==undefined){if(hello.apiVersion.minor<32||value.modifiers!==true||value.maxTop!==4294967295||value.maxLockSources!==64)invalid();flags.modifiers=true;flags.maxTop=value.maxTop;flags.maxLockSources=value.maxLockSources;}
+  if(value.linkedText!==undefined||value.textBuffer!==undefined){if(hello.apiVersion.minor<32||value.linkedText!==true||value.textBuffer!==true||value.maxTextBytes!==8388608||value.textValidation!=='structural')invalid();flags.linkedText=true;flags.textBuffer=true;flags.maxTextBytes=value.maxTextBytes;}
   if(flags.packageTree&&!flags.packages||flags.copyStatement&&(!flags.packageTree||!flags.actionPreview)||flags.unionMatrix&&(!flags.unions||!flags.bulkItems||!flags.actionPreview)||flags.predicates&&!flags.having)invalid();
   const clauses = flags.having ? HAVING_CLAUSES : flags.packages ? PACKAGE_CLAUSES : flags.totals ? CLAUSES : BASE_CLAUSES;
   if (value.clauses.length !== clauses.length || !value.clauses.every((kind, index) => kind === clauses[index])) invalid();
@@ -255,8 +262,33 @@ export class QueryConstructor {
     return value as unknown as CatalogPage;
   }
 
+  /** Core owns byte/UTF-16 conversion and innermost scope selection. */
+  async locate(target:TextTarget):Promise<TextLocation>{
+    const result=await this.textRead('query/constructorLocate',{target});
+    if(!locationValue(result.location,this.current)||!isRecord(result.location)||!unsigned(result.location.statement))invalid();return result.location as unknown as TextLocation;
+  }
+
+  /** Comment pages retain source associations and expose no alternative editable text. */
+  async comments(offset=0,limit=128,selection:ConstructorSelection|null=null):Promise<CommentPage>{
+    const result=await this.textRead('query/constructorText',{view:{kind:'comments',offset,limit,selection}}),page=result.comments;
+    if(!isRecord(page)||!unsigned(page.total)||!Array.isArray(page.comments)||page.comments.length>128||!(page.nextOffset===null||unsigned(page.nextOffset)&&page.nextOffset<=page.total)||!page.comments.every(comment=>locationValue(comment,this.current)))invalid();return page as unknown as CommentPage;
+  }
+
+  /** Diff compares the constructor opening with the acknowledged current snapshot. */
+  async diff():Promise<TextDiff>{
+    const result=await this.textRead('query/constructorText',{view:{kind:'diff'}}),diff=result.diff;
+    if(!isRecord(diff)||typeof diff.original!=='string'||Buffer.byteLength(diff.original)>8388608||!(diff.change===null||isRecord(diff.change)&&isByteRange(diff.change.before,Buffer.byteLength(diff.original))&&isByteRange(diff.change.after,this.current.bytes)&&isByteRange(diff.change.beforeUtf16,diff.original.length)&&isByteRange(diff.change.afterUtf16,this.current.text.length)))invalid();return diff as unknown as TextDiff;
+  }
+
+  /** Read replies remain bound to the same revision across asynchronous backend/metadata responses. */
+  private async textRead(method:ConstructorMethod,params:Record<string,unknown>):Promise<Record<string,unknown>>{
+    if(!this.limits.linkedText)throw new ExplorerError('incompatible');const revision=this.current.revision,result=await this.request(method,params);
+    if(!isRecord(result)||result.constructorRevision!==revision||this.current.revision!==revision)throw new ExplorerError('obsolete');return result;
+  }
+
   /** A preview is validated against the same snapshot and never replaces this acknowledged model. */
-  async preview(action:ConstructorAction):Promise<ConstructorModel>{
+  async preview(action:ConstructorAction,expectedRevision=this.current.revision):Promise<ConstructorModel>{
+    if(expectedRevision!==this.current.revision)throw new ExplorerError("obsolete");
     if(!this.limits.actionPreview)throw new ExplorerError('incompatible');
     this.requireAction(action);
     const revision=this.current.revision,result=await this.request('query/constructorPreview',{action});
@@ -265,7 +297,8 @@ export class QueryConstructor {
   }
 
   /** Stale indices are rejected by ESKA, including parallel actions captured before the previous reply. */
-  async action(action: ConstructorAction): Promise<void> {
+  async action(action: ConstructorAction,expectedRevision=this.current.revision): Promise<void> {
+    if(expectedRevision!==this.current.revision)throw new ExplorerError("obsolete");
     this.requireAction(action);
     const result = await this.request("query/constructorAction", { action });
     if (!isRecord(result) || result.constructorActive !== true) invalid();
@@ -273,7 +306,8 @@ export class QueryConstructor {
   }
 
   /** Plan precedes the IDE's undoable text transaction and retains the canonical draft lock. */
-  async plan(nativeSnapshot: string): Promise<QueryTextPlan> {
+  async plan(nativeSnapshot: string,expectedRevision=this.current.revision): Promise<QueryTextPlan> {
+    if(expectedRevision!==this.current.revision)throw new ExplorerError("obsolete");
     const result = await this.request("query/constructorPlan", { nativeSnapshot });
     if (!isRecord(result) || result.constructorActive !== true) invalid();
     const plan = parseDraftPlan(result.draftPlan, this.original, querySnapshot(this.original), { maxMappings: 64, maxSnapshotBytes: 8_388_608 });
@@ -282,7 +316,8 @@ export class QueryConstructor {
   }
 
   /** Explicit finish publishes only the existing private draft; native source application remains a separate operation. */
-  async finish(nativeSnapshot: string, resultSnapshot?: string): Promise<QueryTextPlan> {
+  async finish(nativeSnapshot: string, resultSnapshot?: string,expectedRevision=this.current.revision): Promise<QueryTextPlan> {
+    if(expectedRevision!==this.current.revision)throw new ExplorerError("obsolete");
     const result = await this.request("query/constructorFinish", { nativeSnapshot, ...(resultSnapshot ? { resultSnapshot } : {}) });
     this.closed = true;
     if (!isRecord(result) || result.constructorActive !== false || result.constructor !== null) invalid();
@@ -301,6 +336,7 @@ export class QueryConstructor {
 
   /** Explicit capabilities govern the same intention in preview and publication. */
   private requireAction(action:ConstructorAction):void {
+    if(action.kind==="setText"&&!this.limits.textBuffer)throw new ExplorerError("incompatible");
     if(action.kind==="setModifiers"&&!this.limits.modifiers)throw new ExplorerError("incompatible");
     if(action.kind==="copyStatement"&&!this.limits.copyStatement)throw new ExplorerError("incompatible");
     if(action.kind==="alignUnion"&&!this.limits.unionMatrix)throw new ExplorerError("incompatible");
@@ -453,4 +489,10 @@ function predicateValue(value:unknown,depth=0,budget={nodes:0}):value is Predica
 function modifierView(view:unknown):view is ModifierView {
  if(!isRecord(view)||!isRecord(view.value)||typeof view.editable!=='boolean'||typeof view.autoOrderAvailable!=='boolean'||typeof view.forUpdateAvailable!=='boolean'||!Array.isArray(view.sources)||view.sources.length>65536||!view.sources.every(shortText))return false;
  const value=view.value;return typeof value.distinct==='boolean'&&typeof value.allowed==='boolean'&&typeof value.autoOrder==='boolean'&&(value.top===null||unsigned(value.top)&&value.top<=4294967295)&&(value.forUpdate===null||Array.isArray(value.forUpdate)&&value.forUpdate.length<=64&&value.forUpdate.every(shortText));
+}
+
+/** Range validation checks transport bounds only; it never derives query ownership in the adapter. */
+function locationValue(value:unknown,model:ConstructorModel):boolean {
+ if(!isRecord(value)||!(value.statement===null||unsigned(value.statement)&&value.statement<model.statements.length)||!isByteRange(value.range,model.bytes)||!isByteRange(value.utf16,model.text.length))return false;
+ const selection=value.selection;return selection===null||isRecord(selection)&&unsigned(selection.statement)&&unsigned(selection.clause)&&unsigned(selection.item)&&selection.statement===value.statement&&!!model.statements[selection.statement]?.clauses[selection.clause]?.items[selection.item];
 }

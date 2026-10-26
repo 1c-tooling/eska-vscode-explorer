@@ -1,4 +1,5 @@
-import { createHash } from "node:crypto";
+import { withQueryText, querySnapshot } from "./text-transfer.js";
+export { querySnapshot } from "./text-transfer.js";
 import type { Connection } from "../connection.js";
 import { ExplorerError, isRecord, isToken, isWirePath, type WirePath } from "../protocol.js";
 import type { NodeId, ProjectTree } from "../tree.js";
@@ -20,9 +21,6 @@ export interface QueryBinding {
   snapshot: string;
   contextFingerprint: string;
 }
-
-/** Hash exactly the text submitted from the owner editor, including any retained BOM. */
-export function querySnapshot(text: string): string { return createHash("sha256").update(text, "utf8").digest("hex"); }
 
 /** Query RPCs never retry a request under a different metadata generation. */
 export class QueryClient {
@@ -87,30 +85,8 @@ export class QueryClient {
   /** Sequential UTF-8 chunks stay below the frame bound even when JSON escapes every character. */
   async withText<T>(text: string, generation: string, use: (input: { text: string } | { bufferId: string }) => Promise<T>,
     signal?: AbortSignal): Promise<T> {
-    assertActive(signal);
-    const bytes = Buffer.from(text, "utf8");
-    if (bytes.toString("utf8") !== text) throw new ExplorerError("sourceChanged");
-    if (bytes.length > this.limits.maxSnapshotBytes) throw new ExplorerError("resourceLimit");
-    if (bytes.length <= this.limits.maxInlineBytes) return use({ text });
-    let bufferId: string | undefined;
-    try {
-      const begun = await this.request("query/bufferBegin", { bytes: bytes.length, snapshot: querySnapshot(text) }, generation);
-      if (typeof begun.bufferId === "string" && begun.bufferId) bufferId = begun.bufferId;
-      if (!bufferId || begun.receivedBytes !== 0 || begun.ready !== false) invalid();
-      for (let offset = 0; offset < bytes.length;) {
-        assertActive(signal);
-        let end = Math.min(offset + this.limits.maxInlineBytes, bytes.length);
-        while (end < bytes.length && (bytes[end]! & 0xc0) === 0x80) end--;
-        if (end === offset) throw new ExplorerError("resourceLimit");
-        const appended = await this.request("query/bufferAppend", { bufferId, offset, text: bytes.toString("utf8", offset, end) }, generation);
-        if (appended.bufferId !== bufferId || appended.receivedBytes !== end || appended.ready !== (end === bytes.length)) invalid();
-        offset = end;
-      }
-      assertActive(signal);
-      return await use({ bufferId });
-    } finally {
-      if (bufferId) await this.release("query/bufferClose", "bufferId", bufferId, generation);
-    }
+    return withQueryText(text,this.limits,(method,params)=>this.request(method,params,generation),
+      id=>this.release("query/bufferClose","bufferId",id,generation),use,signal);
   }
 
   /** A changed member or permission refresh requires reopening from a preserved draft. */

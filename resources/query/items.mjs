@@ -21,6 +21,7 @@ export function itemTable(entries, context) {
   toolbar.append(button(l.copy, () => run({kind:'copy', to: entries[0]?.clause.items.length ?? 0}), reason('copy'), 'copy-selected'));
   toolbar.append(button('↑', () => run({kind:'move', to:first.item.index - 1}), !first || first.item.index === 0 ? 'single_item' : reason('move'), 'move-selected-up'));
   toolbar.append(button('↓', () => run({kind:'move', to:last.item.index + 2}), !last || last.item.index + 1 === last.clause.items.length ? 'single_item' : reason('move'), 'move-selected-down'));
+  if(context.linkedText)toolbar.append(button(l.showInText,()=>context.locate(first),active.length===1?null:"single_item","show-in-text"));
   wrap.append(toolbar);
   const table = element('table'); table.setAttribute('aria-label', l.selection); table.setAttribute('aria-multiselectable','true');
   const head = element('thead'), tr = element('tr'), check = element('input'); check.type='checkbox'; check.setAttribute('aria-label',l.selectAll);
@@ -53,7 +54,7 @@ export function itemTable(entries, context) {
       cell.append(display); tr.append(cell);
       if(context.cells.has(`${row.selection.statement}:${row.selection.clause}:${item.index}:${key}`))openCell();
     }
-    const comments=element('td',item.comments?String(item.comments):'');
+    const comments=element('td');if(item.comments)comments.append(context.linkedText?button(String(item.comments),()=>context.comments(row),null,'item-comments'):element('span',String(item.comments)));
     for (const child of item.children??[]) comments.append(button(l.editNested,()=>navigate(child),null,'edit-nested'));
     tr.append(comments); tr.addEventListener('click',event=>{if(event.target===tr)selectRow(event);});
     tr.addEventListener('keydown',event=> {

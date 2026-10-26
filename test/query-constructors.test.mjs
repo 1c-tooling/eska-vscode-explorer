@@ -332,6 +332,10 @@ test("real read-only constructor exposes its lossless model without permitting a
   const f = await fixture(t, "en-US", true), before = f.source.record.draft;
   const constructor = await f.source.openConstructor(); assert.equal(constructor.model.writable, false);
   await assert.rejects(constructor.action({ kind: "append", statement: 0, clause: "fields", text: "2" }), error => error.details?.reason === "user_read_only");
+  for (const submit of [action => constructor.action(action), action => constructor.preview(action)]) {
+    await assert.rejects(submit({kind:"setText",text:"SELECT 9 AS N",editorNormalized:true}), error => error.details?.reason === "user_read_only");
+    assert.equal(constructor.model.text, before);
+  }
   const plan = await constructor.plan(querySnapshot(before)); assert.equal(plan.noOp, true);
   await constructor.finish(querySnapshot(before)); assert.equal(f.source.record.draft, before);
   assert.equal(await readFile(f.files.module, "utf8"), f.owner);
@@ -408,3 +412,25 @@ for(const locale of ['ru-RU','en-US']) {
   await assert.rejects(core.action({kind:'setInto',statement:0,name:'Tmp'}));assert.deepEqual(core.model,accepted);await core.cancel();assert.equal(await readFile(f.files.module,'utf8'),f.owner);
  });
 }
+
+for(const locale of ['ru-RU','en-US']) {
+ /** Navigation, comments, diff and the explicit text buffer share one source-bound revision. */
+ test(`linked text tools and invalid buffer preservation (${locale})`,{skip:!executable},async t=>{
+  const f=await fixture(t,locale),text='SELECT "😀" AS N, // keep\r\n2 AS Other';await f.store.saveDraft(f.source.record.id,text);const core=await f.source.openConstructor();assert.equal(core.limits.linkedText,true);
+  const location=await core.locate({kind:'item',selection:{statement:0,clause:0,item:0}});assert.equal(location.utf16.start,7);assert.equal(location.range.start,7);
+  await assert.rejects(core.locate({kind:'offset',offset:9}),error=>error.details?.reason==='constructor_invalid_selection');
+  const page=await core.comments();assert.equal(page.total,1);assert.ok(page.comments[0].selection);assert.equal((await core.diff()).original,text);
+  const before=structuredClone(core.model);await assert.rejects(core.preview({kind:'setText',text:'SELECT "unfinished',editorNormalized:true}));assert.deepEqual(core.model,before);
+  const action={kind:'setText',text:text.replace('2 AS Other','3 AS Other'),editorNormalized:true},preview=await core.preview(action);assert.deepEqual(core.model,before);await core.action(action);assert.equal(core.model.text,preview.text);const diff=await core.diff();assert.equal(diff.original,text);assert.equal(Buffer.from(core.model.text).subarray(diff.change.after.start,diff.change.after.end).toString(),'3');
+  const accepted=structuredClone(core.model);await assert.rejects(core.action({kind:'append',statement:0,clause:'fields',text:'99'},before.revision),{code:'obsolete'});assert.deepEqual(core.model,accepted);await core.cancel();assert.equal(f.source.record.draft,text);assert.equal(await readFile(f.files.module,'utf8'),f.owner);
+ });
+}
+/** Existing chunk framing carries a full buffer beyond the inline/frame budget and releases it after preview/cancel. */
+test('full text buffers reuse bounded query uploads instead of enlarging RPC frames',{skip:!executable},async t=>{
+ const f=await fixture(t,'en-US'),core=await f.source.openConstructor(),methods=[],request=f.connection.child.request.bind(f.connection.child);
+ f.connection.child.request=(method,...args)=>{methods.push(method);return request(method,...args);};
+ const text='SELECT 1 AS N\n// '+ '😀'.repeat(40000),action={kind:'setText',text,editorNormalized:true};const before=structuredClone(core.model),preview=await core.preview(action);assert.equal(preview.text,text);assert.deepEqual(core.model,before);assert.ok(methods.includes('query/bufferBegin'));assert.ok(methods.filter(method=>method==='query/bufferAppend').length>=2);assert.ok(methods.includes('query/bufferClose'));
+ const closes=methods.filter(method=>method==='query/bufferClose').length;
+ await assert.rejects(core.preview({...action,text:'SELECT "unfinished\n// '+'😀'.repeat(40000)}));assert.deepEqual(core.model,before);assert.equal(methods.filter(method=>method==='query/bufferClose').length,closes+1);
+ await core.action(action);assert.equal(core.model.text,text);await core.cancel();
+});

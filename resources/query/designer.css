@@ -104,8 +104,8 @@ body.vscode-high-contrast [role=separator], body.vscode-high-contrast-light [rol
 .union-matrix td, .union-matrix th { border: 1px solid var(--vscode-panel-border); padding: 2px 4px; min-width: 100px; max-width: 260px; }
 .union-matrix button { display: block; width: 100%; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .union-matrix tr[aria-selected=true] { background: var(--vscode-list-inactiveSelectionBackground); }
-.action-preview { position: fixed; inset: 24px; z-index: 20; background: var(--vscode-editor-background); border-color: var(--vscode-focusBorder); display: flex; flex-wrap: wrap; gap: 6px; overflow: auto; }
-.action-preview h2 { flex-basis: 100%; }
+.action-preview { position: fixed; inset: 24px; z-index: 20; background: var(--vscode-editor-background); border-color: var(--vscode-focusBorder); display: grid; grid-template-columns: max-content max-content minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr) auto; gap: 6px; overflow: auto; }
+.action-preview h2, .action-preview .preview-diff { grid-column: 1 / -1; }
 .preview-diff { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; width: 100%; flex: 1 1 100%; min-height: 0; }
 .preview-diff > div { min-width: 0; overflow: auto; }
 .preview-diff pre { white-space: pre; max-height: 65vh; overflow: auto; }
@@ -122,3 +122,16 @@ body.vscode-high-contrast [role=separator], body.vscode-high-contrast-light [rol
 
 .modifier-expression label { flex-direction: row; align-items: center; }
 .modifier-expression [name=lockSources] { min-width: 200px; flex: 1; }
+
+/* Text tools share the constructor snapshot and keep their private editor below the checked preview. */
+.text-tools { position: relative; flex: 0 0 auto; }
+.text-tools > summary { white-space: nowrap; }
+.text-tools-commands { position: absolute; right: 0; top: 100%; z-index: 10; display: flex; flex-direction: column; gap: 4px; padding: 6px; background: var(--vscode-editor-background); border: 1px solid var(--vscode-panel-border); box-shadow: 0 2px 8px var(--vscode-widget-shadow); }
+.text-tools-commands button { text-align: left; }
+.text-navigation { display: flex; flex: 0 0 auto; gap: 4px; flex-wrap: wrap; }
+.linked-fragment { color: inherit; background: var(--vscode-editor-findMatchHighlightBackground); outline: 1px solid var(--vscode-editor-findMatchHighlightBorder, var(--vscode-focusBorder)); }
+.text-editor { position: fixed; inset: 24px; z-index: 15; padding: 10px; display: grid; grid-template-columns: max-content max-content minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr) auto; gap: 6px; background: var(--vscode-editor-background); border: 1px solid var(--vscode-focusBorder); }
+.text-editor h2 { grid-column: 1 / -1; }
+.text-editor textarea { grid-column: 1 / -1; width: 100%; height: 100%; min-height: 0; min-width: 0; resize: none; white-space: pre; font-family: var(--vscode-editor-font-family); }
+.comment-list { flex: 0 1 auto; max-height: 20vh; overflow: auto; }
+.query-comment { display: block; max-width: 100%; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
