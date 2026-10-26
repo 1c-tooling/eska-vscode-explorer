@@ -66,6 +66,20 @@ exports.connect = async function (until) {
   };
   await until(async () => await evaluate('document.getElementById("root").getAttribute("aria-busy") !== "true"'), 'constructor metadata controls ready');
   return { evaluate, memory: () => found.connection.request('Runtime.getHeapUsage'), close: () => { for (const connection of connections.values()) connection.close(); },
+    // Profiling is opt-in and confined to this disposable webview's renderer.
+    startProfile: async () => {
+      await found.connection.request('Performance.enable');
+      await found.connection.request('Profiler.enable');
+      await found.connection.request('Profiler.start');
+      return found.connection.request('Performance.getMetrics');
+    },
+    stopProfile: async () => {
+      const { profile } = await found.connection.request('Profiler.stop');
+      const metrics = await found.connection.request('Performance.getMetrics');
+      await found.connection.request('Profiler.disable');
+      await found.connection.request('Performance.disable');
+      return { profile, metrics };
+    },
     pointer: (type, x, y) => found.connection.request('Input.dispatchMouseEvent', { type, x, y, button: 'left', buttons: type === 'mouseReleased' ? 0 : 1, clickCount: 1 }),
     screenshot: async file => {
       const [connection] = connections.values(); await connection.request('Page.enable');

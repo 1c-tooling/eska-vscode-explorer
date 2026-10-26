@@ -42,10 +42,17 @@ exports.run = async function(){
       await client.evaluate('document.querySelector(".search input").value="Товары";document.querySelector(".search input").dispatchEvent(new Event("input",{bubbles:true}));document.querySelector(".search").requestSubmit()');
       await until(()=>client.evaluate('document.getElementById("root").getAttribute("aria-busy")==="false"&&document.querySelectorAll(".metadata-table").length===1'),'metadata refresh');
       row.retainedInput=await client.evaluate('({value:document.querySelector(".expression [name=expression]")?.value,focus:document.activeElement?.name,start:document.activeElement?.selectionStart,end:document.activeElement?.selectionEnd})');
+      const profileOutput=round===1?process.env.ESKA_COMPACT_CPU_OUTPUT:undefined;
+      const profileBefore=profileOutput?await client.startProfile():undefined;
       const addRpc={...rpc},addStart=performance.now();
       await client.evaluate(`for(const [key,value] of [['expression','99'],['alias','Performance']]){const input=document.querySelector('.expression [name='+key+']');input.value=value;input.dispatchEvent(new Event('input',{bubbles:true}));}document.querySelector('.expression').requestSubmit();`);
       await until(()=>client.evaluate('document.getElementById("root").getAttribute("aria-busy")==="false"&&document.querySelector(".query-preview pre").textContent.includes("99 AS Performance")'),'field acknowledged');
       row.addFieldMs=performance.now()-addStart;row.addFieldRpc=Object.fromEntries(Object.entries(rpc).map(([key,value])=>[key,value-(addRpc[key]??0)]).filter(([,value])=>value));
+      if(profileOutput){
+        const {profile,metrics}=await client.stopProfile();
+        await fs.writeFile(profileOutput,JSON.stringify(profile));
+        row.profile={before:profileBefore,after:metrics,file:profileOutput};
+      }
       row.memory=await memory(explorer,client);
       await client.evaluate('document.querySelectorAll("header button")[1].click()');client.close();client=undefined;
       await until(()=>!explorer.queryDesigner.views.size&&vscode.window.activeTextEditor?.document.uri.toString()===draft.uri.toString(),'cancel returns draft');

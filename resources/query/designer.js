@@ -550,7 +550,7 @@ import { markedText, mountDialog, textEditor } from './text.mjs';
       predicateForm(form,editing.predicate,{element,button,input,select,labels:state.labels,draw:render,update:value=>{editing.predicate=value;}});
       const accept=button(state.labels.submit,()=>{});accept.type='submit';form.append(accept,button(state.labels.close,()=>{editing=undefined;render();}));
       form.addEventListener('submit',event=>{event.preventDefault();if(!state.busy&&!state.paused&&form.reportValidity())send({...editing.action,predicate:structuredClone(editing.predicate)});});
-      expressionTools(form,{element,button,labels:state.labels,fields:[...new Set(state.metadata.fields.flatMap(source=>source.fields.map(name)))]});root.append(form);return;
+      expressionTools(form,{element,button,labels:state.labels,fields:[...new Set(state.metadata.fields.flatMap(source=>source.fields.map(name)))],state:editing.fieldPicker??={}});root.append(form);return;
     }
     if (editing.dcs) { dcsForm(); return; }
     const l = state.labels, form = element("form", undefined, "expression"); form.append(element("h2", l.edit));
@@ -576,7 +576,7 @@ import { markedText, mountDialog, textEditor } from './text.mjs';
     });
     form.append(accept, button(l.close, () => { editing = undefined; render(); }));
     if (editing.expression) form.append(button(editing.raw ? l.visualEditor : l.rawExpression, () => { editing.raw = !editing.raw; render(); }));
-    expressionTools(form, {element,button,labels:l,fields:[...new Set(state.metadata.fields.flatMap(source=>source.fields.map(name)))]});
+    expressionTools(form, {element,button,labels:l,fields:[...new Set(state.metadata.fields.flatMap(source=>source.fields.map(name)))],state:editing.fieldPicker??={}});
     root.append(form);
   }
 
@@ -663,7 +663,7 @@ import { markedText, mountDialog, textEditor } from './text.mjs';
       const close=()=>post({type:state.preview?'cancelPreview':'cancelDiff'});dialog.append(button(l.close,close,null,state.preview?'preview-cancel':'diff-close'));mountDialog(root,dialog,close);
     }
     root.setAttribute("aria-busy", String(state.busy));
-    layout.mount(selected, page, state.model.revision, l);
+    layout.mount(selected, page, l);
   }
 
   /** While a child scope is open, parent selectors are replaced with one explicit return control. */

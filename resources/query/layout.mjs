@@ -34,18 +34,21 @@ function keyFor(node, root) {
   const path = [];
   while (node && node !== root) {
     const id = ['id', 'data-section', 'data-source', 'data-category', 'data-value', 'name'].map(name => node.getAttribute(name)).find(Boolean);
-    // Named form inputs can shadow native properties such as `children` and `name`.
-    const siblings = node.parentElement ? [...node.parentElement.querySelectorAll(':scope > *')].filter(value => value.tagName === node.tagName) : [];
-    path.unshift(`${node.tagName}:${id || siblings.indexOf(node)}`); node = node.parentElement;
+    // Named nodes need no sibling scan; element links also avoid form.children shadowing.
+    let index = 0;
+    if (!id) for (let sibling = node.previousElementSibling; sibling; sibling = sibling.previousElementSibling) {
+      if (sibling.tagName === node.tagName) index++;
+    }
+    path.push(`${node.tagName}:${id || index}`); node = node.parentElement;
   }
-  return path.join('/');
+  return path.reverse().join('/');
 }
 
 /** Native focus, scroll and geometry belong to this adapter; all accepted text remains in ESKA. */
 export class ConstructorLayout {
   constructor(api, root) {
     this.api = api; this.root = root; this.preferences = layoutPreferences(api.getState());
-    this.inputs = []; this.focus = undefined; this.context = undefined; this.revision = undefined;
+    this.focus = undefined; this.context = undefined;
     window.addEventListener('resize', () => { this.grid(); this.previewSize(); });
   }
 
@@ -77,17 +80,14 @@ export class ConstructorLayout {
     if (active && this.root.contains(active) && active !== this.root) this.focus = {
       key: keyFor(active, this.root), start: active.selectionStart, end: active.selectionEnd
     };
-    const inputs = [...this.root.querySelectorAll('input, textarea, select')];
-    if (inputs.length) this.inputs = inputs.map(node => ({ key: keyFor(node, this.root), value: node.value, checked: node.checked }));
     this.save();
   }
 
-  /** Recreate layout handles and restore local input only within the same acknowledged revision. */
-  mount(statement, page, revision, labels) {
+  /** Restore geometry and focus; values are rendered once from the current form or selection state. */
+  mount(statement, page, labels) {
     const context = `${statement}:${page}`, same = this.context === context;
-    if (!same || revision !== this.revision) this.inputs = [];
     if (!same) this.focus = undefined;
-    this.context = context; this.revision = revision; this.labels = labels;
+    this.context = context; this.labels = labels;
     this.preferences.page[statement] = page;
     this.content = this.root.querySelector('.sections');
     for (const node of this.content.children) node.classList.add('query-pane');
@@ -116,13 +116,6 @@ export class ConstructorLayout {
       const open = view?.details[keyFor(node, this.root)]; if (open !== undefined) node.open = open;
       node.addEventListener('toggle', () => { if (node.isConnected) { this.capture(); } });
     }
-    const controls = [...this.root.querySelectorAll('button, input, textarea, select, summary, [role=separator]')];
-    for (const node of controls) {
-      const previous = this.inputs.find(input => input.key === keyFor(node, this.root));
-      if (!previous || node.disabled || !['INPUT', 'TEXTAREA', 'SELECT'].includes(node.tagName)) continue;
-      if (node.value !== previous.value) { node.value = previous.value; node.dispatchEvent(new Event(node.tagName === 'SELECT' ? 'change' : 'input', { bubbles: true })); }
-      if (node.type === 'checkbox') node.checked = previous.checked;
-    }
     for (const node of this.root.querySelectorAll('.query-pane, .query-preview pre, .expression, .tabs')) {
       const key = keyFor(node, this.root);
       node.scrollTop = view?.scroll[key] ?? 0; node.scrollLeft = view?.scroll[`${key}/left`] ?? 0;
@@ -135,6 +128,7 @@ export class ConstructorLayout {
       else if (selected.right > bounds.right) tabs.scrollLeft += selected.right - bounds.right;
     }
     if (same && this.focus) {
+      const controls = [...this.root.querySelectorAll('button, input, textarea, select, summary, [role=separator]')];
       const node = controls.find(node => keyFor(node, this.root) === this.focus.key);
       if (node && !node.disabled) {
         node.focus({ preventScroll: true });

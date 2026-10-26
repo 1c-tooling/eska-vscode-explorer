@@ -88,11 +88,14 @@ async function exerciseState(client) {
   await client.pointer('mouseMoved', divider.x + 50, divider.y);
   await client.pointer('mouseReleased', divider.x + 50, divider.y);
   await until(async () => await client.evaluate('document.querySelector(".pane-separator").getAttribute("aria-valuenow")') !== divider.width, 'native pointer resized panes');
-  await client.evaluate(`document.querySelector('[data-section="fields"] .action-add').click();const input=document.querySelector('.expression [name="expression"]');input.value='UnfinishedExpression';input.dispatchEvent(new Event('input',{bubbles:true}));input.focus();input.setSelectionRange(3,7);
+  await client.evaluate(`document.querySelector('[data-section="fields"] .action-add').click();
+    {const filter=document.querySelector('.expression-tools input');filter.value='Nested';filter.dispatchEvent(new Event('input',{bubbles:true}));}
+    const input=document.querySelector('.expression [name="expression"]');input.value='UnfinishedExpression';input.dispatchEvent(new Event('input',{bubbles:true}));input.focus();input.setSelectionRange(3,7);
     globalThis.layoutFocusTrace=[];window.addEventListener('message',event=>{if(event.data?.type==='model'){const row={busy:event.data.busy,revision:event.data.model.revision,before:document.activeElement?.outerHTML?.slice(0,400)};layoutFocusTrace.push(row);queueMicrotask(()=>row.after=document.activeElement?.outerHTML?.slice(0,400));}},{capture:true});
     const search=document.querySelector('.search input');search.value='Товары';search.dispatchEvent(new Event('input',{bubbles:true}));document.querySelector('.search').requestSubmit();`);
   await until(() => client.evaluate('document.getElementById("root").getAttribute("aria-busy")==="false" && document.querySelectorAll(".metadata-table").length===1 && document.querySelector(".table-name").textContent==="Товары"'), 'layout metadata refresh');
   assert.equal(await client.evaluate('document.querySelector(".expression [name=expression]").value'), 'UnfinishedExpression');
+  assert.equal(await client.evaluate('document.querySelector(".expression-tools input").value'), 'Nested');
   assert.ok((await client.evaluate('document.querySelector(".table-add").getAttribute("aria-label")')).includes('Товары'));
   assert.deepEqual(await client.evaluate('({name:document.activeElement.name,start:document.activeElement.selectionStart,end:document.activeElement.selectionEnd})'), {name:'expression',start:3,end:7}, JSON.stringify(await client.evaluate('layoutFocusTrace')));
   await client.evaluate('document.querySelector(".expression button:nth-last-child(2)").click()');

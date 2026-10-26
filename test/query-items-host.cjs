@@ -17,6 +17,17 @@ exports.run = async function () {
     await vscode.commands.executeCommand('eska.explorer.queryConstructor',draft.uri);client=await connect(until);await ready(client);
     const rows=()=>client.evaluate('document.querySelectorAll("[data-section=fields] tbody tr").length');
     assert.equal(await rows(),2);
+    const layoutReview = {};
+    await client.evaluate('document.querySelector("[data-section=fields] thead input").click()');
+    layoutReview.selectAll = await client.evaluate('[...document.querySelectorAll("[data-section=fields] tbody tr")].map(row=>({selected:row.getAttribute("aria-selected"),checked:row.querySelector("input").checked}))');
+    await client.evaluate('document.querySelector("[data-section=fields] thead input").click();document.querySelector("[data-section=fields] tbody input").click();document.querySelector("[data-section=fields] .edit-selected").click();{const input=document.querySelector(".expression [name=expression]");input.value="999";input.dispatchEvent(new Event("input",{bubbles:true}));}');
+    await client.evaluate('document.querySelectorAll("[data-section=fields] tbody input")[0].click();document.querySelectorAll("[data-section=fields] tbody input")[1].click();document.querySelector("[data-section=fields] .edit-selected").click()');
+    layoutReview.otherExpression = await client.evaluate('document.querySelector(".expression [name=expression]").value');
+    await fs.writeFile(path.join(fixture.root,'layout-review.json'),JSON.stringify(layoutReview));
+    if(process.env.ESKA_REVIEW_OUTPUT)await fs.writeFile(process.env.ESKA_REVIEW_OUTPUT,JSON.stringify(layoutReview));
+    assert.deepEqual(layoutReview.selectAll,[{selected:'true',checked:true},{selected:'true',checked:true}]);
+    assert.equal(layoutReview.otherExpression,'2','another row must not inherit unsaved input');
+    await client.evaluate('document.querySelector(".expression [data-action=submit] + button").click();document.querySelectorAll("[data-section=fields] tbody input")[1].click()');
     await client.evaluate('document.querySelector("[data-section=fields] tbody input").click();document.querySelector("[data-section=fields] .copy-selected").click()');
     await until(async()=>await rows()===3,'copied selected row');await ready(client);
     assert.match(await client.evaluate('document.getElementById("query-text").textContent'),/AS A2/);
