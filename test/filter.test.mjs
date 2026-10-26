@@ -127,7 +127,7 @@ test("workspace members retain independent filters after reconnect", { skip: !ex
   t.after(() => rm(root, { recursive: true, force: true }));
   await createTreeProject(join(root, "first"));
   await createTreeProject(join(root, "second"), "extension");
-  await writeFile(join(root, "eska.toml"), "[workspace]\n[workspace.members.app]\nconfiguration='first'\nextensions=['second']\n");
+  await writeFile(join(root, "eska.toml"), "[workspace]\n[workspace.members.app]\nconfiguration='first'\nextensions=[{path='second'}]\n");
   for (const [name, type] of [["first", "configuration"], ["second", "extension"]]) {
     await writeFile(join(root, name, "eska.toml"), `[project]\nname='${name}'\ntype='${type}'\n`);
   }

@@ -9,7 +9,7 @@ import { findTool, inspectProject, inspectAnalyzer, inspectProjectContract } fro
 /** A complete T97 contract identifies exactly the project component and its compiled target. */
 function contract() {
   return { schema_version: 2, tool: "eska-project", target: "x86_64-unknown-linux-gnu", version: "0.14.3",
-    config_schema: "designer-xml-2", bridge_schema: 1, metadata_api: { major: 1, minor: 12 } };
+    config_schema: "designer-xml-3", bridge_schema: 1, metadata_api: { major: 1, minor: 12 } };
 }
 
 /** Assertions cover the declared flags actually used by check/configuration, not a list of names alone. */
@@ -25,7 +25,7 @@ test("project compatibility checks complete fields, config, bridge and target in
   const value = contract();
   assert.deepEqual(projectContract(value), value);
   for (const [field, replacement] of [["schema_version", 1], ["tool", "eska"], ["version", "0.14.3-dev"],
-    ["bridge_schema", 2], ["config_schema", "designer-xml-1"], ["config_schema", "other"], ["metadata_api", { major: 1, minor: 11 }],
+    ["bridge_schema", 2], ["config_schema", "designer-xml-1"], ["config_schema", "designer-xml-2"], ["config_schema", "other"], ["metadata_api", { major: 1, minor: 11 }],
     ["metadata_api", { major: 2, minor: 12 }], ["target", "unknown"]]) {
     assert.throws(() => projectContract({ ...value, [field]: replacement }), ToolFailure);
   }
