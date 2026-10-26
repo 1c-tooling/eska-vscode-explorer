@@ -42,7 +42,7 @@ try {
   }
   if (basename(suite) === "query-language-context-host.cjs") fixture.applications = await (await import("./query-language-fixture.mjs")).createQueryLanguageContexts(fixture);
   if (basename(suite) === "query-language-host.cjs") fixture.languageSource = await (await import("./query-language-fixture.mjs")).createQueryLanguageSource(fixture);
-  if (["query-constructor-host.cjs", "query-items-host.cjs", "query-predicates-host.cjs", "query-union-matrix-host.cjs", "query-package-tree-host.cjs"].includes(basename(suite))) {
+  if (["query-constructor-host.cjs", "query-items-host.cjs", "query-predicates-host.cjs", "query-union-matrix-host.cjs", "query-package-tree-host.cjs", "query-modifiers-host.cjs"].includes(basename(suite))) {
     fixture.query = await (await import("./query-fixture.mjs")).createQuerySource(fixture);
     await writeFile(fixture.module, '\ufeff// owner 😀\r\nПроцедура Test()\r\nQ = "SELECT 1 AS A,\r\n|// field B 😀\r\n|2 AS B";\r\nOther = 42;\r\nКонецПроцедуры\r\n');
     const schema = await readFile(fixture.query.schemaPath, "utf8");

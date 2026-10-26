@@ -119,3 +119,6 @@ body.vscode-high-contrast [role=separator], body.vscode-high-contrast-light [rol
 .virtual-parameters td:first-child { width: 28px; }
 .virtual-parameters label { flex-direction: row; align-items: center; gap: 8px; }
 .virtual-parameters input { flex: 1; min-width: 0; }
+
+.modifier-expression label { flex-direction: row; align-items: center; }
+.modifier-expression [name=lockSources] { min-width: 200px; flex: 1; }

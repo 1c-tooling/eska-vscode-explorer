@@ -397,3 +397,14 @@ test('package tree copy allocates a new table and keeps original consumer defini
  const consumer=core.model.statements.find(owner=>owner.sources.some(source=>source.table==='Tmp'));assert.equal(consumer.sources[0].temporaryDefinition,0);
  const nested=core.model.statements.find(owner=>owner.nested);assert.deepEqual(nested.path,[0,nested.index]);assert.deepEqual(core.model.issues,[]);await core.cancel();assert.equal(f.source.record.draft,text);
 });
+
+for(const locale of ['ru-RU','en-US']) {
+ /** Settings previews use native checked values and preserve one canonical draft plus its owner. */
+ test(`structured modifiers roundtrip and preview through the real backend (${locale})`,{skip:!executable},async t=>{
+  const f=await fixture(t,locale),core=await f.source.openConstructor(),before=structuredClone(core.model);assert.equal(core.limits.modifiers,true);assert.equal(core.limits.maxTop,4294967295);
+  const modifiers={...core.model.statements[0].modifiers.value,distinct:true,allowed:true,top:0,autoOrder:true};
+  const action={kind:'setModifiers',statement:0,modifiers},preview=await core.preview(action);assert.match(preview.text,/SELECT ALLOWED DISTINCT TOP 0/);assert.match(preview.text,/AUTOORDER/);assert.deepEqual(core.model,before);
+  await core.action(action);assert.equal(core.model.text,preview.text);const accepted=structuredClone(core.model);await core.action(action);assert.deepEqual(core.model,accepted);
+  await assert.rejects(core.action({kind:'setInto',statement:0,name:'Tmp'}));assert.deepEqual(core.model,accepted);await core.cancel();assert.equal(await readFile(f.files.module,'utf8'),f.owner);
+ });
+}

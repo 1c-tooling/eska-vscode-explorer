@@ -3,6 +3,7 @@ import { ConstructorLayout } from './layout.mjs';
 import { itemTable } from './items.mjs';
 import { expressionTools } from './expression.mjs';
 import { predicateForm, emptyPredicate } from './predicates.mjs';
+import { modifierForm } from './modifiers.mjs';
 
 (() => {
   const api = acquireVsCodeApi(), root = document.getElementById("root");
@@ -527,6 +528,10 @@ import { predicateForm, emptyPredicate } from './predicates.mjs';
 
   /** Expression mode is an explicit escape hatch; switching modes never reparses text in the renderer. */
   function renderEditor() {
+    if(editing.modifiers){
+      const form=element('form',undefined,'expression modifier-expression');form.append(element('h2',state.labels.settings));
+      modifierForm(form,editing.modifiers,{element,button,labels:state.labels,close:()=>{editing=undefined;render();},submit:modifiers=>api.postMessage({type:'preview',action:{kind:'setModifiers',statement:selected,modifiers}})});root.append(form);return;
+    }
     if(editing.predicate){
       const form=element('form',undefined,'expression predicate-expression');
       predicateForm(form,editing.predicate,{element,button,input,select,labels:state.labels,draw:render,update:value=>{editing.predicate=value;}});
@@ -573,6 +578,7 @@ import { predicateForm, emptyPredicate } from './predicates.mjs';
     selected = Math.min(state.statement ?? selected, Math.max(0, state.model.statements.length - 1));
     if (selected !== previous) page = layout.page(selected, state.model.scopes?.[statement()?.scope]?.parent != null ? "tablesFields" : page);
     navigation(header); root.append(header);
+    if(state.features.modifiers)header.append(button(l.settings,()=>{editing={modifiers:structuredClone(statement().modifiers)};render();},statement()?.modifiers?.editable?null:'unsupported','query-settings'));
     const catalogToggle = button(l.database, () => { layout.preferences.catalogCollapsed = !layout.collapsed(); layout.grid(); layout.save(); }, null, "catalog-toggle");
     catalogToggle.setAttribute("aria-label", l.toggleCatalog); header.append(catalogToggle);
     const status = element("span", state.busy ? l.working : state.paused ? state.pausedText : !state.model.writable ? state.reasons.read_only : l.opened, "constructor-status");
@@ -620,7 +626,7 @@ import { predicateForm, emptyPredicate } from './predicates.mjs';
       content.inert=true;preview.inert=true;
       const dialog=element('section',undefined,'action-preview');dialog.setAttribute('role','dialog');dialog.setAttribute('aria-modal','true');dialog.setAttribute('aria-label',l.previewChanges);dialog.append(element('h2',l.previewChanges));
       const panes=element('div',undefined,'preview-diff');for(const [label,value]of [[l.beforeChanges,state.model.text],[l.afterChanges,state.preview.text]]){const pane=element('div');pane.append(element('h3',label),element('pre',value));panes.append(pane);}dialog.append(panes);
-      dialog.append(button(l.acceptChanges,()=>api.postMessage({type:'applyPreview'}),null,'preview-accept'),button(l.close,()=>api.postMessage({type:'cancelPreview'}),null,'preview-cancel'));
+      dialog.append(button(l.acceptChanges,()=>{pendingEdit=editing?structuredClone(editing):undefined;editing=undefined;api.postMessage({type:'applyPreview'});},null,'preview-accept'),button(l.close,()=>api.postMessage({type:'cancelPreview'}),null,'preview-cancel'));
       dialog.addEventListener('keydown',event=>{if(event.key==='Escape'){event.preventDefault();api.postMessage({type:'cancelPreview'});}if(event.key==='Tab'){const buttons=[...dialog.querySelectorAll('button:not(:disabled)')];const next=buttons[(buttons.indexOf(document.activeElement)+(event.shiftKey?-1:1)+buttons.length)%buttons.length];if(next){event.preventDefault();next.focus();}}});
       for(const child of root.querySelectorAll(':scope > *'))child.inert=true;root.append(dialog);
       queueMicrotask(()=>{if(!dialog.contains(document.activeElement))dialog.querySelector('button:not(:disabled)')?.focus();});
@@ -660,6 +666,7 @@ import { predicateForm, emptyPredicate } from './predicates.mjs';
         }
         if (event.data.model.totalFocus !== undefined && event.data.model.totalFocus !== null) totalSection = event.data.model.totalFocus;
       }
+      if(state?.preview&&!event.data.preview&&!editing)pendingEdit=undefined;
       state = event.data; render();
     } else if (event.data?.type === "error") {
       if (pendingEdit) { editing = pendingEdit; render(); }

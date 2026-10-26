@@ -9,7 +9,7 @@ export const PACKAGE_CLAUSES = [...CLAUSES, "into", "destroy", "index"] as const
 export const HAVING_CLAUSES = [...PACKAGE_CLAUSES, "having"] as const;
 export type ConstructorClauseKind = typeof HAVING_CLAUSES[number];
 export type ConstructorMethod = "query/constructorOpen" | "query/constructorPlan" | "query/constructorModel" | "query/constructorAction" | "query/constructorFinish" | "query/constructorCancel" | "query/constructorCatalog" | "query/constructorPreview";
-export interface ConstructorLimits { maxExpression: number; maxModel: number; visual?: boolean; virtualTables?: boolean; nestedQueries?: boolean; unions?: boolean; totals?: boolean; packages?: boolean; having?: boolean; totalSections?: boolean; maxTotalSections?: number; dcs?: boolean; bulkItems?: boolean; maxBulkItems?: number; addSourceFields?: boolean; predicates?: boolean; unionMatrix?:boolean; actionPreview?:boolean; packageTree?:boolean; copyStatement?:boolean }
+export interface ConstructorLimits { maxExpression: number; maxModel: number; visual?: boolean; virtualTables?: boolean; nestedQueries?: boolean; unions?: boolean; totals?: boolean; packages?: boolean; having?: boolean; totalSections?: boolean; maxTotalSections?: number; dcs?: boolean; bulkItems?: boolean; maxBulkItems?: number; addSourceFields?: boolean; predicates?: boolean; unionMatrix?:boolean; actionPreview?:boolean; packageTree?:boolean; copyStatement?:boolean; modifiers?:boolean;maxTop?:number;maxLockSources?:number }
 export interface ConstructorSelection { statement: number; clause: number; item: number }
 export type Comparison = "equal" | "notEqual" | "less" | "lessOrEqual" | "greater" | "greaterOrEqual" | "like" | "in" | "inHierarchy";
 export type Aggregate = "sum" | "count" | "minimum" | "maximum" | "average" | null;
@@ -32,7 +32,10 @@ export interface CatalogField { russian: string; english: string }
 export interface CatalogPage { tables: CatalogTable[]; fields: CatalogField[]; parameters?: CatalogParameter[]; temporaryTables?: { name: string; scope: number; statement: number }[]; nextOffset: number | null; found: boolean; limitedContext: boolean; contextFingerprint: string }
 export interface CatalogQuery { search?: string; offset?: number; limit?: number; table?: string; qualifier?: string; virtualTables?: boolean; source?: ConstructorSelection; scope?: number; atStatement?: number }
 export type Predicate = {kind:'all'|'any';children:Predicate[]}|{kind:'not';child:Predicate}|{kind:'compare';left:string;comparison:Comparison;right:string}|{kind:'between';expression:string;begin:string;end:string}|{kind:'isNull';expression:string;negated:boolean}|{kind:'raw';expression:string};
-export type ConstructorAction = {kind:'copyStatement';statement:number}
+export interface Modifiers {distinct:boolean;allowed:boolean;top:number|null;autoOrder:boolean;forUpdate:string[]|null}
+export interface ModifierView {value:Modifiers;editable:boolean;autoOrderAvailable:boolean;forUpdateAvailable:boolean;sources:string[]}
+export type ConstructorAction = {kind:'setModifiers';statement:number;modifiers:Modifiers}
+  | {kind:'copyStatement';statement:number}
   | {kind:'alignUnion';statement:number}
   | {kind:'setJoinKind';selection:ConstructorSelection;join:'inner'|'left'|'right'|'full'}
   | {kind:'setPredicate';statement:number;clause:'conditions'|'having'|'joins';selection:ConstructorSelection|null;predicate:Predicate}
@@ -71,6 +74,7 @@ export interface ConstructorStatement {
   package?: PackageControls;
   unionMatrix?:UnionMatrix|null;
   path?:number[];
+  modifiers?:ModifierView|null;
   totalSections?: ConstructorTotalSection[]; addTotals?: boolean;
   dcs?: { russian: boolean; addSelect: boolean; addWhere: boolean; nodes: DcsNode[] };
 }
@@ -136,6 +140,7 @@ export function constructorCapabilities(hello: unknown): ConstructorLimits | und
   }
   if(value.predicates!==undefined) {if(hello.apiVersion.minor<32||value.predicates!==true)invalid();flags.predicates=true;}
   for(const key of ['unionMatrix','actionPreview','packageTree','copyStatement'] as const)if(value[key]!==undefined){if(hello.apiVersion.minor<32||value[key]!==true)invalid();flags[key]=true;}
+  if(value.modifiers!==undefined){if(hello.apiVersion.minor<32||value.modifiers!==true||value.maxTop!==4294967295||value.maxLockSources!==64)invalid();flags.modifiers=true;flags.maxTop=value.maxTop;flags.maxLockSources=value.maxLockSources;}
   if(flags.packageTree&&!flags.packages||flags.copyStatement&&(!flags.packageTree||!flags.actionPreview)||flags.unionMatrix&&(!flags.unions||!flags.bulkItems||!flags.actionPreview)||flags.predicates&&!flags.having)invalid();
   const clauses = flags.having ? HAVING_CLAUSES : flags.packages ? PACKAGE_CLAUSES : flags.totals ? CLAUSES : BASE_CLAUSES;
   if (value.clauses.length !== clauses.length || !value.clauses.every((kind, index) => kind === clauses[index])) invalid();
@@ -162,6 +167,7 @@ export function constructorModel(raw: unknown, limits: ConstructorLimits, id?: s
       || statement.sources.length > 65_536 || !statement.sources.every(source => isRecord(source) && shortText(source.table) && shortText(source.alias)
         && (source.parameters === undefined || parameters(source.parameters))))) invalid();
     if (limits.packages) validatePackage(statement.package, raw.statements.length);
+    if(limits.modifiers&&statement.modifiers!==null&&!modifierView(statement.modifiers))invalid();
     if(limits.packageTree&&Array.isArray(statement.sources)&&!statement.sources.every(source=>isRecord(source)&&(source.temporaryDefinition===null||unsigned(source.temporaryDefinition)&&source.temporaryDefinition<statementCount)))invalid();
     if(limits.packageTree&&(!Array.isArray(statement.path)||statement.path.length>33||!statement.path.every(index=>unsigned(index)&&index<statementCount)||statement.path.at(-1)!==statement.index))invalid();
     if(limits.copyStatement&&(!isRecord(statement.package)||typeof statement.package.copy!=='boolean'))invalid();
@@ -295,6 +301,7 @@ export class QueryConstructor {
 
   /** Explicit capabilities govern the same intention in preview and publication. */
   private requireAction(action:ConstructorAction):void {
+    if(action.kind==="setModifiers"&&!this.limits.modifiers)throw new ExplorerError("incompatible");
     if(action.kind==="copyStatement"&&!this.limits.copyStatement)throw new ExplorerError("incompatible");
     if(action.kind==="alignUnion"&&!this.limits.unionMatrix)throw new ExplorerError("incompatible");
     if (["setJoinKind","setPredicate","movePredicate"].includes(action.kind)&&!this.limits.predicates)throw new ExplorerError("incompatible");
@@ -442,4 +449,8 @@ function predicateValue(value:unknown,depth=0,budget={nodes:0}):value is Predica
  return value.kind==='raw'&&typeof value.expression==='string'&&Buffer.byteLength(value.expression)<=16384;
 }
 
-
+/** Settings are checked DTO values; source eligibility and keyword construction remain in ESKA. */
+function modifierView(view:unknown):view is ModifierView {
+ if(!isRecord(view)||!isRecord(view.value)||typeof view.editable!=='boolean'||typeof view.autoOrderAvailable!=='boolean'||typeof view.forUpdateAvailable!=='boolean'||!Array.isArray(view.sources)||view.sources.length>65536||!view.sources.every(shortText))return false;
+ const value=view.value;return typeof value.distinct==='boolean'&&typeof value.allowed==='boolean'&&typeof value.autoOrder==='boolean'&&(value.top===null||unsigned(value.top)&&value.top<=4294967295)&&(value.forUpdate===null||Array.isArray(value.forUpdate)&&value.forUpdate.length<=64&&value.forUpdate.every(shortText));
+}
