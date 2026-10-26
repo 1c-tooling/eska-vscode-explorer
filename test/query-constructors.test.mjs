@@ -110,6 +110,14 @@ test("constructor capture releases its allocated token after an invalid model", 
   assert.deepEqual(calls, [{ method: "query/constructorCancel", params: { constructorId: "7" } }]);
 });
 
+/** Atomic batches require a coherent explicit capability even on a newer server. */
+test("bulk constructor operations require minor 31 and complete capabilities", () => {
+  const value = {...capability, visualExpressions:true,metadataCatalog:true,bulkItems:true,addSourceFields:true,maxBulkItems:512};
+  assert.equal(constructorCapabilities({apiVersion:{major:1,minor:31},capabilities:{queryConstructor:value}}).bulkItems,true);
+  for(const [minor,change] of [[30,{}],[31,{addSourceFields:undefined}],[31,{maxBulkItems:513}],[31,{bulkItems:false}]])
+    assert.throws(()=>constructorCapabilities({apiVersion:{major:1,minor},capabilities:{queryConstructor:{...value,...change}}}),{code:'protocolInvalid'});
+});
+
 /** The real standalone protocol and shared recovery queue own both constructor state and canonical draft publication. */
 async function fixture(t, locale, readonly = false) {
   const outer = await mkdtemp(join(process.env.ESKA_TEST_ROOT ?? resolve("../eska-playground"), "explorer-query-constructor-"));
@@ -324,7 +332,105 @@ test("real read-only constructor exposes its lossless model without permitting a
   const f = await fixture(t, "en-US", true), before = f.source.record.draft;
   const constructor = await f.source.openConstructor(); assert.equal(constructor.model.writable, false);
   await assert.rejects(constructor.action({ kind: "append", statement: 0, clause: "fields", text: "2" }), error => error.details?.reason === "user_read_only");
+  for (const submit of [action => constructor.action(action), action => constructor.preview(action)]) {
+    await assert.rejects(submit({kind:"setText",text:"SELECT 9 AS N",editorNormalized:true}), error => error.details?.reason === "user_read_only");
+    assert.equal(constructor.model.text, before);
+  }
   const plan = await constructor.plan(querySnapshot(before)); assert.equal(plan.noOp, true);
   await constructor.finish(querySnapshot(before)); assert.equal(f.source.record.draft, before);
   assert.equal(await readFile(f.files.module, "utf8"), f.owner);
+});
+
+for (const locale of ['ru-RU','en-US']) {
+  /** The real RPC publishes one revision and leaves every rejected or cancelled edit private. */
+  test(`atomic item sets and source fields preserve owner and draft (${locale})`,{skip:!executable},async t=>{
+    const f=await fixture(t,locale),before=f.source.record.draft,core=await f.source.openConstructor();
+    assert.equal(core.limits.bulkItems,true);
+    const revision=core.model.revision;
+    await core.action({kind:'editItems',statement:0,clause:0,items:[1,0],operation:{kind:'copy',to:2}});
+    assert.equal(core.model.revision,String(BigInt(revision)+1n));
+    assert.match(core.model.text,/A AS A2,\s*B AS B2/);
+    assert.deepEqual(core.model.itemFocus.map(value=>value.item),[2,3]);
+    const captured=structuredClone(core.model);
+    await assert.rejects(core.action({kind:'editItems',statement:0,clause:0,items:[0,1,2,3],operation:{kind:'remove'}}));
+    assert.deepEqual(core.model,captured);
+    const malformed=structuredClone(captured);malformed.itemFocus[0].item=999;
+    assert.throws(()=>constructorModel(malformed,core.limits),{code:'protocolInvalid'});
+    await core.action({kind:'addSourceFields',statement:0,source:{kind:'source',table:'Catalog.Товары',alias:''},fields:['Артикул']});
+    assert.match(core.model.text,/Товары.Артикул/);
+    assert.equal(f.source.record.draft,before);assert.equal(await readFile(f.files.module,'utf8'),f.owner);
+    await core.cancel();assert.equal(f.source.record.draft,before);
+  });
+}
+
+for(const locale of ['ru-RU','en-US']) {
+ /** Full-snapshot predicates remain private and malformed recursive DTOs cannot reach the renderer. */
+ test(`structured boolean conditions are checked by the real backend (${locale})`,{skip:!executable},async t=>{
+  const f=await fixture(t,locale),core=await f.source.openConstructor();assert.equal(core.limits.predicates,true);
+  const predicate={kind:'any',children:[{kind:'between',expression:'A',begin:'1',end:'3'},{kind:'not',child:{kind:'isNull',expression:'B',negated:false}}]};
+  await core.action({kind:'setPredicate',statement:0,clause:'conditions',selection:null,predicate});
+  assert.deepEqual(core.model.statements[0].clauses.at(-1).predicate,predicate);
+  const before=structuredClone(core.model);await core.action({kind:'setPredicate',statement:0,clause:'conditions',selection:null,predicate});assert.deepEqual(core.model,before);
+  const malformed=structuredClone(core.model);malformed.statements[0].clauses.at(-1).predicate={kind:'not',child:{kind:'bad'}};
+  assert.throws(()=>constructorModel(malformed,core.limits),{code:'protocolInvalid'});
+  await assert.rejects(core.action({kind:'setPredicate',statement:0,clause:'conditions',selection:null,predicate:{kind:'compare',left:'SUM(A)',comparison:'greater',right:'0'}}));assert.deepEqual(core.model,before);
+  await core.cancel();assert.equal(await readFile(f.files.module,'utf8'),f.owner);
+ });
+}
+
+/** Preview and matrix inspection never publish a working revision or fill an absent cell implicitly. */
+test('union matrix previews alignment without changing the acknowledged constructor',{skip:!executable},async t=>{
+ const f=await fixture(t,'en-US');const text='SELECT 1 AS N UNION ALL SELECT 2 AS N, 3 AS Extra';await f.store.saveDraft(f.source.record.id,text);
+ const core=await f.source.openConstructor(),before=structuredClone(core.model);assert.equal(core.limits.unionMatrix,true);assert.equal(core.model.statements[0].unionMatrix.canAlign,true);assert.equal(core.model.statements[0].unionMatrix.columns[1].cells[0],null);
+ const action={kind:'alignUnion',statement:0},preview=await core.preview(action);assert.match(preview.text,/NULL AS Extra/);assert.deepEqual(core.model,before);assert.equal(f.source.record.draft,text);
+ await core.action(action);assert.equal(core.model.text,preview.text);assert.equal(core.model.revision,'2');assert.deepEqual(core.model.issues,[]);
+ const malformed=structuredClone(core.model);malformed.statements[0].unionMatrix.columns[0].cells[0].item=100;
+ assert.throws(()=>constructorModel(malformed,core.limits),{code:'protocolInvalid'});await core.cancel();assert.equal(f.source.record.draft,text);
+});
+/** Preview goes through the same source/session protection as an accepted edit. */
+test('read-only constructor refuses preview without allocating a new revision',{skip:!executable},async t=>{
+ const f=await fixture(t,'en-US',true),core=await f.source.openConstructor(),before=structuredClone(core.model);
+ await assert.rejects(core.preview({kind:'editItems',statement:0,clause:0,items:[0],operation:{kind:'copy',to:2}}),error=>error.details?.reason==='user_read_only');assert.deepEqual(core.model,before);await core.cancel();
+});
+
+/** Root copies get a separate destination and ESKA supplies both lexical breadcrumbs and lifetime-bound definitions. */
+test('package tree copy allocates a new table and keeps original consumer definitions',{skip:!executable},async t=>{
+ const f=await fixture(t,'ru-RU'),text='SELECT Q.N AS N INTO Tmp FROM (SELECT 7 AS N) AS Q; SELECT Tmp.N FROM Tmp; DROP Tmp';await f.store.saveDraft(f.source.record.id,text);
+ const core=await f.source.openConstructor(),before=structuredClone(core.model),preview=await core.preview({kind:'copyStatement',statement:0});assert.match(preview.text,/INTO Tmp2/);assert.deepEqual(core.model,before);
+ await core.action({kind:'copyStatement',statement:0});const owner=core.model.statements[core.model.focus];assert.equal(owner.package.destination,'Tmp2');assert.equal(owner.package.copy,true);
+ const consumer=core.model.statements.find(owner=>owner.sources.some(source=>source.table==='Tmp'));assert.equal(consumer.sources[0].temporaryDefinition,0);
+ const nested=core.model.statements.find(owner=>owner.nested);assert.deepEqual(nested.path,[0,nested.index]);assert.deepEqual(core.model.issues,[]);await core.cancel();assert.equal(f.source.record.draft,text);
+});
+
+for(const locale of ['ru-RU','en-US']) {
+ /** Settings previews use native checked values and preserve one canonical draft plus its owner. */
+ test(`structured modifiers roundtrip and preview through the real backend (${locale})`,{skip:!executable},async t=>{
+  const f=await fixture(t,locale),core=await f.source.openConstructor(),before=structuredClone(core.model);assert.equal(core.limits.modifiers,true);assert.equal(core.limits.maxTop,4294967295);
+  const modifiers={...core.model.statements[0].modifiers.value,distinct:true,allowed:true,top:0,autoOrder:true};
+  const action={kind:'setModifiers',statement:0,modifiers},preview=await core.preview(action);assert.match(preview.text,/SELECT ALLOWED DISTINCT TOP 0/);assert.match(preview.text,/AUTOORDER/);assert.deepEqual(core.model,before);
+  await core.action(action);assert.equal(core.model.text,preview.text);const accepted=structuredClone(core.model);await core.action(action);assert.deepEqual(core.model,accepted);
+  await assert.rejects(core.action({kind:'setInto',statement:0,name:'Tmp'}));assert.deepEqual(core.model,accepted);await core.cancel();assert.equal(await readFile(f.files.module,'utf8'),f.owner);
+ });
+}
+
+for(const locale of ['ru-RU','en-US']) {
+ /** Navigation, comments, diff and the explicit text buffer share one source-bound revision. */
+ test(`linked text tools and invalid buffer preservation (${locale})`,{skip:!executable},async t=>{
+  const f=await fixture(t,locale),text='SELECT "😀" AS N, // keep\r\n2 AS Other';await f.store.saveDraft(f.source.record.id,text);const core=await f.source.openConstructor();assert.equal(core.limits.linkedText,true);
+  const location=await core.locate({kind:'item',selection:{statement:0,clause:0,item:0}});assert.equal(location.utf16.start,7);assert.equal(location.range.start,7);
+  await assert.rejects(core.locate({kind:'offset',offset:9}),error=>error.details?.reason==='constructor_invalid_selection');
+  const page=await core.comments();assert.equal(page.total,1);assert.ok(page.comments[0].selection);assert.equal((await core.diff()).original,text);
+  const before=structuredClone(core.model);await assert.rejects(core.preview({kind:'setText',text:'SELECT "unfinished',editorNormalized:true}));assert.deepEqual(core.model,before);
+  const action={kind:'setText',text:text.replace('2 AS Other','3 AS Other'),editorNormalized:true},preview=await core.preview(action);assert.deepEqual(core.model,before);await core.action(action);assert.equal(core.model.text,preview.text);const diff=await core.diff();assert.equal(diff.original,text);assert.equal(Buffer.from(core.model.text).subarray(diff.change.after.start,diff.change.after.end).toString(),'3');
+  const accepted=structuredClone(core.model);await assert.rejects(core.action({kind:'append',statement:0,clause:'fields',text:'99'},before.revision),{code:'obsolete'});assert.deepEqual(core.model,accepted);await core.cancel();assert.equal(f.source.record.draft,text);assert.equal(await readFile(f.files.module,'utf8'),f.owner);
+ });
+}
+/** Existing chunk framing carries a full buffer beyond the inline/frame budget and releases it after preview/cancel. */
+test('full text buffers reuse bounded query uploads instead of enlarging RPC frames',{skip:!executable},async t=>{
+ const f=await fixture(t,'en-US'),core=await f.source.openConstructor(),methods=[],request=f.connection.child.request.bind(f.connection.child);
+ f.connection.child.request=(method,...args)=>{methods.push(method);return request(method,...args);};
+ const text='SELECT 1 AS N\n// '+ '😀'.repeat(40000),action={kind:'setText',text,editorNormalized:true};const before=structuredClone(core.model),preview=await core.preview(action);assert.equal(preview.text,text);assert.deepEqual(core.model,before);assert.ok(methods.includes('query/bufferBegin'));assert.ok(methods.filter(method=>method==='query/bufferAppend').length>=2);assert.ok(methods.includes('query/bufferClose'));
+ const closes=methods.filter(method=>method==='query/bufferClose').length;
+ await assert.rejects(core.preview({...action,text:'SELECT "unfinished\n// '+'😀'.repeat(40000)}));assert.deepEqual(core.model,before);assert.equal(methods.filter(method=>method==='query/bufferClose').length,closes+1);
+ await core.action(action);assert.equal(core.model.text,text);await core.cancel();
 });

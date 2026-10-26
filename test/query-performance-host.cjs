@@ -104,7 +104,7 @@ exports.run = async function () {
       await vscode.commands.executeCommand('eska.explorer.queryConstructor', document.uri);
       const view = explorer.queryDesigner.views.get(document.uri.toString()); assert.ok(view); assert.equal(view.binding.core.model.writable, false);
       await assert.rejects(view.binding.core.action({ kind: 'append', statement: 0, clause: 'fields', text: '9' }), error => error.details?.reason === 'user_read_only');
-      await explorer.queryDesigner.receive(view, { type: 'apply' }); document = vscode.window.activeTextEditor.document;
+      await explorer.queryDesigner.receive(view, { revision: view.binding.core.model.revision, type: 'apply' }); document = vscode.window.activeTextEditor.document;
       await vscode.commands.executeCommand('eska.explorer.applyQuery', document.uri);
       assert.ok(errors.some(error => ['user_read_only', 'read_only'].includes(error.details?.reason)));
       await vscode.commands.executeCommand('eska.explorer.cancelQuery', document.uri);
@@ -133,8 +133,8 @@ exports.run = async function () {
         await timed(samples, 'constructor', async () => {
           await vscode.commands.executeCommand('eska.explorer.queryConstructor', document.uri);
           const view = explorer.queryDesigner.views.get(document.uri.toString()); assert.ok(view);
-          await explorer.queryDesigner.receive(view, { type: 'action', action: { kind: 'append', statement: 0, clause: 'fields', text: `${index + 10} AS Bench` } });
-          await explorer.queryDesigner.receive(view, { type: 'apply' }); document = vscode.window.activeTextEditor.document;
+          await explorer.queryDesigner.receive(view, { revision: view.binding.core.model.revision, type: 'action', action: { kind: 'append', statement: 0, clause: 'fields', text: `${index + 10} AS Bench` } });
+          await explorer.queryDesigner.receive(view, { revision: view.binding.core.model.revision, type: 'apply' }); document = vscode.window.activeTextEditor.document;
           assert.ok(document.getText().includes(`${index + 10} AS Bench`));
         });
         await timed(samples, 'apply', () => vscode.commands.executeCommand('eska.explorer.applyQuery', document.uri));

@@ -19,7 +19,7 @@ exports.run = async function () {
     await fs.writeFile(path.join(member.source, 'CommonModules', 'Обмен', 'Ext', 'Module.bsl'),
       `\ufeff// 😀 ${type}\r\nПроцедура ПриЗаписи(Источник) Экспорт\r\nКонецПроцедуры\r\n`);
   }
-  await fs.writeFile(path.join(fixture.root, 'eska.toml'), '[workspace]\n[workspace.members.app]\nconfiguration="configuration"\nextensions=["extension"]\n');
+  await fs.writeFile(path.join(fixture.root, 'eska.toml'), '[workspace]\n[workspace.members.app]\nconfiguration="configuration"\nextensions=[{path="extension"}]\n');
   await vscode.workspace.getConfiguration('eska.explorer').update('executable', process.env.ESKA_TEST_BINARY, vscode.ConfigurationTarget.Workspace);
   const extension = vscode.extensions.all.find(value => value.packageJSON.name === 'eska-explorer');
   const explorer = await extension.activate();

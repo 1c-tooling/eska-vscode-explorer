@@ -4,7 +4,7 @@ const path = require('node:path');
 const vscode = require('vscode');
 const { connect } = require('./query-constructor-dom.cjs');
 const { until, parentTabs, returned } = require('./query-modal-host.cjs');
-const { ready, form } = require('./query-builder-host.cjs');
+const { ready, form, editFirstField } = require('./query-builder-host.cjs');
 
 /** A model-driven operation must reach its acknowledged DOM before the next native action. */
 async function textContains(client, value) {
@@ -38,12 +38,12 @@ exports.run = async function () {
     await client.evaluate('document.querySelector(".edit-nested").click()');
     await until(() => client.evaluate('!!document.querySelector(".back-parent")'), 'child scope'); await ready(client);
     assert.equal(await client.evaluate('document.querySelectorAll("header select").length'), 0, 'parent cannot be selected interactively inside child scope');
-    await client.evaluate('document.querySelector("[data-section=fields] .controls button").click()'); await form(client, { expression: '2', alias: 'Inner' });
+    await editFirstField(client); await form(client, { expression: '2', alias: 'Inner' });
     await textContains(client, '2 AS Inner'); await client.evaluate('document.querySelector(".back-parent").click()');
     await until(() => client.evaluate('!document.querySelector(".back-parent")'), 'parent restored'); await ready(client);
     await client.evaluate(`const field=[...document.querySelectorAll('.field-choice')].find(node=>node.textContent.endsWith('.Inner'));
       if(!field)throw Error('derived field');field.dispatchEvent(new MouseEvent('dblclick',{bubbles:true}));`);
-    await until(() => client.evaluate('document.querySelectorAll("[data-section=fields] .row").length === 2'), 'derived projection'); await ready(client);
+    await until(() => client.evaluate('document.querySelectorAll("[data-section=fields] .row,[data-section=fields] tbody tr").length === 2'), 'derived projection'); await ready(client);
     accepted.push('same_panel_child_navigation_parent_hidden_and_current_derived_projection');
     await client.evaluate('document.getElementById("tab-unions").click();document.querySelector(".add-union").click()');
     await textContains(client, 'UNION ALL');

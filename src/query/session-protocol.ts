@@ -1,3 +1,4 @@
+import type { QueryBufferMethod } from "./text-transfer.js";
 import { constructorCapabilities, type ConstructorLimits, type ConstructorMethod } from "./constructors.js";
 import { projectionCapabilities, type ProjectionLimits, type ProjectionMethod } from "./projections.js";
 import { isRecord, isToken } from "../protocol.js";
@@ -12,7 +13,7 @@ export interface QuerySessionCapabilities {
   readonly maxRetainedBytes: number;
 }
 export type QuerySessionMethod = "query/sessionOpen" | "query/sessionRestore" | "query/sessionGet"
-  | "query/sessionResume" | "query/sessionPrepare" | "query/sessionApplied" | "query/sessionAbort" | "query/sessionClose" | ProjectionMethod | ConstructorMethod | "query/sessionComments";
+  | "query/sessionResume" | "query/sessionPrepare" | "query/sessionApplied" | "query/sessionAbort" | "query/sessionClose" | ProjectionMethod | ConstructorMethod | "query/sessionComments" | QueryBufferMethod;
 export interface QuerySessionTransport {
   readonly capabilities: QuerySessionCapabilities;
   request(method: QuerySessionMethod, params: Record<string, unknown>): Promise<unknown>;

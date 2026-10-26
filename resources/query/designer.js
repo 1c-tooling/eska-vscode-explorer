@@ -1,9 +1,21 @@
 /* This renderer owns presentation only. ESKA supplies metadata, bindings, syntax and every accepted model. */
+import { ConstructorLayout } from './layout.mjs';
+import { itemTable } from './items.mjs';
+import { expressionTools } from './expression.mjs';
+import { predicateForm, emptyPredicate } from './predicates.mjs';
+import { modifierForm } from './modifiers.mjs';
+import { markedText, mountDialog, textEditor } from './text.mjs';
+
 (() => {
   const api = acquireVsCodeApi(), root = document.getElementById("root");
+  const layout = new ConstructorLayout(api, root);
   const basePages = ["tablesFields", "joins", "group", "conditions", "order"];
-  let state, totalSection = 0, totalScope = -1, selected = 0, page = "tablesFields", editing, pendingEdit, search = "", chosenField = "";
-  const expanded = new Set();
+  let state, totalSection = 0, totalScope = -1, selected = 0, page = layout.page(0), editing, pendingEdit, search = "", chosenField = "";
+  let locationSerial=-1;
+  const expanded = new Set(layout.preferences.expanded), itemSelections = new Map(), cellDrafts = new Map(), matrixSelections = new Map();
+
+  /** Every intention is bound to the revision actually displayed in this webview. */
+  function post(message){api.postMessage({revision:state?.model.revision,...message});}
 
   /** Untrusted names and expressions are always text nodes, never markup. */
   function element(tag, text, className) {
@@ -24,7 +36,7 @@
   }
 
   /** Scope edges are supplied by ESKA and keep navigation inside this one modal editor. */
-  function navigate(index) { editing = undefined; chosenField = ""; api.postMessage({ type: "select", statement: index }); }
+  function navigate(index) { editing = undefined; chosenField = ""; post({ type: "select", statement: index }); }
 
   /** Eligibility reasons are supplied by the backend for this exact model revision. */
   function unavailable(kind) { const owner = statement(kind); return owner?.append.find(option => option.kind === kind)?.unavailable ?? (owner?.unavailable || null); }
@@ -32,9 +44,12 @@
   /** All buttons preserve native busy/paused state, with explicit backend explanations for disabled actions. */
   function button(label, action, reason, className) {
     const node = element("button", label, className); node.type = "button";
-    node.disabled = !!reason || state.busy || state.paused;
-    if (reason) node.title = state.reasons[reason] ?? reason;
-    node.addEventListener("click", action); return node;
+    const accessible = label === "↑" ? state.labels.up : label === "↓" ? state.labels.down : label === "+" ? state.labels.add : label;
+    node.title = accessible; node.setAttribute("aria-label", accessible);
+    const child=!!state.preview||!!state.diff||!!editing?.textBuffer,childButton=/^(preview-|text-|diff-)/.test(className??'');
+    node.disabled=!!reason||state.busy||state.paused&&!['preview-cancel','text-cancel','diff-close','comments-close'].includes(className)||child&&!childButton;
+    if (reason) node.title = `${accessible}: ${state.reasons[reason] ?? reason}`;
+    const revision=state.model.revision;node.addEventListener("click",()=>{if(revision===state.model.revision)action();}); return node;
   }
 
   /** A user intention cannot supply a session, source path or constructor identity. */
@@ -44,7 +59,7 @@
       if (section) action = { kind: "appendTotal", statement: action.statement, section: section.index, clause: action.clause, text: action.text };
     }
     pendingEdit = editing ? structuredClone(editing) : undefined;
-    editing = undefined; api.postMessage({ type: "action", action });
+    editing = undefined; post({ type: "action", action });
   }
 
   /** Typed expressions are formatted and validated by ESKA, including language-specific keywords. */
@@ -57,7 +72,7 @@
   /** Free expression editing remains available for nodes outside the recognized structured subset. */
   function begin(action, expression, initial = "") {
     editing = { action, expression: expression ? structuredClone(expression) : undefined, initial, raw: !state.visual || !expression }; render();
-    if (["virtualSource", "virtualJoin"].includes(expression?.kind) && !new Map(state.metadata.details).has(expression.table)) api.postMessage({ type: "catalog", table: expression.table });
+    if (["virtualSource", "virtualJoin"].includes(expression?.kind) && !new Map(state.metadata.details).has(expression.table)) post({ type: "catalog", table: expression.table });
   }
 
   /** Empty forms contain values only; their corresponding query syntax is never built in the webview. */
@@ -104,9 +119,8 @@
     node.append(button(l.remove, () => send({ kind: "remove", selection }), item.unavailable.remove));
     for (const child of item.children ?? []) node.append(button(l.editNested, () => navigate(state.model.scopes[child].branches[0]), null, "edit-nested"));
     node.append(button("↑", () => send({ kind: "move", selection, to: item.index - 1 }), item.moveUp === false || item.index === 0 ? "single_item" : item.unavailable.move));
-    node.lastChild.title = l.up;
     node.append(button("↓", () => send({ kind: "move", selection, to: item.index + 1 }), item.moveDown === false || item.index + 1 === clause.items.length ? "single_item" : item.unavailable.move));
-    node.lastChild.title = l.down; return node;
+    return node;
   }
 
   /** Acknowledged rows remain readable even when their syntax has no structured projection. */
@@ -114,12 +128,35 @@
     const l = state.labels, node = panel(title), add = button(l.add, () => { const value = blank(kind); if (page === "group" && kind === "fields") value.aggregate = "sum"; begin({ kind: "append", statement: statement(kind).index, clause: kind }, value); }, unavailable(kind), "action-add");
     node.dataset.section = kind; node.querySelector(".section-title").append(add);
     if (kind === "joins" && state.features.nestedQueries) node.querySelector(".section-title").append(button(l.nested, () => begin({ kind: "append", statement: selected, clause: kind }, { kind: "subqueryJoin", alias: "", join: "left", left: chosenField, comparison: "equal", right: "" }), unavailable(kind), "add-nested"));
+    if(state.features.predicates&&['conditions','having'].includes(kind))node.querySelector('.section-title').append(button(l.editPredicate,()=>{const clause=statement(kind).clauses.find(clause=>clause.kind===kind);editing={predicate:structuredClone(clause?.predicate??emptyPredicate()),action:{kind:'setPredicate',statement:statement(kind).index,clause:kind,selection:null}};render();},unavailable(kind),'edit-predicate'));
     const entries = rows(kind).filter(row => !filter || filter(row.item));
+    if (state.features.bulkItems && !["joins", "conditions", "having"].includes(kind)) { node.append(table(entries)); return node; }
     for (const row of entries) {
-      const item = element("div", undefined, "row"); item.append(element("pre", row.item.preview), controls(row)); node.append(item);
+      const item = element("div", undefined, "row"), text = element("pre", row.item.preview); text.title = row.item.preview;
+      item.append(text, controls(row));
+      if(state.features.predicates&&kind==='joins'){
+        const relation=row.clause.join;
+        if(relation){item.prepend(element('small',`${relation.left.join(', ')} → ${relation.right}`));const picker=select(item,l.joins,'joinKind',{joinKind:relation.kind},['inner','left','right','full'].map(kind=>[kind,l[kind]]));picker.disabled||=!state.model.writable||state.paused;picker.addEventListener('change',()=>send({kind:'setJoinKind',selection:row.selection,join:picker.value}));}
+        item.append(button(l.editPredicate,()=>{editing={predicate:structuredClone(row.clause.predicate??emptyPredicate()),action:{kind:'setPredicate',statement:row.selection.statement,clause:'joins',selection:row.selection}};render();},row.item.unavailable.replace,'edit-predicate'));
+      }
+      if(state.features.predicates&&['conditions','having'].includes(kind))item.append(button(kind==='conditions'?l.moveHaving:l.moveWhere,()=>send({kind:'movePredicate',selection:row.selection,target:kind==='conditions'?'having':'conditions'}),row.item.unavailable.remove,'move-predicate'));
+      node.append(item);
     }
     if (!entries.length) node.append(element("p", l.noRows, "empty"));
     return node;
+  }
+
+  /** This component stores selection only; the backend returns the resulting identities. */
+  function table(entries) {
+    const key = entries.length ? `${entries[0].selection.statement}:${entries[0].selection.clause}` : '', selection = itemSelections.get(key) ?? { items: [], anchor: -1 };
+    return itemTable(entries, { element, button, cells: cellDrafts, labels: state.labels, selected: selection.items, anchor: selection.anchor,
+      writable: state.model.writable && !state.paused, busy: state.busy,
+      choose: (items, anchor = selection.anchor, redraw = true) => { itemSelections.set(key, {items, anchor}); if(redraw)render();const row=entries.find(row=>row.item.index===anchor);if(row&&layout.preferences.previewOpen&&state.features.linkedText)post({type:'locate',target:{kind:'item',selection:row.selection},navigate:false}); },
+      locate: row => post({type:'locate',target:{kind:'item',selection:row.selection},navigate:false}),
+      comments: row => post({type:'comments',selection:row.selection}), linkedText:state.features.linkedText,
+      run: (operation, items = selection.items) => { if(entries.length)send({kind:'editItems', statement:entries[0].selection.statement, clause:entries[0].selection.clause, items, operation}); },
+      edit: row => begin({kind:'replace',selection:row.selection},row.item.visual,row.item.expression??''), compose,
+      navigate: child => navigate(state.model.scopes[child].branches[0]) });
   }
 
   /** A virtual table selection opens positional value controls; ESKA builds the eventual call. */
@@ -132,10 +169,10 @@
   /** Database tables are paged by ESKA; only explicitly expanded descriptors are requested. */
   function database() {
     const l = state.labels, node = panel(l.database, "database"), toolbar = element("form", undefined, "search");
-    const input = element("input"); input.type = "search"; input.value = search; input.placeholder = l.search; input.setAttribute("aria-label", l.search);
+    const input = element("input"); input.name = "catalogSearch"; input.type = "search"; input.value = search; input.placeholder = l.search; input.setAttribute("aria-label", l.search);
     input.addEventListener("input", () => { search = input.value; });
-    toolbar.append(input, button(l.find, () => api.postMessage({ type: "catalog", search, offset: 0 })));
-    toolbar.addEventListener("submit", event => { event.preventDefault(); if (!state.busy) api.postMessage({ type: "catalog", search, offset: 0 }); }); node.append(toolbar);
+    toolbar.append(input, button(l.find, () => post({ type: "catalog", search, offset: 0 })));
+    toolbar.addEventListener("submit", event => { event.preventDefault(); if (!state.busy) post({ type: "catalog", search, offset: 0 }); }); node.append(toolbar);
     if (!state.visual) { node.append(element("p", l.metadataUnavailable, "notice")); return node; }
     if (state.metadata.failed) node.append(element("p", l.metadataFailed, "error"));
     const catalog = state.metadata.catalog, groups = new Map();
@@ -146,17 +183,22 @@
     const details = new Map(state.metadata.details);
     for (const [category, tables] of groups) {
       const group = element("details", undefined, "metadata-group"); group.open = true;
+      group.dataset.category = category;
       group.append(element("summary", l[`category${category}`] ?? category));
       for (const table of tables) {
         const row = element("div", undefined, "metadata-table"), path = name(table);
         const expand = button(expanded.has(path) ? "▾" : "▸", () => {
           if (expanded.has(path)) { expanded.delete(path); render(); }
-          else { expanded.add(path); if (!details.has(path)) api.postMessage({ type: "catalog", table: path }); else render(); }
-        }); expand.title = table.name;
+          else { expanded.add(path); if (!details.has(path)) post({ type: "catalog", table: path }); else render(); }
+          layout.preferences.expanded = [...expanded]; layout.save();
+        }); expand.title = `${l.toggleTable} ${table.name}`; expand.setAttribute("aria-label", expand.title);
         const label = button(table.name, () => {}, null, "table-name"); label.title = path;
         label.addEventListener("dblclick", () => { if (!label.disabled && !unavailable("sources")) chooseTable(table); });
-        const add = button("+", () => chooseTable(table), unavailable("sources"), "table-add"); add.title = l.add;
+        const add = button("+", () => chooseTable(table), unavailable("sources"), "table-add"); add.setAttribute("aria-label", `${l.add} ${table.name}`);
         row.append(expand, label, add); group.append(row);
+        if (expanded.has(path) && state.features.addSourceFields && !table.virtualTable) for (const field of details.get(path)?.fields ?? []) {
+          const pick = button(`${l.addSourceField} · ${name(field)}`, () => send({kind:'addSourceFields',statement:selected,source:{kind:'source',table:path,alias:''},fields:[name(field)]}), unavailable('fields') || unavailable('sources'), 'add-source-field'); group.append(pick);
+        }
         if (expanded.has(path)) for (const child of details.get(path)?.tables ?? []) {
           const childButton = button(child.name, () => chooseTable(child), unavailable("sources"), "tabular-section");
           childButton.title = name(child); childButton.dataset.table = name(child); group.append(childButton);
@@ -166,7 +208,7 @@
     }
     if (!catalog?.tables.length && !catalog?.temporaryTables?.length && !state.busy) node.append(element("p", l.noTables, "empty"));
     if (catalog?.nextOffset !== null && catalog?.nextOffset !== undefined) node.append(button(l.more,
-      () => api.postMessage({ type: "catalog", search, offset: catalog.nextOffset })));
+      () => post({ type: "catalog", search, offset: catalog.nextOffset })));
     if (catalog?.limitedContext) node.append(element("p", l.limitedContext, "notice"));
     return node;
   }
@@ -176,8 +218,10 @@
     const l = state.labels, node = panel(l.tables, "source-fields");
     for (const source of state.metadata.fields) {
       const tree = element("details", undefined, "source-tree"); tree.open = source.loaded;
-      tree.addEventListener("toggle", () => { if (tree.open && !source.loaded && !state.busy) api.postMessage({ type: "fields", table: source.table, alias: source.alias, clause: source.clause, item: source.item }); });
+      tree.dataset.source = source.alias;
+      tree.addEventListener("toggle", () => { if (tree.open && !source.loaded && !state.busy) post({ type: "fields", table: source.table, alias: source.alias, clause: source.clause, item: source.item }); });
       tree.append(element("summary", source.alias), element("small", source.table));
+      if(state.features.packageTree&&source.temporaryDefinition!==null&&source.temporaryDefinition!==undefined)tree.append(button(l.openDefinition,()=>navigate(source.temporaryDefinition),null,'temporary-definition'));
       if (choose === "fields" && source.fields.length) {
         tree.append(button(l.allFields, () => send({ kind: "appendFields", statement: selected, fields: source.fields.map(name) }),
           source.fields.length > 512 ? "model_limit" : unavailable("fields"), "all-fields"));
@@ -203,6 +247,7 @@
     const node = sourceFields("fields"), l = state.labels;
     node.querySelector(".section-title").append(button(l.add, () => begin({ kind: "append", statement: selected, clause: "sources" }, blank("sources")), unavailable("sources")));
     if (state.features.nestedQueries) node.querySelector(".section-title").append(button(l.nested, () => compose({ kind: "subquerySource", alias: "" }), unavailable("sources"), "add-nested"));
+    if (state.features.bulkItems) { node.append(table(rows("sources"))); return node; }
     for (const row of rows("sources")) {
       const properties = element("div", undefined, "source-properties"); properties.append(element("pre", row.item.preview), controls(row)); node.append(properties);
     }
@@ -224,6 +269,21 @@
   function unions() {
     const l = state.labels, node = panel(l.unions, "union-branches"), scope = state.model.scopes[statement().scope];
     node.querySelector(".section-title").append(button(l.addUnion, () => send({ kind: "addUnion", statement: selected, all: true }), statement().unavailable, "add-union"));
+    const matrix=state.features.unionMatrix&&state.model.statements[scope.branches[0]].unionMatrix;
+    if(matrix){
+      const chosen=matrixSelections.get(matrix.scope)??0, selection=matrix.columns[chosen]?.cells.find(Boolean), toolbar=node.querySelector('.section-title');
+      const preview=action=>post({type:'preview',action});
+      toolbar.append(button(l.alignUnion,()=>preview({kind:'alignUnion',statement:selected}),matrix.canAlign&&!state.busy?null:'unsupported','align-union'));
+      for(const [label,to] of [['↑',chosen-1],['↓',chosen+2]])toolbar.append(button(label,()=>preview({kind:'editItems',statement:selection.statement,clause:selection.clause,items:[selection.item],operation:{kind:'move',to}}),!selection||chosen===0&&to<0||to>matrix.columns.length||matrix.canAlign?'unsupported':null,'matrix-move'));
+      const table=element('table',undefined,'union-matrix'), head=element('tr');head.append(element('th',l.alias));
+      for(const id of matrix.branches)head.append(element('th',`${l.branch} ${state.model.statements[id].branch+1}`));table.append(head);
+      for(const column of matrix.columns){
+        const row=element('tr');row.dataset.column=String(column.index);row.setAttribute('aria-selected',String(chosen===column.index));
+        const name=element('td'),pick=button(column.alias??String(column.index+1),()=>{matrixSelections.set(matrix.scope,column.index);render();},null,'matrix-column');name.append(pick);row.append(name);
+        for(const cell of column.cells){const td=element('td');if(cell){const item=state.model.statements[cell.statement].clauses[cell.clause].items[cell.item];td.append(button(item.preview,()=>begin({kind:'replace',selection:cell},item.visual,item.expression??''),item.unavailable.replace,'matrix-cell'));}else td.append(element('span','—'));row.append(td);}table.append(row);
+      }
+      node.append(table);
+    }
     for (const [index, id] of scope.branches.entries()) {
       const owner = state.model.statements[id], row = element("div", undefined, "row"); row.dataset.branch = String(id);
       row.append(button(`${l.branch} ${index + 1}`, () => navigate(id)), element("pre", owner.columns.join(", ")));
@@ -246,9 +306,11 @@
     for (const scope of state.model.scopes.filter(scope => scope.parent === null)) {
       const value = state.model.statements[scope.branches[0]], row = element("div", undefined, "row"), controls = value.package;
       row.append(button(`${l.statement} ${controls.position + 1}`, () => navigate(value.index)), element("pre", value.preview));
+      if(state.features.copyStatement)row.append(button(l.copy,()=>post({type:'preview',action:{kind:'copyStatement',statement:value.index}}),controls.copy?null:'unsupported','copy-statement'));
       row.append(button(l.remove, () => send({ kind: "removeStatement", statement: value.index }), !controls.remove ? "required_item" : null, "remove-statement"));
       for (const [key, label] of [["moveUp", "↑"], ["moveDown", "↓"]]) row.append(button(label, () => send({ kind: "moveStatement", statement: value.index, to: controls[key] }), controls[key] === null ? "unsupported" : null));
       node.append(row);
+      if(state.features.packageTree)node.append(packageChildren(scope));
     }
     if (permissions.operation === "select") {
       const form = element("form", undefined, "temporary-destination"), value = { name: permissions.destination ?? "" };
@@ -263,6 +325,18 @@
     const submit = button(l.destroyTable, () => {}, !permissions.add ? "unsupported" : null, "add-destroy"); submit.type = "submit";
     drop.addEventListener("submit", event => { event.preventDefault(); if (!state.busy && !state.paused && drop.reportValidity()) send({ kind: "addStatement", statement: selected, operation: "destroy", name: drop.querySelector("input").value }); });
     drop.append(submit); node.append(drop); return node;
+  }
+
+  /** ESKA supplies the scope graph; this tree follows edges without reconstructing query ownership. */
+  function packageChildren(scope){
+    const list=element('ul',undefined,'package-tree');
+    for(const id of scope.branches){
+      const owner=state.model.statements[id],row=element('li');
+      row.append(button(`${state.labels.branch} ${owner.branch+1} · ${owner.preview.slice(0,70)}`,()=>navigate(id),null,'tree-branch'));
+      for(const child of state.model.scopes.filter(child=>child.parent===id)){const nested=element('details');nested.dataset.scope=String(child.index);nested.open=true;nested.append(element('summary',state.labels.nested),packageChildren(child));row.append(nested);}
+      list.append(row);
+    }
+    return list;
   }
 
   /** Overall totals and ordinary groups share one backend-owned section. */
@@ -397,13 +471,16 @@
     form.append(element("h3", l.parameters));
     if (!detail) return;
     if (!detail.parameters?.length) form.append(element("p", l.noParameters, "notice"));
+    const table=element('table',undefined,'virtual-parameters');
     for (const [index, parameter] of (detail.parameters ?? []).entries()) {
+      const row=element('tr'),position=element('td',String(index+1)),cell=element('td');row.append(position,cell);table.append(row);
       const data = { value: value.parameters[index] ?? "" }, list = `parameter-choices-${index}`;
-      const node = input(form, l[`parameter${parameter.key[0].toUpperCase()}${parameter.key.slice(1)}`] ?? parameter.key, `parameter-${index}`, { [`parameter-${index}`]: data.value }, { required: parameter.required, list });
+      const node = input(cell, l[`parameter${parameter.key[0].toUpperCase()}${parameter.key.slice(1)}`] ?? parameter.key, `parameter-${index}`, { [`parameter-${index}`]: data.value }, { required: parameter.required, list });
       node.addEventListener("input", () => { while (value.parameters.length <= index) value.parameters.push(""); value.parameters[index] = node.value; });
       const choices = element("datalist"); choices.id = list;
-      for (const choice of parameter.choices ?? []) { const option = element("option"); option.value = name(choice); choices.append(option); } form.append(choices);
+      for (const choice of parameter.choices ?? []) { const option = element("option"); option.value = name(choice); choices.append(option); } cell.append(choices);
     }
+    form.append(table);
   }
 
   /** Hierarchy and period options remain enum/value DTOs; ESKA enforces their mutual exclusion. */
@@ -437,8 +514,8 @@
     const l = state.labels, value = editing.expression; choices(form);
     if (["source", "join", "virtualSource", "virtualJoin"].includes(value.kind)) {
       const table = input(form, l.tables, "table", value, { list: "query-tables" });
-      form.append(button(l.find, () => api.postMessage({ type: "catalog", search: table.value, offset: 0 })));
-      table.addEventListener("change", () => { api.postMessage({ type: "catalog", table: table.value }); });
+      form.append(button(l.find, () => post({ type: "catalog", search: table.value, offset: 0 })));
+      table.addEventListener("change", () => { post({ type: "catalog", table: table.value }); });
     }
     if (["source", "join", "virtualSource", "virtualJoin", "subquerySource", "subqueryJoin"].includes(value.kind)) input(form, l.alias, "alias", value, { required: false });
     if (["source", "join"].includes(value.kind) && new Map(state.metadata.details).get(value.table)?.parameters?.length) { value.kind = value.kind === "join" ? "virtualJoin" : "virtualSource"; value.parameters = []; }
@@ -459,6 +536,22 @@
 
   /** Expression mode is an explicit escape hatch; switching modes never reparses text in the renderer. */
   function renderEditor() {
+    if(editing.textBuffer){
+      const dialog=textEditor(editing.textBuffer,{element,button,labels:state.labels,maxBytes:state.features.maxTextBytes,busy:state.busy,
+        close:()=>{editing=undefined;render();},submit:(text,revision)=>post({type:'preview',revision,action:{kind:'setText',text,editorNormalized:true}})});
+      mountDialog(root,dialog,()=>{editing=undefined;render();});return;
+    }
+    if(editing.modifiers){
+      const form=element('form',undefined,'expression modifier-expression');form.append(element('h2',state.labels.settings));
+      modifierForm(form,editing.modifiers,{element,button,labels:state.labels,close:()=>{editing=undefined;render();},submit:modifiers=>post({type:'preview',action:{kind:'setModifiers',statement:selected,modifiers}})});root.append(form);return;
+    }
+    if(editing.predicate){
+      const form=element('form',undefined,'expression predicate-expression');
+      predicateForm(form,editing.predicate,{element,button,input,select,labels:state.labels,draw:render,update:value=>{editing.predicate=value;}});
+      const accept=button(state.labels.submit,()=>{});accept.type='submit';form.append(accept,button(state.labels.close,()=>{editing=undefined;render();}));
+      form.addEventListener('submit',event=>{event.preventDefault();if(!state.busy&&!state.paused&&form.reportValidity())send({...editing.action,predicate:structuredClone(editing.predicate)});});
+      expressionTools(form,{element,button,labels:state.labels,fields:[...new Set(state.metadata.fields.flatMap(source=>source.fields.map(name)))],state:editing.fieldPicker??={}});root.append(form);return;
+    }
     if (editing.dcs) { dcsForm(); return; }
     const l = state.labels, form = element("form", undefined, "expression"); form.append(element("h2", l.edit));
     if (editing.raw) {
@@ -483,48 +576,94 @@
     });
     form.append(accept, button(l.close, () => { editing = undefined; render(); }));
     if (editing.expression) form.append(button(editing.raw ? l.visualEditor : l.rawExpression, () => { editing.raw = !editing.raw; render(); }));
+    expressionTools(form, {element,button,labels:l,fields:[...new Set(state.metadata.fields.flatMap(source=>source.fields.map(name)))],state:editing.fieldPicker??={}});
     root.append(form);
   }
 
   /** Render acknowledged state with tab navigation and a complete, readonly text preview. */
   function render() {
-    const active = document.activeElement, focus = active?.name, start = active?.selectionStart, end = active?.selectionEnd;
+    layout.capture();
     root.replaceChildren(); if (!state) return;
     const l = state.labels, header = element("header"), actions = element("div", undefined, "header-actions");
-    actions.append(button(l.apply, () => api.postMessage({ type: "apply" }), state.model.issues?.length ? "union_field_count" : null, "primary"));
-    const cancel = button(l.cancel, () => api.postMessage({ type: "cancel" })); cancel.disabled = state.busy; actions.append(cancel); header.append(actions);
+    actions.append(button(l.apply, () => post({ type: "apply" }), state.model.issues?.length ? "union_field_count" : null, "primary"));
+    const cancel = button(l.cancel, () => post({ type: "cancel" })); cancel.disabled = state.busy || !!state.preview || !!state.diff || !!editing?.textBuffer; actions.append(cancel); header.append(actions);
+    const previous = selected;
     selected = Math.min(state.statement ?? selected, Math.max(0, state.model.statements.length - 1));
+    if (selected !== previous) page = layout.page(selected, state.model.scopes?.[statement()?.scope]?.parent != null ? "tablesFields" : page);
     navigation(header); root.append(header);
+    if(state.features.modifiers)header.append(button(l.settings,()=>{editing={modifiers:structuredClone(statement().modifiers)};render();},statement()?.modifiers?.editable?null:'unsupported','query-settings'));
+    if(state.features.linkedText){
+      const menu=element('details',undefined,'text-tools');menu.append(element('summary',l.textTools));const commands=element('div',undefined,'text-tools-commands');
+      commands.append(button(l.editText,()=>{editing={textBuffer:{text:state.model.text,revision:state.model.revision}};render();},state.model.writable?null:'read_only','edit-query-text'),button(l.diff,()=>post({type:'textDiff'}),null,'query-diff'),button(l.comments,()=>post({type:'comments'}),null,'query-comments'));menu.append(commands);header.append(menu);
+    }
+    const catalogToggle = button(l.database, () => { layout.preferences.catalogCollapsed = !layout.collapsed(); layout.grid(); layout.save(); }, null, "catalog-toggle");
+    catalogToggle.setAttribute("aria-label", l.toggleCatalog); header.append(catalogToggle);
+    const status = element("span", state.busy ? l.working : state.paused ? state.pausedText : !state.model.writable ? state.reasons.read_only : l.opened, "constructor-status");
+    status.setAttribute("role", "status"); header.append(status);
     if (statement()?.package?.operation === "destroy") page = "packages";
     if (state.paused) root.append(element("p", state.pausedText, "error"));
     for (const issue of state.model.issues ?? []) root.append(element("p", issue.code === "union_field_count" ? l.unionMismatch : `${l.packageIssue}: ${issue.table}${issue.column ? `.${issue.column}` : ""}`, "error"));
     const pages = [...basePages, ...(state.features.unions ? ["unions"] : []), ...(state.features.totals ? ["totals"] : []), ...(state.features.packages && !statement()?.nested ? ["packages"] : []), ...(state.features.dcs ? ["dcs"] : [])];
     if (!pages.includes(page)) page = "tablesFields";
+    const scope = state.model.scopes?.[statement()?.scope];
+    const used = { unions: scope?.branches.length > 1, totals: rows("totals").length > 0 || rows("totalGroups").length > 0,
+      packages: state.model.scopes?.filter(scope => scope.parent === null).length > 1 || !!statement()?.package?.destination || statement()?.package?.operation === "destroy",
+      dcs: statement()?.dcs?.nodes.some(node => node.enabled) };
     const tabs = element("nav", undefined, "tabs"); tabs.setAttribute("role", "tablist");
+    tabs.setAttribute("aria-label", l.sections);
+    const activate = target => { layout.select(selected, target); page = target; editing = undefined; render(); document.getElementById(`tab-${target}`)?.focus(); };
+    const visiblePages = pages.filter(value => basePages.includes(value) || used[value] || layout.preferences.extra.includes(value) || value === page);
     for (const value of pages) {
-      const activate = target => { page = target; editing = undefined; render(); document.getElementById(`tab-${target}`)?.focus(); };
       const tab = button(l[value], () => activate(value)); tab.setAttribute("role", "tab"); tab.tabIndex = page === value ? 0 : -1;
+      tab.hidden = !visiblePages.includes(value);
       tab.addEventListener("keydown", event => {
-        const index = pages.indexOf(value);
-        const next = event.key === "ArrowRight" ? pages[(index + 1) % pages.length] : event.key === "ArrowLeft" ? pages[(index + pages.length - 1) % pages.length]
-          : event.key === "Home" ? pages[0] : event.key === "End" ? pages[pages.length - 1] : undefined;
+        const index = visiblePages.indexOf(value);
+        const next = event.key === "ArrowRight" ? visiblePages[(index + 1) % visiblePages.length] : event.key === "ArrowLeft" ? visiblePages[(index + visiblePages.length - 1) % visiblePages.length]
+          : event.key === "Home" ? visiblePages[0] : event.key === "End" ? visiblePages[visiblePages.length - 1] : undefined;
         if (next && !state.busy) { event.preventDefault(); activate(next); }
       });
       tab.setAttribute("aria-selected", String(page === value)); tab.id = `tab-${value}`; tab.setAttribute("aria-controls", "query-page"); tabs.append(tab);
     }
-    root.append(tabs);
+    const sectionBar = element("div", undefined, "section-bar"); sectionBar.append(tabs);
+    const optional = pages.filter(value => !visiblePages.includes(value));
+    if (optional.length) {
+      const more = element("select"); more.setAttribute("aria-label", l.addSection); more.className = "add-section"; more.disabled = state.busy || state.paused;
+      for (const value of ["", ...optional]) { const option = element("option", value ? l[value] : l.addSection); option.value = value; more.append(option); }
+      more.addEventListener("change", () => { if (optional.includes(more.value)) activate(more.value); }); sectionBar.append(more);
+    }
+    root.append(sectionBar);
     const owner = statement(), content = element("div", undefined, "sections"); content.id = "query-page"; content.setAttribute("role", "tabpanel"); content.setAttribute("aria-labelledby", `tab-${page}`);
     if (!owner) content.append(element("p", l.empty));
     else if (owner.unavailable && page !== "dcs") content.append(element("p", state.reasons[owner.unavailable] ?? l.empty, "notice"));
     else renderPage(content);
     root.append(content); if (editing) renderEditor();
-    const preview = element("details", undefined, "query-preview"); preview.append(element("summary", l.text), element("pre", state.model.text)); root.append(preview);
-    root.setAttribute("aria-busy", String(state.busy));
-    if (focus) {
-      const restored = [...root.querySelectorAll("input,textarea,select")].find(node => node.name === focus);
-      if (restored) { restored.focus(); if (typeof start === "number" && restored.setSelectionRange && !["select-one", "select-multiple"].includes(restored.type)) restored.setSelectionRange(start, end); }
+    const preview = element("details", undefined, "query-preview"), text = element("pre");text.id='query-text';
+    markedText(text,state.model.text,state.location?.utf16);
+    text.tabIndex = 0; text.setAttribute("aria-label", l.text); preview.append(element("summary", l.text), text); root.append(preview);
+    if(state.features.linkedText){
+      const toolbar=element('div',undefined,'text-navigation');
+      const jump=()=>{const selection=window.getSelection();if(!selection?.focusNode||!text.contains(selection.focusNode))return;const range=document.createRange();range.setStart(text,0);range.setEnd(selection.focusNode,selection.focusOffset);post({type:'locate',target:{kind:'offset',offset:range.cloneContents().textContent.length},navigate:true});};
+      toolbar.append(button(l.findInModel,jump,null,'locate-query-text'));text.addEventListener('dblclick',jump);
+      const selections=state.model.statements.flatMap(owner=>owner.clauses.flatMap(clause=>clause.items.map(item=>({statement:owner.index,clause:clause.index,item:item.index,range:item.range})))).sort((a,b)=>a.range.start-b.range.start);
+      for(const [label,direction]of [[l.previousFragment,-1],[l.nextFragment,1]])toolbar.append(button(label,()=>{const at=selections.findIndex(selection=>selection.range.start===state.location?.range.start);const selection=selections[(at+direction+selections.length)%selections.length];post({type:'locate',target:{kind:'item',selection:{statement:selection.statement,clause:selection.clause,item:selection.item}},navigate:true});},selections.length?null:'unsupported','text-fragment'));
+      preview.insertBefore(toolbar,text);
     }
-    tabs.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: "nearest", inline: "nearest" });
+    if(state.comments){
+      const comments=element('section',undefined,'comment-list');comments.append(element('h2',l.comments));
+      for(const comment of state.comments.comments)comments.append(button(state.model.text.slice(comment.utf16.start,comment.utf16.end),()=>post({type:'locate',target:{kind:'range',range:comment.range},navigate:true}),comment.statement===null?'unsupported':null,'query-comment'));
+      if(state.comments.offset)comments.append(button(l.previousFragment,()=>post({type:'comments',offset:Math.max(0,state.comments.offset-128),selection:state.comments.selection})));
+      if(state.comments.nextOffset!==null)comments.append(button(l.more,()=>post({type:'comments',offset:state.comments.nextOffset,selection:state.comments.selection})));
+      comments.append(button(l.close,()=>post({type:'closeComments'}),null,'comments-close'));root.append(comments);
+    }
+    if(editing?.textBuffer)for(const child of root.querySelectorAll(':scope > *'))if(!child.classList.contains('text-editor'))child.inert=true;
+    if(state.preview||state.diff){
+      const dialog=element('section',undefined,'action-preview');dialog.setAttribute('aria-label',l.previewChanges);dialog.append(element('h2',state.preview?l.previewChanges:l.diff));
+      const panes=element('div',undefined,'preview-diff');for(const [label,value,range]of [[l.beforeChanges,state.diff?.original??state.model.text,state.diff?.change?.beforeUtf16],[l.afterChanges,state.preview?.text??state.model.text,state.diff?.change?.afterUtf16]]){const pane=element('div'),pre=element('pre');pre.tabIndex=0;markedText(pre,value,range);pane.append(element('h3',label),pre);panes.append(pane);}dialog.append(panes);
+      if(state.preview)dialog.append(button(l.acceptChanges,()=>{pendingEdit=editing?structuredClone(editing):undefined;editing=undefined;post({type:'applyPreview'});},null,'preview-accept'));
+      const close=()=>post({type:state.preview?'cancelPreview':'cancelDiff'});dialog.append(button(l.close,close,null,state.preview?'preview-cancel':'diff-close'));mountDialog(root,dialog,close);
+    }
+    root.setAttribute("aria-busy", String(state.busy));
+    layout.mount(selected, page, l);
   }
 
   /** While a child scope is open, parent selectors are replaced with one explicit return control. */
@@ -538,6 +677,7 @@
       for (const value of statements) { const option = element("option", `${l.statement} ${value.index + 1} · ${value.preview.slice(0, 50)}`); option.value = String(value.index); picker.append(option); }
       picker.value = String(scope ? scope.branches[0] : selected); picker.addEventListener("change", () => navigate(Number(picker.value))); header.append(picker);
     }
+    if(state.features.packageTree&&statement()?.path?.length>1){const path=element('nav',undefined,'scope-path');path.setAttribute('aria-label',l.scopePath);for(const id of statement().path)path.append(button(`${state.model.statements[id].preview.slice(0,24)}`,()=>navigate(id),id===selected?'single_item':null,'scope-crumb'));header.append(path);}
     if (scope?.branches.length > 1) {
       const picker = element("select"); picker.setAttribute("aria-label", l.branch); picker.disabled = state.busy || state.paused;
       for (const [index, id] of scope.branches.entries()) { const option = element("option", `${l.branch} ${index + 1}`); option.value = String(id); picker.append(option); }
@@ -549,14 +689,29 @@
   window.addEventListener("message", event => {
     if (event.data?.type === "model") {
       if (state && state.model.revision !== event.data.model.revision) {
+        locationSerial=-1;
         pendingEdit = undefined;
+        itemSelections.clear(); cellDrafts.clear();
+        for (const focus of event.data.model.itemFocus ?? []) {
+          const key = `${focus.statement}:${focus.clause}`, selection = itemSelections.get(key) ?? {items:[],anchor:focus.item};
+          selection.items.push(focus.item); itemSelections.set(key,selection);
+        }
         if (event.data.model.totalFocus !== undefined && event.data.model.totalFocus !== null) totalSection = event.data.model.totalFocus;
       }
-      state = event.data; render();
+      if(state?.preview&&!event.data.preview&&!editing)pendingEdit=undefined;
+      state = event.data;
+      if(state.location&&state.location.serial!==locationSerial){
+        locationSerial=state.location.serial;layout.preferences.previewOpen=true;const preview=root.querySelector('.query-preview');if(preview)preview.open=true;
+        if(state.location.navigate&&state.location.selection){const selection=state.location.selection,kind=state.model.statements[selection.statement].clauses[selection.clause].kind;
+          const target={fields:'tablesFields',sources:'tablesFields',joins:'joins',conditions:'conditions',having:'conditions',group:'group',order:'order',totals:'totals',totalGroups:'totals',index:'packages',into:'packages',destroy:'packages'}[kind]??'tablesFields';
+          layout.select(state.statement,target);page=target;itemSelections.set(`${selection.statement}:${selection.clause}`,{items:[selection.item],anchor:selection.item});
+        }
+      }
+      render();
     } else if (event.data?.type === "error") {
       if (pendingEdit) { editing = pendingEdit; render(); }
       const error = element("p", event.data.text, "error"); error.setAttribute("role", "alert"); root.prepend(error);
     }
   });
-  api.postMessage({ type: "ready" });
+  post({ type: "ready" });
 })();

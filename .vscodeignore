@@ -21,4 +21,5 @@
 !resources/icons/support/LICENSE
 !resources/icons/support/NOTICE.md
 !resources/query/*.js
+!resources/query/*.mjs
 !resources/query/*.css

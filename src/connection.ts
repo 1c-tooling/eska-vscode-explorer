@@ -166,7 +166,8 @@ export class Connection {
           const supported = error instanceof ExplorerError ? error.details?.supported : undefined;
           if (backend !== "project" || !(error instanceof ExplorerError) || error.domain !== "unsupported_version"
             || !isRecord(supported) || supported.major !== 1
-            || typeof supported.minor !== "number" || ![12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24].includes(supported.minor)) throw error;
+            || typeof supported.minor !== "number" || !Number.isInteger(supported.minor)
+            || supported.minor < BASE_API_VERSION.minor || supported.minor >= API_VERSION.minor) throw error;
           response = await initialize(supported.minor >= 17 ? { major: 1, minor: supported.minor } : supported.minor === 16 ? SESSION_API_VERSION : supported.minor >= 14 ? RECOVERY_API_VERSION
             : supported.minor === QUERY_API_VERSION.minor ? QUERY_API_VERSION : BASE_API_VERSION);
         }

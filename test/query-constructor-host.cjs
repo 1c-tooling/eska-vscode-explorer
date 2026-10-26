@@ -44,41 +44,56 @@ async function objects(explorer, kind) {
   assert.ok(group); return explorer.getChildren(group);
 }
 
-/** XML constructor plans preserve pre-existing query edits and still save through the common XML receipt. */
+/** Constructor edits stay private; the subsequent explicit XML query Save uses the common native receipt. */
 async function xmlConstructor(explorer, fixture, accepted) {
-  const xml = await vscode.workspace.openTextDocument(vscode.Uri.file(fixture.query.schemaPath)), disk = await fs.readFile(fixture.query.schemaPath);
-  await replace(xml, "<other>before</other>", "<other>dirty 😀</other>"); const dirty = xml.getText();
-  const [template] = await objects(explorer, "common-template"), branches = await explorer.getChildren(template);
-  const branch = branches.find(row => row.queryKind === "branch"), [entry] = await explorer.getChildren(branch);
-  await vscode.commands.executeCommand("eska.explorer.openQuery", entry);
-  let draft = vscode.window.activeTextEditor.document; assert.equal(draft.getText(), "SELECT Long");
-  await replace(draft, "SELECT Long", "SELECT 1 AS Draft");
-  const before = draft.getText(); let view = await openConstructor(explorer, draft);
-  await explorer.queryDesigner.receive(view, { type: "apply" });
-  draft = vscode.window.activeTextEditor.document;
-  assert.equal(draft.getText(), before); assert.equal(draft.isDirty, true, "XML draft remains saveable after no-op constructor");
-  assert.equal(xml.getText(), dirty); assert.deepEqual(await fs.readFile(fixture.query.schemaPath), disk);
-  view = await openConstructor(explorer, draft);
-  await explorer.queryDesigner.receive(view, { type: "action", action: { kind: "replace", selection: { statement: 0, clause: 0, item: 0 }, text: "2 AS Edited" } });
-  await explorer.queryDesigner.receive(view, { type: "apply" }); draft = vscode.window.activeTextEditor.document;
-  const working = draft.getText(); assert.equal(working, "SELECT 2 AS Edited");
-  await vscode.commands.executeCommand("undo"); assert.equal(draft.getText(), before);
-  await vscode.commands.executeCommand("redo"); assert.equal(draft.getText(), working);
-  assert.equal(await draft.save(), false, "ambiguous XML source comment blocks implicit movement");
-  let choices = 0;
-  explorer.queries.sourceCommentChoices = async (source, info, document) => {
-    choices++; assert.equal(info.needsDecision, true);
-    const point = document.positionAt(document.getText().length), mapped = await source.comments([point]);
-    assert.notEqual(mapped.positions[0].queryOffset, null);
-    return info.comments.map(comment => ({ comment: comment.comment, queryOffset: mapped.positions[0].queryOffset }));
-  };
-  await vscode.commands.executeCommand("eska.explorer.placeQueryComments"); assert.equal(choices, 1);
-  await vscode.commands.executeCommand("eska.explorer.resumeQuery");
-  assert.equal(await draft.save(), true);
-  assert.ok(xml.getText().includes("SELECT 2 AS Edited<!--source 😀-->")); assert.ok(xml.getText().includes("<other>dirty 😀</other>"));
-  assert.equal(xml.isDirty, true); assert.deepEqual(await fs.readFile(fixture.query.schemaPath), disk);
-  await vscode.window.showTextDocument(xml); await vscode.commands.executeCommand("undo"); assert.equal(xml.getText(), dirty);
-  accepted.push("xml_constructor_keeps_existing_draft_undo_and_explicit_source_comment_placement_without_owner_save");
+  let phase='fixture-owner';
+  try {
+    let xml = await vscode.workspace.openTextDocument(vscode.Uri.file(fixture.query.schemaPath));
+    // Fixture input predates workspace/open; a live XML save would invalidate sessions through the real file watcher.
+    const baselineOwner = xml.getText(); assert.ok(baselineOwner.includes("<other>prior input 😀</other>"));
+    const disk = await fs.readFile(fixture.query.schemaPath);
+    phase='discovery';
+    const [template] = await objects(explorer, "common-template"), branches = await explorer.getChildren(template);
+    const branch = branches.find(row => row.queryKind === "branch"), [entry] = await explorer.getChildren(branch);
+    await vscode.commands.executeCommand("eska.explorer.openQuery", entry);
+    let draft = vscode.window.activeTextEditor.document; assert.equal(draft.getText(), "SELECT Long");
+    await replace(draft, "SELECT Long", "SELECT 1 AS Draft");
+    phase='constructor-noop';
+    const before = draft.getText(); let view = await openConstructor(explorer, draft);
+    await explorer.queryDesigner.receive(view, { revision: view.binding.core.model.revision, type: "apply" });
+    draft = vscode.window.activeTextEditor.document;
+    xml = await vscode.workspace.openTextDocument(xml.uri);
+    assert.equal(draft.getText(), before); assert.equal(draft.isDirty, true, "XML draft remains saveable after no-op constructor");
+    assert.equal(xml.getText(), baselineOwner); assert.deepEqual(await fs.readFile(fixture.query.schemaPath), disk);
+    phase='constructor-edit';
+    view = await openConstructor(explorer, draft);
+    await explorer.queryDesigner.receive(view, { revision: view.binding.core.model.revision, type: "action", action: { kind: "replace", selection: { statement: 0, clause: 0, item: 0 }, text: "2 AS Edited" } });
+    await explorer.queryDesigner.receive(view, { revision: view.binding.core.model.revision, type: "apply" }); draft = vscode.window.activeTextEditor.document;
+    const working = draft.getText(); assert.equal(working, "SELECT 2 AS Edited");
+    await vscode.commands.executeCommand("undo"); assert.equal(draft.getText(), before);
+    await vscode.commands.executeCommand("redo"); assert.equal(draft.getText(), working);
+    phase='first-query-save';
+    assert.equal(await draft.save(), false, "source confirmation and comment decisions precede XML application");
+    let choices = 0;
+    explorer.queries.sourceCommentChoices = async (source, info, document) => {
+      choices++; assert.equal(info.needsDecision, true);
+      const point = document.positionAt(document.getText().length), mapped = await source.comments([point]);
+      assert.notEqual(mapped.positions[0].queryOffset, null);
+      return info.comments.map(comment => ({ comment: comment.comment, queryOffset: mapped.positions[0].queryOffset }));
+    };
+    phase='place-comments';
+    await vscode.commands.executeCommand("eska.explorer.placeQueryComments"); assert.equal(choices, 1);
+    phase='resume';
+    await vscode.commands.executeCommand("eska.explorer.resumeQuery");
+    phase='final-query-save';
+    assert.equal(await draft.save(), true);
+    phase='inspect-saved-owner';
+    xml = await vscode.workspace.openTextDocument(xml.uri);
+    assert.ok(xml.getText().includes("SELECT 2 AS Edited<!--source 😀-->")); assert.ok(xml.getText().includes("<other>prior input 😀</other>"));
+    assert.equal(xml.isDirty, false); assert.equal((await fs.readFile(fixture.query.schemaPath,"utf8")).replace(/^\uFEFF/,""),xml.getText());
+    await vscode.window.showTextDocument(xml); await vscode.commands.executeCommand("undo"); assert.equal(xml.getText(), baselineOwner);
+    accepted.push("xml_constructor_keeps_private_dirty_draft_then_explicit_xml_save_places_source_comments_and_native_undo");
+  } catch(error){error.testPhase=phase;throw error;}
 }
 
 /** All visual clause intentions share the same core model; unsupported package statements remain exact text. */
@@ -90,12 +105,12 @@ async function clauseAndReadonly(explorer, owner, accepted) {
   assert.equal(view.binding.core.model.statements[0].unavailable, "unsupported_construct");
   for (const [clause, expression, join] of [["fields", "B"], ["sources", "T AS Main"], ["joins", "U AS Other ON Main.ID = Other.ID", "left"],
     ["conditions", "A = &Parameter"], ["group", "A"], ["order", "A DESC"]]) {
-    await explorer.queryDesigner.receive(view, { type: "action", action: { kind: "append", statement: 1, clause, text: expression, ...(join ? { join } : {}) } });
+    await explorer.queryDesigner.receive(view, { revision: view.binding.core.model.revision, type: "action", action: { kind: "append", statement: 1, clause, text: expression, ...(join ? { join } : {}) } });
     assert.equal(view.binding.core.model.text.startsWith(opaque), true);
   }
   const model = view.binding.core.model;
   assert.deepEqual(new Set(model.statements[1].clauses.map(value => value.kind)), new Set(["fields", "sources", "joins", "conditions", "group", "order"]));
-  await explorer.queryDesigner.receive(view, { type: "apply" }); draft = vscode.window.activeTextEditor.document;
+  await explorer.queryDesigner.receive(view, { revision: view.binding.core.model.revision, type: "apply" }); draft = vscode.window.activeTextEditor.document;
   assert.equal(draft.getText(), model.text); await vscode.commands.executeCommand("undo"); assert.equal(draft.getText(), text);
   await vscode.commands.executeCommand("eska.explorer.cancelQuery", draft.uri);
   const files = vscode.workspace.getConfiguration("files", owner.uri);
@@ -105,7 +120,7 @@ async function clauseAndReadonly(explorer, owner, accepted) {
     assert.equal(view.binding.core.model.writable, false);
     assert.ok(view.binding.core.model.statements[0].append.every(value => value.unavailable === "read_only"));
     await assert.rejects(view.binding.core.action({ kind: "append", statement: 0, clause: "fields", text: "9" }), error => error.details?.reason === "user_read_only");
-    await explorer.queryDesigner.receive(view, { type: "apply" }); draft = vscode.window.activeTextEditor.document;
+    await explorer.queryDesigner.receive(view, { revision: view.binding.core.model.revision, type: "apply" }); draft = vscode.window.activeTextEditor.document;
     assert.equal(draft.getText(), before); assert.equal((await vscode.workspace.fs.stat(draft.uri)).permissions, vscode.FilePermission.Readonly);
     await vscode.commands.executeCommand("eska.explorer.cancelQuery", draft.uri);
   } finally { await files.update("readonlyInclude", undefined, vscode.ConfigurationTarget.Workspace); }
@@ -117,13 +132,13 @@ async function interrupted(explorer, owner, accepted) {
   let draft = await openQuery(owner); const before = draft.getText();
   await replace(draft, before, before + "\nORDER BY A"); const checkpoint = draft.getText();
   const view = await openConstructor(explorer, draft), id = [...explorer.queries.sessions.keys()].find(key => explorer.queries.sessions.get(key).design === view.binding);
-  await explorer.queryDesigner.receive(view, { type: "action", action: { kind: "append", statement: 0, clause: "fields", text: "9 AS Unaccepted" } });
+  await explorer.queryDesigner.receive(view, { revision: view.binding.core.model.revision, type: "action", action: { kind: "append", statement: 0, clause: "fields", text: "9 AS Unaccepted" } });
   const oldPid = explorer.connection.child.pid; process.kill(oldPid, "SIGKILL");
   await until(() => explorer.connection.state.kind === "error" && !view.binding.current, "constructor observes real backend loss");
   await vscode.commands.executeCommand("eska.explorer.restart");
   await until(() => explorer.connection.state.kind === "ready" && explorer.connection.child.pid !== oldPid && !explorer.support.loading, "fresh backend after constructor loss");
   await explorer.queries.ready;
-  await explorer.queryDesigner.receive(view, { type: "cancel" });
+  await explorer.queryDesigner.receive(view, { revision: view.binding.core.model.revision, type: "cancel" });
   draft = vscode.window.activeTextEditor.document; assert.equal(draft.getText(), checkpoint); assert.equal(draft.getText().includes("Unaccepted"), false);
   assert.equal(explorer.queries.sessions.get(id).resumed, false);
   await vscode.commands.executeCommand("eska.explorer.resumeQuery"); assert.equal(explorer.queries.sessions.get(id).resumed, true);
@@ -164,14 +179,22 @@ exports.run = async function () {
     assert.equal((await vscode.workspace.fs.stat(uri)).permissions, vscode.FilePermission.Readonly);
     assert.equal(owner.version, ownerVersion); assert.equal(owner.getText(), capturedOwner);
     accepted.push("all_editable_splits_replaced_by_constructor_and_core_draft_lock");
-    await explorer.queryDesigner.receive(view, { type: "action", action: { kind: "move", selection: { statement: 0, clause: 0, item: 1 }, to: 0 } });
+    const displayedRevision = view.binding.core.model.revision;
+    await explorer.queryDesigner.receive(view, { revision: view.binding.core.model.revision, type: "action", action: { kind: "move", selection: { statement: 0, clause: 0, item: 1 }, to: 0 } });
     assert.ok(view.binding.core.model.text.indexOf("// field B") < view.binding.core.model.text.indexOf("1 AS A"));
+    const currentSnapshot = structuredClone(view.binding.core.model);
+    for (const type of ["action", "preview", "apply"]) {
+      await assert.rejects(explorer.queryDesigner.receive(view, { revision: displayedRevision, type,
+        action: { kind: "replace", selection: { statement: 0, clause: 0, item: 0 }, text: "9 AS Stale" } }), error => error.code === "obsolete");
+      assert.deepEqual(view.binding.core.model, currentSnapshot);
+    }
+    accepted.push("late_webview_actions_previews_and_apply_reject_the_displayed_old_revision");
     let choices = 0; explorer.queryDesigner.commentDecision = async () => { choices++; return "keep"; };
-    await explorer.queryDesigner.receive(view, { type: "action", action: { kind: "remove", selection: { statement: 0, clause: 0, item: 0 } } });
+    await explorer.queryDesigner.receive(view, { revision: view.binding.core.model.revision, type: "action", action: { kind: "remove", selection: { statement: 0, clause: 0, item: 0 } } });
     assert.equal(choices, 1); assert.ok(view.binding.core.model.text.includes("// field B"));
-    await explorer.queryDesigner.receive(view, { type: "action", action: { kind: "append", statement: 0, clause: "fields", text: "3 AS C" } });
+    await explorer.queryDesigner.receive(view, { revision: view.binding.core.model.revision, type: "action", action: { kind: "append", statement: 0, clause: "fields", text: "3 AS C" } });
     const working = view.binding.core.model.text;
-    await explorer.queryDesigner.receive(view, { type: "apply" });
+    await explorer.queryDesigner.receive(view, { revision: view.binding.core.model.revision, type: "apply" });
     await until(() => vscode.window.activeTextEditor?.document.uri.toString() === uri.toString(), "same query draft reopened");
     draft = vscode.window.activeTextEditor.document;
     assert.equal(draft.getText(), working); assert.equal(owner.getText(), capturedOwner); assert.deepEqual(await fs.readFile(fixture.module), disk);
@@ -186,22 +209,22 @@ exports.run = async function () {
     accepted.push("constructor_result_uses_existing_explicit_bsl_apply_without_disk_save");
     draft = await openQuery(owner); const unchanged = draft.getText();
     let next = await openConstructor(explorer, draft);
-    await explorer.queryDesigner.receive(next, { type: "apply" });
+    await explorer.queryDesigner.receive(next, { revision: next.binding.core.model.revision, type: "apply" });
     draft = vscode.window.activeTextEditor.document; assert.equal(draft.getText(), unchanged); assert.equal(owner.getText(), capturedOwner);
     accepted.push("opening_and_applying_without_operations_preserves_exact_draft_and_owner");
     next = await openConstructor(explorer, draft);
-    await explorer.queryDesigner.receive(next, { type: "action", action: { kind: "append", statement: 0, clause: "order", text: "A" } });
-    await explorer.queryDesigner.receive(next, { type: "cancel" });
+    await explorer.queryDesigner.receive(next, { revision: next.binding.core.model.revision, type: "action", action: { kind: "append", statement: 0, clause: "order", text: "A" } });
+    await explorer.queryDesigner.receive(next, { revision: next.binding.core.model.revision, type: "cancel" });
     draft = vscode.window.activeTextEditor.document; assert.equal(draft.getText(), unchanged); assert.equal(owner.getText(), capturedOwner);
     assert.notEqual((await vscode.workspace.fs.stat(draft.uri)).permissions, vscode.FilePermission.Readonly);
     accepted.push("cancel_discards_only_unaccepted_constructor_operations_and_releases_its_lock");
     await vscode.commands.executeCommand("eska.explorer.cancelQuery", draft.uri);
     await clauseAndReadonly(explorer, owner, accepted);
     await visualDom(explorer, owner, accepted);
-    await xmlConstructor(explorer, fixture, accepted);
     await interrupted(explorer, owner, accepted);
+    await xmlConstructor(explorer, fixture, accepted);
     await fs.writeFile(path.join(fixture.root, "host-result.json"), JSON.stringify({ passed: true, suite: "query-constructor", accepted, errors, locale: vscode.env.language }));
   } catch (error) {
-    await fs.writeFile(path.join(fixture.root, "host-result.json"), JSON.stringify({ passed: false, suite: "query-constructor", accepted, errors, error: String(error.stack ?? error) })); throw error;
+    await fs.writeFile(path.join(fixture.root, "host-result.json"), JSON.stringify({ passed: false, suite: "query-constructor", accepted, errors, error: String(error.stack ?? error)+" "+JSON.stringify({details:error.details,phase:error.testPhase,accepted,errors}) })); throw error;
   }
 };

@@ -36,7 +36,9 @@ exports.connectWorkbench = async function (until) {
     if (!target) return false;
     connection = await attach(target); return true;
   }, 'native workbench endpoint');
-  return { close: () => connection.close(), evaluate: async expression => {
+  return { close: () => connection.close(), viewport: async (width, height) => {
+    await connection.request('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
+  }, evaluate: async expression => {
     const value = await connection.request('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true });
     if (value.exceptionDetails) throw new Error(JSON.stringify(value.exceptionDetails)); return value.result.value;
   } };
@@ -63,7 +65,22 @@ exports.connect = async function (until) {
     if (value.exceptionDetails) throw new Error(JSON.stringify(value.exceptionDetails)); return value.result.value;
   };
   await until(async () => await evaluate('document.getElementById("root").getAttribute("aria-busy") !== "true"'), 'constructor metadata controls ready');
-  return { evaluate, close: () => { for (const connection of connections.values()) connection.close(); },
+  return { evaluate, memory: () => found.connection.request('Runtime.getHeapUsage'), close: () => { for (const connection of connections.values()) connection.close(); },
+    // Profiling is opt-in and confined to this disposable webview's renderer.
+    startProfile: async () => {
+      await found.connection.request('Performance.enable');
+      await found.connection.request('Profiler.enable');
+      await found.connection.request('Profiler.start');
+      return found.connection.request('Performance.getMetrics');
+    },
+    stopProfile: async () => {
+      const { profile } = await found.connection.request('Profiler.stop');
+      const metrics = await found.connection.request('Performance.getMetrics');
+      await found.connection.request('Profiler.disable');
+      await found.connection.request('Performance.disable');
+      return { profile, metrics };
+    },
+    pointer: (type, x, y) => found.connection.request('Input.dispatchMouseEvent', { type, x, y, button: 'left', buttons: type === 'mouseReleased' ? 0 : 1, clickCount: 1 }),
     screenshot: async file => {
       const [connection] = connections.values(); await connection.request('Page.enable');
       const image = await connection.request('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false });
@@ -84,7 +101,7 @@ exports.exercise = async function ({ explorer, view, until, locale }) {
     await client.evaluate(`document.querySelector('[data-section="fields"] .action-add').click()`);
     await client.evaluate(`for (const [key,value] of [["expression","99"],["alias","BrowserField"]]) { const input=document.querySelector('.expression [name="'+key+'"]'); input.value=value; input.dispatchEvent(new Event("input",{bubbles:true})); } document.querySelector(".expression").requestSubmit();`);
     await until(() => view.binding.core.model.revision !== before && !view.busy, 'DOM expression reached ESKA');
-    await until(async () => await client.evaluate(`document.querySelector('[data-section="fields"]').textContent.includes("99 AS BrowserField")`), 'acknowledged DOM row');
+    await until(async () => await client.evaluate(`document.querySelector('.query-preview pre').textContent.includes("99 AS BrowserField")`), 'acknowledged DOM row');
     assert.equal(await client.evaluate('document.querySelectorAll("#root img").length'), 0);
     const stand = process.env.ESKA_HOST_DOM_ARTIFACTS;
     if (stand) { await fs.mkdir(stand, { recursive: true }); await client.screenshot(path.join(stand, `constructor-${locale}.png`)); }

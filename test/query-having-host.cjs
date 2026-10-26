@@ -4,7 +4,7 @@ const path = require('node:path');
 const vscode = require('vscode');
 const { connect } = require('./query-constructor-dom.cjs');
 const { until, parentTabs, returned } = require('./query-modal-host.cjs');
-const { ready, form } = require('./query-builder-host.cjs');
+const { ready, form, editFirstField } = require('./query-builder-host.cjs');
 
 /** A native typed condition reaches ESKA before another DOM intention is issued. */
 async function addFilter(client, kind, values) {
@@ -29,7 +29,7 @@ exports.run = async function () {
     await until(() => !vscode.window.tabGroups.all.some(group => group.tabs.some(tab => tab.input instanceof vscode.TabInputWebview)) && vscode.window.activeTextEditor?.document.uri.toString() === draft.uri.toString(), 'HAVING cancel');
     assert.equal(draft.getText(), before);
     await vscode.commands.executeCommand('eska.explorer.queryConstructor', draft.uri); client = await connect(until);
-    await client.evaluate('document.querySelector("[data-section=fields] .controls button").click()'); await form(client, { expression: '1', alias: 'Value', aggregate: 'sum' });
+    await editFirstField(client); await form(client, { expression: '1', alias: 'Value', aggregate: 'sum' });
     await addFilter(client, 'having', { left: 'SUM(1)', comparison: 'greater', right: '0' });
     await addFilter(client, 'conditions', { left: '1', right: '1' });
     const text = await client.evaluate('document.querySelector(".query-preview pre").textContent');

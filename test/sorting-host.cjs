@@ -38,7 +38,7 @@ exports.run = async function () {
     const kind = type === 'report' ? 'ExternalReport' : type === 'processing' ? 'ExternalDataProcessor' : 'Catalog';
     await fs.writeFile(member.descriptor, descriptor(kind, kind === 'Catalog' ? 'Товары' : 'Тест', fields + table));
   }
-  await fs.writeFile(path.join(fixture.root, 'eska.toml'), `[workspace]\n[workspace.members.app]\nconfiguration="configuration"\nextensions=["extension"]\nexternal_objects=["processing", "report"]\n`);
+  await fs.writeFile(path.join(fixture.root, 'eska.toml'), `[workspace]\n[workspace.members.app]\nconfiguration="configuration"\nextensions=[{path="extension"}]\nexternal_objects=["processing", "report"]\n`);
   await vscode.workspace.getConfiguration('eska.explorer').update('executable', process.env.ESKA_TEST_BINARY, vscode.ConfigurationTarget.Workspace);
   await vscode.workspace.getConfiguration('eska.explorer').update('treeLanguage', 'ru-RU', vscode.ConfigurationTarget.Workspace);
   await vscode.workspace.getConfiguration('eska.explorer').update('hideEmptyRootGroups', false, vscode.ConfigurationTarget.Workspace);
