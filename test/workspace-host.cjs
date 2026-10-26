@@ -25,7 +25,7 @@ exports.run = async function () {
     const manifest = path.join(member.root, "eska.toml");
     await fs.writeFile(manifest, (await fs.readFile(manifest, "utf8")).replace("tree-test", path.basename(member.root)));
   }
-  await fs.writeFile(path.join(fixture.root, "eska.toml"), "[workspace]\nmembers=['src/first','src/second']\n");
+  await fs.writeFile(path.join(fixture.root, "eska.toml"), "[workspace]\n[workspace.members.app]\nconfiguration='src/first'\nexternal_objects=['src/second']\n");
   await fs.writeFile(path.join(fixture.root, "README.md"), "# Workspace\n");
   await fs.writeFile(path.join(fixture.root, "bsl-analyzer.toml"), "# settings\n");
   await fs.writeFile(path.join(first.root, "README.ru.md"), "# Первый\n");

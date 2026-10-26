@@ -21,7 +21,7 @@ for (const [member, application] of [["a", "one"], ["b", "two"]]) {
   await writeFile(file, text.replaceAll("Проверка", names[application]) + (memberOnly ? "" : "Функция Сломано(\n"));
   files[application] = file;
 }
-await writeFile(join(workspace, "eska.toml"), "[workspace]\nmembers=['a','b']\n[analysis]\ndefault_application='one'\n[applications.one]\nconfiguration='a'\n[applications.two]\nconfiguration='b'\n");
+await writeFile(join(workspace, "eska.toml"), "[workspace]\n[analysis]\ndefault_application='one'\n[workspace.members.one]\nconfiguration='a'\n[workspace.members.two]\nconfiguration='b'\n");
 await writeFile(join(coordination, "fixture.json"), JSON.stringify({ workspace, files, names }));
 
 /** Each role has its own native profile and extension host but shares the actual managed config and OS lock. */
