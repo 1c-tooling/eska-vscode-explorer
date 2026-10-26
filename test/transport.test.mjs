@@ -277,3 +277,11 @@ test('lifetime cancellation escalates to SIGKILL and reaps its process', async t
   await peer.stop();
   exited(peer.pid);
 });
+
+/** A published minor-30 server remains usable by the new constructor UI. */
+test('API 1.30 falls back on the same process without new constructor features',async t=>{
+ const {value,children,versions}=connection(t,'api30');await value.connect(target);
+ assert.equal(value.state.kind,'ready',JSON.stringify(value.state));
+ assert.deepEqual(versions,[API_VERSION.minor,30]);assert.equal(children.length,1);
+ assert.equal(value.recovery?.sessions?.capabilities?.constructorLimits,undefined);
+});

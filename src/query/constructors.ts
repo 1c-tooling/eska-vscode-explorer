@@ -9,7 +9,7 @@ export const PACKAGE_CLAUSES = [...CLAUSES, "into", "destroy", "index"] as const
 export const HAVING_CLAUSES = [...PACKAGE_CLAUSES, "having"] as const;
 export type ConstructorClauseKind = typeof HAVING_CLAUSES[number];
 export type ConstructorMethod = "query/constructorOpen" | "query/constructorPlan" | "query/constructorModel" | "query/constructorAction" | "query/constructorFinish" | "query/constructorCancel" | "query/constructorCatalog";
-export interface ConstructorLimits { maxExpression: number; maxModel: number; visual?: boolean; virtualTables?: boolean; nestedQueries?: boolean; unions?: boolean; totals?: boolean; packages?: boolean; having?: boolean; totalSections?: boolean; maxTotalSections?: number; dcs?: boolean }
+export interface ConstructorLimits { maxExpression: number; maxModel: number; visual?: boolean; virtualTables?: boolean; nestedQueries?: boolean; unions?: boolean; totals?: boolean; packages?: boolean; having?: boolean; totalSections?: boolean; maxTotalSections?: number; dcs?: boolean; bulkItems?: boolean; maxBulkItems?: number; addSourceFields?: boolean }
 export interface ConstructorSelection { statement: number; clause: number; item: number }
 export type Comparison = "equal" | "notEqual" | "less" | "lessOrEqual" | "greater" | "greaterOrEqual" | "like" | "in" | "inHierarchy";
 export type Aggregate = "sum" | "count" | "minimum" | "maximum" | "average" | null;
@@ -32,6 +32,8 @@ export interface CatalogField { russian: string; english: string }
 export interface CatalogPage { tables: CatalogTable[]; fields: CatalogField[]; parameters?: CatalogParameter[]; temporaryTables?: { name: string; scope: number; statement: number }[]; nextOffset: number | null; found: boolean; limitedContext: boolean; contextFingerprint: string }
 export interface CatalogQuery { search?: string; offset?: number; limit?: number; table?: string; qualifier?: string; virtualTables?: boolean; source?: ConstructorSelection; scope?: number; atStatement?: number }
 export type ConstructorAction = { kind: "compose"; statement: number; selection: ConstructorSelection | null; expression: VisualExpression }
+  | { kind: "editItems"; statement: number; clause: number; items: number[]; operation: { kind: "remove" } | { kind: "move" | "copy"; to: number }; comments?: "keep" | "discard" }
+  | { kind: "addSourceFields"; statement: number; source: VisualExpression; fields: string[] }
   | { kind: "setDcs"; statement: number; node: number | null; target: DcsKind; values: DcsValue[]; enabled: boolean; comments?: "keep" | "discard" }
   | { kind: "composeTotal"; statement: number; section: number; selection: ConstructorSelection | null; expression: VisualExpression }
   | { kind: "appendTotal"; statement: number; section: number; clause: "totals" | "totalGroups"; text: string }
@@ -50,7 +52,7 @@ export type ConstructorAction = { kind: "compose"; statement: number; selection:
   | { kind: "addUnion" | "setUnion"; statement: number; all: boolean } | { kind: "removeUnion"; statement: number; comments?: "keep" | "discard" };
 export interface ConstructorItem {
   index: number; range: ByteRange; preview: string; expression: string | null; comments: number; removable: boolean; movable: boolean;
-  unavailable: { replace: string | null; remove: string | null; move: string | null };
+  unavailable: { replace: string | null; remove: string | null; move: string | null; copy?: string | null };
   visual?: VisualExpression | null;
   children?: number[]; moveUp?: boolean; moveDown?: boolean;
 }
@@ -77,6 +79,7 @@ export interface ConstructorModel {
   scopes?: ConstructorScope[]; issues?: { code: string; scope: number; table?: string; column?: string | null }[];
   focus?: number | null;
   totalFocus?: number | null;
+  itemFocus?: ConstructorSelection[];
 }
 type Transport = (method: ConstructorMethod, params: Record<string, unknown>) => Promise<unknown>;
 
@@ -117,6 +120,11 @@ export function constructorCapabilities(hello: unknown): ConstructorLimits | und
     if (hello.apiVersion.minor < 29 || value.dcs !== true || value.maxDcsValues !== 128 || !flags.totalSections) invalid();
     flags.dcs = true;
   }
+  if (value.bulkItems !== undefined || value.addSourceFields !== undefined || value.maxBulkItems !== undefined) {
+    if (hello.apiVersion.minor < 31 || value.bulkItems !== true || value.addSourceFields !== true
+      || !unsigned(value.maxBulkItems) || value.maxBulkItems === 0 || value.maxBulkItems > 512) invalid();
+    flags.bulkItems = true; flags.addSourceFields = true; flags.maxBulkItems = value.maxBulkItems;
+  }
   const clauses = flags.having ? HAVING_CLAUSES : flags.packages ? PACKAGE_CLAUSES : flags.totals ? CLAUSES : BASE_CLAUSES;
   if (value.clauses.length !== clauses.length || !value.clauses.every((kind, index) => kind === clauses[index])) invalid();
   const visual = value.visualExpressions !== undefined || value.metadataCatalog !== undefined;
@@ -156,6 +164,7 @@ export function constructorModel(raw: unknown, limits: ConstructorLimits, id?: s
           || !unsigned(item.comments) || typeof item.removable !== "boolean" || typeof item.movable !== "boolean"
           || !isRecord(item.unavailable) || ![item.unavailable.replace, item.unavailable.remove, item.unavailable.move].every(reason)) invalid();
         if (item.visual !== undefined && item.visual !== null && !visualExpression(item.visual)) invalid();
+        if (limits.bulkItems && !reason(item.unavailable.copy)) invalid();
         if (item.moveUp !== undefined && typeof item.moveUp !== "boolean" || item.moveDown !== undefined && typeof item.moveDown !== "boolean") invalid();
       }
     }
@@ -163,6 +172,10 @@ export function constructorModel(raw: unknown, limits: ConstructorLimits, id?: s
   if ((limits.nestedQueries || limits.unions) && raw.scopes === undefined) invalid();
   if (limits.totalSections && !(raw.totalFocus === null || unsigned(raw.totalFocus) && raw.totalFocus < (limits.maxTotalSections ?? 0))) invalid();
   validateScopes(raw);
+  const statements = raw.statements;
+  if (limits.bulkItems && (!Array.isArray(raw.itemFocus) || raw.itemFocus.length > (limits.maxBulkItems ?? 0)
+    || !raw.itemFocus.every(selection => isRecord(selection) && unsigned(selection.statement) && unsigned(selection.clause) && unsigned(selection.item)
+      && !!statements[selection.statement]?.clauses[selection.clause]?.items[selection.item]))) invalid();
   return raw as unknown as ConstructorModel;
 }
 
@@ -211,6 +224,7 @@ export class QueryConstructor {
 
   /** Stale indices are rejected by ESKA, including parallel actions captured before the previous reply. */
   async action(action: ConstructorAction): Promise<void> {
+    if (action.kind === "editItems" && !this.limits.bulkItems || action.kind === "addSourceFields" && !this.limits.addSourceFields) throw new ExplorerError("incompatible");
     if (action.kind === "setDcs" && !this.limits.dcs) throw new ExplorerError("incompatible");
     if (["setInto", "addStatement", "removeStatement", "moveStatement"].includes(action.kind) && !this.limits.packages) throw new ExplorerError("incompatible");
     if (["addTotals", "removeTotals", "moveTotals", "composeTotal", "appendTotal"].includes(action.kind) && !this.limits.totalSections) throw new ExplorerError("incompatible");

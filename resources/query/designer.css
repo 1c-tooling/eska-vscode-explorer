@@ -79,3 +79,17 @@ pre { white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--vscode-
   .controls { max-width: 50%; }
 }
 body.vscode-high-contrast [role=separator], body.vscode-high-contrast-light [role=separator] { border: 1px solid var(--vscode-contrastBorder); }
+
+.item-table { min-width: 0; overflow: auto; }
+.item-toolbar { position: sticky; top: 30px; z-index: 1; background: var(--vscode-editor-background); padding: 2px 0; flex-wrap: wrap; }
+.item-table table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+.item-table th, .item-table td { height: 26px; border-bottom: 1px solid var(--vscode-panel-border); text-align: left; padding: 1px 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.item-table th:first-child { width: 26px; }
+.item-table th:nth-child(2) { width: 44%; }
+.item-table th:nth-child(4) { width: 90px; }
+.item-table th:last-child { width: 72px; }
+.item-table tr[aria-selected=true] { background: var(--vscode-list-activeSelectionBackground); color: var(--vscode-list-activeSelectionForeground); }
+.item-table tr:focus-within { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
+.cell-value { display: block; background: transparent; color: inherit; border: 0; padding: 0; text-align: left; width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.item-table td > input:not([type=checkbox]), .item-table td > select { width: 100%; padding: 0; }
+.add-source-field { display: block; margin-left: 24px; max-width: calc(100% - 24px); text-align: left; }

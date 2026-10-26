@@ -1,12 +1,13 @@
 /* This renderer owns presentation only. ESKA supplies metadata, bindings, syntax and every accepted model. */
 import { ConstructorLayout } from './layout.mjs';
+import { itemTable } from './items.mjs';
 
 (() => {
   const api = acquireVsCodeApi(), root = document.getElementById("root");
   const layout = new ConstructorLayout(api, root);
   const basePages = ["tablesFields", "joins", "group", "conditions", "order"];
   let state, totalSection = 0, totalScope = -1, selected = 0, page = layout.page(0), editing, pendingEdit, search = "", chosenField = "";
-  const expanded = new Set(layout.preferences.expanded);
+  const expanded = new Set(layout.preferences.expanded), itemSelections = new Map(), cellDrafts = new Map();
 
   /** Untrusted names and expressions are always text nodes, never markup. */
   function element(tag, text, className) {
@@ -119,12 +120,24 @@ import { ConstructorLayout } from './layout.mjs';
     node.dataset.section = kind; node.querySelector(".section-title").append(add);
     if (kind === "joins" && state.features.nestedQueries) node.querySelector(".section-title").append(button(l.nested, () => begin({ kind: "append", statement: selected, clause: kind }, { kind: "subqueryJoin", alias: "", join: "left", left: chosenField, comparison: "equal", right: "" }), unavailable(kind), "add-nested"));
     const entries = rows(kind).filter(row => !filter || filter(row.item));
+    if (state.features.bulkItems && !["joins", "conditions", "having"].includes(kind)) { node.append(table(entries)); return node; }
     for (const row of entries) {
       const item = element("div", undefined, "row"), text = element("pre", row.item.preview); text.title = row.item.preview;
       item.append(text, controls(row)); node.append(item);
     }
     if (!entries.length) node.append(element("p", l.noRows, "empty"));
     return node;
+  }
+
+  /** This component stores selection only; the backend returns the resulting identities. */
+  function table(entries) {
+    const key = entries.length ? `${entries[0].selection.statement}:${entries[0].selection.clause}` : '', selection = itemSelections.get(key) ?? { items: [], anchor: -1 };
+    return itemTable(entries, { element, button, cells: cellDrafts, labels: state.labels, selected: selection.items, anchor: selection.anchor,
+      writable: state.model.writable && !state.paused, busy: state.busy,
+      choose: (items, anchor = selection.anchor, redraw = true) => { itemSelections.set(key, {items, anchor}); if(redraw)render(); },
+      run: (operation, items = selection.items) => { if(entries.length)send({kind:'editItems', statement:entries[0].selection.statement, clause:entries[0].selection.clause, items, operation}); },
+      edit: row => begin({kind:'replace',selection:row.selection},row.item.visual,row.item.expression??''), compose,
+      navigate: child => navigate(state.model.scopes[child].branches[0]) });
   }
 
   /** A virtual table selection opens positional value controls; ESKA builds the eventual call. */
@@ -164,6 +177,9 @@ import { ConstructorLayout } from './layout.mjs';
         label.addEventListener("dblclick", () => { if (!label.disabled && !unavailable("sources")) chooseTable(table); });
         const add = button("+", () => chooseTable(table), unavailable("sources"), "table-add"); add.setAttribute("aria-label", `${l.add} ${table.name}`);
         row.append(expand, label, add); group.append(row);
+        if (expanded.has(path) && state.features.addSourceFields && !table.virtualTable) for (const field of details.get(path)?.fields ?? []) {
+          const pick = button(`${l.addSourceField} · ${name(field)}`, () => send({kind:'addSourceFields',statement:selected,source:{kind:'source',table:path,alias:''},fields:[name(field)]}), unavailable('fields') || unavailable('sources'), 'add-source-field'); group.append(pick);
+        }
         if (expanded.has(path)) for (const child of details.get(path)?.tables ?? []) {
           const childButton = button(child.name, () => chooseTable(child), unavailable("sources"), "tabular-section");
           childButton.title = name(child); childButton.dataset.table = name(child); group.append(childButton);
@@ -211,6 +227,7 @@ import { ConstructorLayout } from './layout.mjs';
     const node = sourceFields("fields"), l = state.labels;
     node.querySelector(".section-title").append(button(l.add, () => begin({ kind: "append", statement: selected, clause: "sources" }, blank("sources")), unavailable("sources")));
     if (state.features.nestedQueries) node.querySelector(".section-title").append(button(l.nested, () => compose({ kind: "subquerySource", alias: "" }), unavailable("sources"), "add-nested"));
+    if (state.features.bulkItems) { node.append(table(rows("sources"))); return node; }
     for (const row of rows("sources")) {
       const properties = element("div", undefined, "source-properties"); properties.append(element("pre", row.item.preview), controls(row)); node.append(properties);
     }
@@ -575,6 +592,11 @@ import { ConstructorLayout } from './layout.mjs';
     if (event.data?.type === "model") {
       if (state && state.model.revision !== event.data.model.revision) {
         pendingEdit = undefined;
+        itemSelections.clear(); cellDrafts.clear();
+        for (const focus of event.data.model.itemFocus ?? []) {
+          const key = `${focus.statement}:${focus.clause}`, selection = itemSelections.get(key) ?? {items:[],anchor:focus.item};
+          selection.items.push(focus.item); itemSelections.set(key,selection);
+        }
         if (event.data.model.totalFocus !== undefined && event.data.model.totalFocus !== null) totalSection = event.data.model.totalFocus;
       }
       state = event.data; render();

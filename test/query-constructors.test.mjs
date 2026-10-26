@@ -110,6 +110,14 @@ test("constructor capture releases its allocated token after an invalid model", 
   assert.deepEqual(calls, [{ method: "query/constructorCancel", params: { constructorId: "7" } }]);
 });
 
+/** Atomic batches require a coherent explicit capability even on a newer server. */
+test("bulk constructor operations require minor 31 and complete capabilities", () => {
+  const value = {...capability, visualExpressions:true,metadataCatalog:true,bulkItems:true,addSourceFields:true,maxBulkItems:512};
+  assert.equal(constructorCapabilities({apiVersion:{major:1,minor:31},capabilities:{queryConstructor:value}}).bulkItems,true);
+  for(const [minor,change] of [[30,{}],[31,{addSourceFields:undefined}],[31,{maxBulkItems:513}],[31,{bulkItems:false}]])
+    assert.throws(()=>constructorCapabilities({apiVersion:{major:1,minor},capabilities:{queryConstructor:{...value,...change}}}),{code:'protocolInvalid'});
+});
+
 /** The real standalone protocol and shared recovery queue own both constructor state and canonical draft publication. */
 async function fixture(t, locale, readonly = false) {
   const outer = await mkdtemp(join(process.env.ESKA_TEST_ROOT ?? resolve("../eska-playground"), "explorer-query-constructor-"));
@@ -328,3 +336,25 @@ test("real read-only constructor exposes its lossless model without permitting a
   await constructor.finish(querySnapshot(before)); assert.equal(f.source.record.draft, before);
   assert.equal(await readFile(f.files.module, "utf8"), f.owner);
 });
+
+for (const locale of ['ru-RU','en-US']) {
+  /** The real RPC publishes one revision and leaves every rejected or cancelled edit private. */
+  test(`atomic item sets and source fields preserve owner and draft (${locale})`,{skip:!executable},async t=>{
+    const f=await fixture(t,locale),before=f.source.record.draft,core=await f.source.openConstructor();
+    assert.equal(core.limits.bulkItems,true);
+    const revision=core.model.revision;
+    await core.action({kind:'editItems',statement:0,clause:0,items:[1,0],operation:{kind:'copy',to:2}});
+    assert.equal(core.model.revision,String(BigInt(revision)+1n));
+    assert.match(core.model.text,/A AS A2,\s*B AS B2/);
+    assert.deepEqual(core.model.itemFocus.map(value=>value.item),[2,3]);
+    const captured=structuredClone(core.model);
+    await assert.rejects(core.action({kind:'editItems',statement:0,clause:0,items:[0,1,2,3],operation:{kind:'remove'}}));
+    assert.deepEqual(core.model,captured);
+    const malformed=structuredClone(captured);malformed.itemFocus[0].item=999;
+    assert.throws(()=>constructorModel(malformed,core.limits),{code:'protocolInvalid'});
+    await core.action({kind:'addSourceFields',statement:0,source:{kind:'source',table:'Catalog.Товары',alias:''},fields:['Артикул']});
+    assert.match(core.model.text,/Товары.Артикул/);
+    assert.equal(f.source.record.draft,before);assert.equal(await readFile(f.files.module,'utf8'),f.owner);
+    await core.cancel();assert.equal(f.source.record.draft,before);
+  });
+}

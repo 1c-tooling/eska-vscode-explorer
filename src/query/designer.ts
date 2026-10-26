@@ -100,9 +100,9 @@ export class QueryDesigner implements vscode.Disposable {
         const action = value.action as unknown as ConstructorAction;
         try { await view.binding.core.action(action); this.followStructuralFocus(view, action); await this.refreshFields(view); }
         catch (error) {
-          if (!["remove", "removeUnion", "removeStatement", "removeTotals", "setDcs", "setInto"].includes(action.kind) || !(error instanceof ExplorerError) || error.details?.reason !== "constructor_comments_require_decision") throw error;
+          if (!["remove", "removeUnion", "removeStatement", "removeTotals", "setDcs", "setInto", "editItems"].includes(action.kind) || !(error instanceof ExplorerError) || error.details?.reason !== "constructor_comments_require_decision") throw error;
           const decision = await this.commentDecision();
-          if (decision && (action.kind === "remove" || action.kind === "removeUnion" || action.kind === "removeStatement" || action.kind === "removeTotals" || action.kind === "setDcs" || action.kind === "setInto")) { await view.binding.core.action({ ...action, comments: decision }); this.followStructuralFocus(view, action); await this.refreshFields(view); }
+          if (decision && (action.kind === "remove" || action.kind === "removeUnion" || action.kind === "removeStatement" || action.kind === "removeTotals" || action.kind === "setDcs" || action.kind === "setInto" || action.kind === "editItems")) { await view.binding.core.action({ ...action, comments: decision }); this.followStructuralFocus(view, action); await this.refreshFields(view); }
         }
       }
     } finally { view.busy = false; if (!view.ending) await this.publish(view); }
@@ -110,7 +110,7 @@ export class QueryDesigner implements vscode.Disposable {
 
   /** ESKA remaps the active scope after adding/removing a branch; adapters do not infer survivors from shifted indices. */
   private followStructuralFocus(view: View, action: ConstructorAction): void {
-    if ((["addUnion", "removeUnion", "addStatement", "removeStatement", "moveStatement"].includes(action.kind)) && view.binding.core.model.focus !== undefined && view.binding.core.model.focus !== null) view.statement = view.binding.core.model.focus;
+    if ((["addUnion", "removeUnion", "addStatement", "removeStatement", "moveStatement", "editItems", "addSourceFields"].includes(action.kind)) && view.binding.core.model.focus !== undefined && view.binding.core.model.focus !== null) view.statement = view.binding.core.model.focus;
   }
 
   /** Bound field expressions come from ESKA; this view retains only the selected page's presentation data. */
@@ -177,7 +177,7 @@ export class QueryDesigner implements vscode.Disposable {
     for (const name of ["unions", "totals", "totalGroups", "overall", "autoTotals", "nested", "editNested", "backParent", "branch", "unionAll", "unionDistinct", "addUnion", "unionMismatch", "parameters", "noParameters", "hierarchy", "onlyHierarchy", "noHierarchy", "periods", "noPeriods", "periodBegin", "periodEnd", "second", "minute", "hour", "day", "week", "tenDays", "month", "quarter", "halfYear", "year", "parameterPeriod", "parameterBeginPeriod", "parameterEndPeriod", "parameterPeriodicity", "parameterComplementMethod", "parameterCondition", "parameterAccountCondition", "parameterExtraDimensions", "parameterCorrespondingAccountCondition", "parameterCorrespondingExtraDimensions", "parameterDebitAccountCondition", "parameterDebitExtraDimensions", "parameterCreditAccountCondition", "parameterCreditExtraDimensions", "parameterOrder", "parameterTop", "parameterMainDimensions", "parameterBaseDimensions", "parameterSlices"] as const) {
       labels[name] = this.text(`constructor${name[0]!.toUpperCase()}${name.slice(1)}` as MessageKey);
     }
-    for (const name of ["working", "opened", "toggleCatalog", "toggleTable", "sections", "resizePanes", "resizeText", "addSection", "dcs", "dcsSelect", "dcsWhere", "dcsOptionalSource", "dcsParameter", "dcsVirtualFilter", "dcsOpaque", "dcsChildren", "dcsEnabled", "dcsNotice", "totalSection", "addTotalSection", "having", "packages", "temporaryTable", "destination", "setDestination", "addStatement", "destroyTable", "packageIssue", "index", "categoryTemporaryTable"] as const) {
+    for (const name of ["copy", "selection", "selectAll", "comments", "addSourceField", "working", "opened", "toggleCatalog", "toggleTable", "sections", "resizePanes", "resizeText", "addSection", "dcs", "dcsSelect", "dcsWhere", "dcsOptionalSource", "dcsParameter", "dcsVirtualFilter", "dcsOpaque", "dcsChildren", "dcsEnabled", "dcsNotice", "totalSection", "addTotalSection", "having", "packages", "temporaryTable", "destination", "setDestination", "addStatement", "destroyTable", "packageIssue", "index", "categoryTemporaryTable"] as const) {
       labels[name] = this.text(`constructor${name[0]!.toUpperCase()}${name.slice(1)}` as MessageKey);
     }
     const reasons = Object.fromEntries(["unsupported_statement", "unsupported_construct", "invalid_syntax", "model_limit", "read_only", "required_item", "source_required",

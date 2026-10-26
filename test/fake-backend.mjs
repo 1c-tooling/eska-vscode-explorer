@@ -35,7 +35,7 @@ function handle(request) {
   if (mode === "crash") process.exit(7);
   if (mode === "garbage") { process.stdout.write("ordinary command help\r\n\r\n"); return; }
   if (request.method === "initialize") {
-    const maximum = /^api1[2-7]$/.test(mode) ? Number(mode.slice(3)) : undefined;
+    const maximum = /^api(?:1[2-7]|30)$/.test(mode) ? Number(mode.slice(3)) : undefined;
     if (maximum && request.params.apiVersion.minor > maximum) {
       send({ jsonrpc: "2.0", id: request.id, error: { code: -32000, message: "Request failed",
         data: { kind: "unsupported_version", details: { requested: request.params.apiVersion, supported: { major: 1, minor: maximum } } } } });
