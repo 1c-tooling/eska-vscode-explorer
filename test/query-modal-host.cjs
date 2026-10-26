@@ -176,3 +176,4 @@ exports.run = async function () {
 
 // The normal-window suite reuses the UI driver because extension-test windows deliberately bypass native save confirmations.
 exports.until=until;exports.replace=replace;exports.parentTabs=parentTabs;exports.returned=returned;exports.dirtyOpening=dirtyOpening;
+exports.openQuery=openQuery;

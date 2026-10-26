@@ -20,6 +20,11 @@ if (!isAbsolute(playground)) throw new Error("ESKA_TEST_ROOT must be absolute.")
 const root = await mkdtemp(join(playground, "explorer-host-"));
 try {
   const fixture = await createTreeProject(join(root, "project"), basename(suite) === "language-reference-host.cjs" ? "processing" : process.env.ESKA_HOST_PROJECT_TYPE ?? "configuration");
+  if (basename(suite) === "query-layout-host.cjs") {
+    fixture.query = await (await import("./query-fixture.mjs")).createQuerySource(fixture);
+    const fields = Array.from({ length: 48 }, (_, index) => `${index} AS КолонкаРезультата${index}WithLongEnglishName`).join(',\r\n|');
+    await writeFile(fixture.module, `\ufeffПроцедура Test()\r\nQ = "SELECT ${fields}\r\n|FROM (SELECT 1 AS NestedValue) AS Child";\r\nКонецПроцедуры\r\n`);
+  }
   if (basename(suite) === "language-reference-host.cjs") {
     fixture.reference = await (await import("./language-fixture.mjs")).createReferenceSource(fixture, root);
   }

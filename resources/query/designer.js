@@ -1,9 +1,12 @@
 /* This renderer owns presentation only. ESKA supplies metadata, bindings, syntax and every accepted model. */
+import { ConstructorLayout } from './layout.mjs';
+
 (() => {
   const api = acquireVsCodeApi(), root = document.getElementById("root");
+  const layout = new ConstructorLayout(api, root);
   const basePages = ["tablesFields", "joins", "group", "conditions", "order"];
-  let state, totalSection = 0, totalScope = -1, selected = 0, page = "tablesFields", editing, pendingEdit, search = "", chosenField = "";
-  const expanded = new Set();
+  let state, totalSection = 0, totalScope = -1, selected = 0, page = layout.page(0), editing, pendingEdit, search = "", chosenField = "";
+  const expanded = new Set(layout.preferences.expanded);
 
   /** Untrusted names and expressions are always text nodes, never markup. */
   function element(tag, text, className) {
@@ -32,8 +35,10 @@
   /** All buttons preserve native busy/paused state, with explicit backend explanations for disabled actions. */
   function button(label, action, reason, className) {
     const node = element("button", label, className); node.type = "button";
+    const accessible = label === "↑" ? state.labels.up : label === "↓" ? state.labels.down : label === "+" ? state.labels.add : label;
+    node.title = accessible; node.setAttribute("aria-label", accessible);
     node.disabled = !!reason || state.busy || state.paused;
-    if (reason) node.title = state.reasons[reason] ?? reason;
+    if (reason) node.title = `${accessible}: ${state.reasons[reason] ?? reason}`;
     node.addEventListener("click", action); return node;
   }
 
@@ -104,9 +109,8 @@
     node.append(button(l.remove, () => send({ kind: "remove", selection }), item.unavailable.remove));
     for (const child of item.children ?? []) node.append(button(l.editNested, () => navigate(state.model.scopes[child].branches[0]), null, "edit-nested"));
     node.append(button("↑", () => send({ kind: "move", selection, to: item.index - 1 }), item.moveUp === false || item.index === 0 ? "single_item" : item.unavailable.move));
-    node.lastChild.title = l.up;
     node.append(button("↓", () => send({ kind: "move", selection, to: item.index + 1 }), item.moveDown === false || item.index + 1 === clause.items.length ? "single_item" : item.unavailable.move));
-    node.lastChild.title = l.down; return node;
+    return node;
   }
 
   /** Acknowledged rows remain readable even when their syntax has no structured projection. */
@@ -116,7 +120,8 @@
     if (kind === "joins" && state.features.nestedQueries) node.querySelector(".section-title").append(button(l.nested, () => begin({ kind: "append", statement: selected, clause: kind }, { kind: "subqueryJoin", alias: "", join: "left", left: chosenField, comparison: "equal", right: "" }), unavailable(kind), "add-nested"));
     const entries = rows(kind).filter(row => !filter || filter(row.item));
     for (const row of entries) {
-      const item = element("div", undefined, "row"); item.append(element("pre", row.item.preview), controls(row)); node.append(item);
+      const item = element("div", undefined, "row"), text = element("pre", row.item.preview); text.title = row.item.preview;
+      item.append(text, controls(row)); node.append(item);
     }
     if (!entries.length) node.append(element("p", l.noRows, "empty"));
     return node;
@@ -132,7 +137,7 @@
   /** Database tables are paged by ESKA; only explicitly expanded descriptors are requested. */
   function database() {
     const l = state.labels, node = panel(l.database, "database"), toolbar = element("form", undefined, "search");
-    const input = element("input"); input.type = "search"; input.value = search; input.placeholder = l.search; input.setAttribute("aria-label", l.search);
+    const input = element("input"); input.name = "catalogSearch"; input.type = "search"; input.value = search; input.placeholder = l.search; input.setAttribute("aria-label", l.search);
     input.addEventListener("input", () => { search = input.value; });
     toolbar.append(input, button(l.find, () => api.postMessage({ type: "catalog", search, offset: 0 })));
     toolbar.addEventListener("submit", event => { event.preventDefault(); if (!state.busy) api.postMessage({ type: "catalog", search, offset: 0 }); }); node.append(toolbar);
@@ -146,16 +151,18 @@
     const details = new Map(state.metadata.details);
     for (const [category, tables] of groups) {
       const group = element("details", undefined, "metadata-group"); group.open = true;
+      group.dataset.category = category;
       group.append(element("summary", l[`category${category}`] ?? category));
       for (const table of tables) {
         const row = element("div", undefined, "metadata-table"), path = name(table);
         const expand = button(expanded.has(path) ? "▾" : "▸", () => {
           if (expanded.has(path)) { expanded.delete(path); render(); }
           else { expanded.add(path); if (!details.has(path)) api.postMessage({ type: "catalog", table: path }); else render(); }
-        }); expand.title = table.name;
+          layout.preferences.expanded = [...expanded]; layout.save();
+        }); expand.title = `${l.toggleTable} ${table.name}`; expand.setAttribute("aria-label", expand.title);
         const label = button(table.name, () => {}, null, "table-name"); label.title = path;
         label.addEventListener("dblclick", () => { if (!label.disabled && !unavailable("sources")) chooseTable(table); });
-        const add = button("+", () => chooseTable(table), unavailable("sources"), "table-add"); add.title = l.add;
+        const add = button("+", () => chooseTable(table), unavailable("sources"), "table-add"); add.setAttribute("aria-label", `${l.add} ${table.name}`);
         row.append(expand, label, add); group.append(row);
         if (expanded.has(path)) for (const child of details.get(path)?.tables ?? []) {
           const childButton = button(child.name, () => chooseTable(child), unavailable("sources"), "tabular-section");
@@ -176,6 +183,7 @@
     const l = state.labels, node = panel(l.tables, "source-fields");
     for (const source of state.metadata.fields) {
       const tree = element("details", undefined, "source-tree"); tree.open = source.loaded;
+      tree.dataset.source = source.alias;
       tree.addEventListener("toggle", () => { if (tree.open && !source.loaded && !state.busy) api.postMessage({ type: "fields", table: source.table, alias: source.alias, clause: source.clause, item: source.item }); });
       tree.append(element("summary", source.alias), element("small", source.table));
       if (choose === "fields" && source.fields.length) {
@@ -488,43 +496,60 @@
 
   /** Render acknowledged state with tab navigation and a complete, readonly text preview. */
   function render() {
-    const active = document.activeElement, focus = active?.name, start = active?.selectionStart, end = active?.selectionEnd;
+    layout.capture();
     root.replaceChildren(); if (!state) return;
     const l = state.labels, header = element("header"), actions = element("div", undefined, "header-actions");
     actions.append(button(l.apply, () => api.postMessage({ type: "apply" }), state.model.issues?.length ? "union_field_count" : null, "primary"));
     const cancel = button(l.cancel, () => api.postMessage({ type: "cancel" })); cancel.disabled = state.busy; actions.append(cancel); header.append(actions);
+    const previous = selected;
     selected = Math.min(state.statement ?? selected, Math.max(0, state.model.statements.length - 1));
+    if (selected !== previous) page = layout.page(selected, state.model.scopes?.[statement()?.scope]?.parent != null ? "tablesFields" : page);
     navigation(header); root.append(header);
+    const catalogToggle = button(l.database, () => { layout.preferences.catalogCollapsed = !layout.collapsed(); layout.grid(); layout.save(); }, null, "catalog-toggle");
+    catalogToggle.setAttribute("aria-label", l.toggleCatalog); header.append(catalogToggle);
+    const status = element("span", state.busy ? l.working : state.paused ? state.pausedText : !state.model.writable ? state.reasons.read_only : l.opened, "constructor-status");
+    status.setAttribute("role", "status"); header.append(status);
     if (statement()?.package?.operation === "destroy") page = "packages";
     if (state.paused) root.append(element("p", state.pausedText, "error"));
     for (const issue of state.model.issues ?? []) root.append(element("p", issue.code === "union_field_count" ? l.unionMismatch : `${l.packageIssue}: ${issue.table}${issue.column ? `.${issue.column}` : ""}`, "error"));
     const pages = [...basePages, ...(state.features.unions ? ["unions"] : []), ...(state.features.totals ? ["totals"] : []), ...(state.features.packages && !statement()?.nested ? ["packages"] : []), ...(state.features.dcs ? ["dcs"] : [])];
     if (!pages.includes(page)) page = "tablesFields";
+    const scope = state.model.scopes?.[statement()?.scope];
+    const used = { unions: scope?.branches.length > 1, totals: rows("totals").length > 0 || rows("totalGroups").length > 0,
+      packages: state.model.scopes?.filter(scope => scope.parent === null).length > 1 || !!statement()?.package?.destination || statement()?.package?.operation === "destroy",
+      dcs: statement()?.dcs?.nodes.some(node => node.enabled) };
     const tabs = element("nav", undefined, "tabs"); tabs.setAttribute("role", "tablist");
+    tabs.setAttribute("aria-label", l.sections);
+    const activate = target => { layout.select(selected, target); page = target; editing = undefined; render(); document.getElementById(`tab-${target}`)?.focus(); };
+    const visiblePages = pages.filter(value => basePages.includes(value) || used[value] || layout.preferences.extra.includes(value) || value === page);
     for (const value of pages) {
-      const activate = target => { page = target; editing = undefined; render(); document.getElementById(`tab-${target}`)?.focus(); };
       const tab = button(l[value], () => activate(value)); tab.setAttribute("role", "tab"); tab.tabIndex = page === value ? 0 : -1;
+      tab.hidden = !visiblePages.includes(value);
       tab.addEventListener("keydown", event => {
-        const index = pages.indexOf(value);
-        const next = event.key === "ArrowRight" ? pages[(index + 1) % pages.length] : event.key === "ArrowLeft" ? pages[(index + pages.length - 1) % pages.length]
-          : event.key === "Home" ? pages[0] : event.key === "End" ? pages[pages.length - 1] : undefined;
+        const index = visiblePages.indexOf(value);
+        const next = event.key === "ArrowRight" ? visiblePages[(index + 1) % visiblePages.length] : event.key === "ArrowLeft" ? visiblePages[(index + visiblePages.length - 1) % visiblePages.length]
+          : event.key === "Home" ? visiblePages[0] : event.key === "End" ? visiblePages[visiblePages.length - 1] : undefined;
         if (next && !state.busy) { event.preventDefault(); activate(next); }
       });
       tab.setAttribute("aria-selected", String(page === value)); tab.id = `tab-${value}`; tab.setAttribute("aria-controls", "query-page"); tabs.append(tab);
     }
-    root.append(tabs);
+    const sectionBar = element("div", undefined, "section-bar"); sectionBar.append(tabs);
+    const optional = pages.filter(value => !visiblePages.includes(value));
+    if (optional.length) {
+      const more = element("select"); more.setAttribute("aria-label", l.addSection); more.className = "add-section"; more.disabled = state.busy || state.paused;
+      for (const value of ["", ...optional]) { const option = element("option", value ? l[value] : l.addSection); option.value = value; more.append(option); }
+      more.addEventListener("change", () => { if (optional.includes(more.value)) activate(more.value); }); sectionBar.append(more);
+    }
+    root.append(sectionBar);
     const owner = statement(), content = element("div", undefined, "sections"); content.id = "query-page"; content.setAttribute("role", "tabpanel"); content.setAttribute("aria-labelledby", `tab-${page}`);
     if (!owner) content.append(element("p", l.empty));
     else if (owner.unavailable && page !== "dcs") content.append(element("p", state.reasons[owner.unavailable] ?? l.empty, "notice"));
     else renderPage(content);
     root.append(content); if (editing) renderEditor();
-    const preview = element("details", undefined, "query-preview"); preview.append(element("summary", l.text), element("pre", state.model.text)); root.append(preview);
+    const preview = element("details", undefined, "query-preview"), text = element("pre", state.model.text); text.id = "query-text";
+    text.tabIndex = 0; text.setAttribute("aria-label", l.text); preview.append(element("summary", l.text), text); root.append(preview);
     root.setAttribute("aria-busy", String(state.busy));
-    if (focus) {
-      const restored = [...root.querySelectorAll("input,textarea,select")].find(node => node.name === focus);
-      if (restored) { restored.focus(); if (typeof start === "number" && restored.setSelectionRange && !["select-one", "select-multiple"].includes(restored.type)) restored.setSelectionRange(start, end); }
-    }
-    tabs.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: "nearest", inline: "nearest" });
+    layout.mount(selected, page, state.model.revision, l);
   }
 
   /** While a child scope is open, parent selectors are replaced with one explicit return control. */

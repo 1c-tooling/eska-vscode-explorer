@@ -36,7 +36,9 @@ exports.connectWorkbench = async function (until) {
     if (!target) return false;
     connection = await attach(target); return true;
   }, 'native workbench endpoint');
-  return { close: () => connection.close(), evaluate: async expression => {
+  return { close: () => connection.close(), viewport: async (width, height) => {
+    await connection.request('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
+  }, evaluate: async expression => {
     const value = await connection.request('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true });
     if (value.exceptionDetails) throw new Error(JSON.stringify(value.exceptionDetails)); return value.result.value;
   } };
@@ -64,6 +66,7 @@ exports.connect = async function (until) {
   };
   await until(async () => await evaluate('document.getElementById("root").getAttribute("aria-busy") !== "true"'), 'constructor metadata controls ready');
   return { evaluate, close: () => { for (const connection of connections.values()) connection.close(); },
+    pointer: (type, x, y) => found.connection.request('Input.dispatchMouseEvent', { type, x, y, button: 'left', buttons: type === 'mouseReleased' ? 0 : 1, clickCount: 1 }),
     screenshot: async file => {
       const [connection] = connections.values(); await connection.request('Page.enable');
       const image = await connection.request('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false });
