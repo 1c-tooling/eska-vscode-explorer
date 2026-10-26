@@ -2,7 +2,7 @@ import * as vscode from "vscode";
 import { randomBytes } from "node:crypto";
 import { ExplorerError, isRecord } from "../protocol.js";
 import { message, type MessageKey } from "../messages.js";
-import type { CatalogPage, CatalogField, CatalogParameter, ConstructorSource, ConstructorAction } from "./constructors.js";
+import type { CatalogPage, CatalogField, CatalogParameter, ConstructorSource, ConstructorAction, ConstructorModel } from "./constructors.js";
 import type { NativeQueryConstructor } from "./native-constructor.js";
 import { QUERY_SCHEME, type QueryTabs } from "./tabs.js";
 
@@ -10,6 +10,7 @@ interface View {
   panel: vscode.WebviewPanel; binding: NativeQueryConstructor; busy: boolean; ending: boolean; failedApply: boolean;
   statement: number; catalog?: CatalogPage; search?: string; browsed: Map<string, CatalogPage>;
   catalogKey?: string; fieldsKey?: string; fields?: (ConstructorSource & { fields: CatalogField[]; signature?: CatalogParameter[]; found: boolean; loaded: boolean })[]; metadataFailed?: boolean;
+  preview?: { action:ConstructorAction;model:ConstructorModel;baseRevision:string };
   resultKey?: string; resultFields?: CatalogField[];
 }
 
@@ -62,9 +63,17 @@ export class QueryDesigner implements vscode.Disposable {
       view.ending = true; try { await view.binding.cancel(); } finally { view.panel.dispose(); } return;
     }
     if (!view.binding.current || view.failedApply) throw new ExplorerError("sourceChanged");
+    if(view.preview&&!['applyPreview','cancelPreview','cancel'].includes(String(value.type)))return;
     view.busy = true; await this.publish(view);
     try {
-      if (value.type === "ready") {
+      if(value.type==='preview'&&isRecord(value.action)){
+        const action=value.action as unknown as ConstructorAction,baseRevision=view.binding.core.model.revision;
+        const model=await view.binding.core.preview(action);view.preview={action,model,baseRevision};
+      }else if(value.type==='cancelPreview'){delete view.preview;
+      }else if(value.type==='applyPreview'&&view.preview){
+        const preview=view.preview;if(preview.baseRevision!==view.binding.core.model.revision)throw new ExplorerError('obsolete');
+        await view.binding.core.action(preview.action);delete view.preview;this.followStructuralFocus(view,preview.action);await this.refreshFields(view);
+      }else if (value.type === "ready") {
         if (view.binding.core.limits.visual) {
           try { view.catalog = await view.binding.core.catalog(this.virtualCatalog(view)); await this.refreshFields(view); }
           catch { view.metadataFailed = true; }
@@ -110,7 +119,7 @@ export class QueryDesigner implements vscode.Disposable {
 
   /** ESKA remaps the active scope after adding/removing a branch; adapters do not infer survivors from shifted indices. */
   private followStructuralFocus(view: View, action: ConstructorAction): void {
-    if ((["addUnion", "removeUnion", "addStatement", "removeStatement", "moveStatement", "editItems", "addSourceFields"].includes(action.kind)) && view.binding.core.model.focus !== undefined && view.binding.core.model.focus !== null) view.statement = view.binding.core.model.focus;
+    if ((["addUnion", "removeUnion", "addStatement", "removeStatement", "moveStatement", "editItems", "addSourceFields", "alignUnion"].includes(action.kind)) && view.binding.core.model.focus !== undefined && view.binding.core.model.focus !== null) view.statement = view.binding.core.model.focus;
   }
 
   /** Bound field expressions come from ESKA; this view retains only the selected page's presentation data. */
@@ -177,13 +186,13 @@ export class QueryDesigner implements vscode.Disposable {
     for (const name of ["unions", "totals", "totalGroups", "overall", "autoTotals", "nested", "editNested", "backParent", "branch", "unionAll", "unionDistinct", "addUnion", "unionMismatch", "parameters", "noParameters", "hierarchy", "onlyHierarchy", "noHierarchy", "periods", "noPeriods", "periodBegin", "periodEnd", "second", "minute", "hour", "day", "week", "tenDays", "month", "quarter", "halfYear", "year", "parameterPeriod", "parameterBeginPeriod", "parameterEndPeriod", "parameterPeriodicity", "parameterComplementMethod", "parameterCondition", "parameterAccountCondition", "parameterExtraDimensions", "parameterCorrespondingAccountCondition", "parameterCorrespondingExtraDimensions", "parameterDebitAccountCondition", "parameterDebitExtraDimensions", "parameterCreditAccountCondition", "parameterCreditExtraDimensions", "parameterOrder", "parameterTop", "parameterMainDimensions", "parameterBaseDimensions", "parameterSlices"] as const) {
       labels[name] = this.text(`constructor${name[0]!.toUpperCase()}${name.slice(1)}` as MessageKey);
     }
-    for (const name of ["editPredicate","booleanAll","booleanAny","booleanNot","between","isNull","conditionKind","rangeBegin","rangeEnd","moveHaving","moveWhere","insertField", "copy", "selection", "selectAll", "comments", "addSourceField", "working", "opened", "toggleCatalog", "toggleTable", "sections", "resizePanes", "resizeText", "addSection", "dcs", "dcsSelect", "dcsWhere", "dcsOptionalSource", "dcsParameter", "dcsVirtualFilter", "dcsOpaque", "dcsChildren", "dcsEnabled", "dcsNotice", "totalSection", "addTotalSection", "having", "packages", "temporaryTable", "destination", "setDestination", "addStatement", "destroyTable", "packageIssue", "index", "categoryTemporaryTable"] as const) {
+    for (const name of ["alignUnion","previewChanges","acceptChanges","beforeChanges","afterChanges","editPredicate","booleanAll","booleanAny","booleanNot","between","isNull","conditionKind","rangeBegin","rangeEnd","moveHaving","moveWhere","insertField", "copy", "selection", "selectAll", "comments", "addSourceField", "working", "opened", "toggleCatalog", "toggleTable", "sections", "resizePanes", "resizeText", "addSection", "dcs", "dcsSelect", "dcsWhere", "dcsOptionalSource", "dcsParameter", "dcsVirtualFilter", "dcsOpaque", "dcsChildren", "dcsEnabled", "dcsNotice", "totalSection", "addTotalSection", "having", "packages", "temporaryTable", "destination", "setDestination", "addStatement", "destroyTable", "packageIssue", "index", "categoryTemporaryTable"] as const) {
       labels[name] = this.text(`constructor${name[0]!.toUpperCase()}${name.slice(1)}` as MessageKey);
     }
     const reasons = Object.fromEntries(["unsupported_statement", "unsupported_construct", "invalid_syntax", "model_limit", "read_only", "required_item", "source_required",
       "join_order_dependency", "single_item", "expression_too_large", "unsupported"].map(reason => [reason, this.reason(reason)]));
     reasons.union_field_count = this.text("constructorUnionMismatch");
-    await view.panel.webview.postMessage({ type: "model", model: view.binding.core.model, labels, reasons, maxExpression: view.binding.core.limits.maxExpression,
+    await view.panel.webview.postMessage({ preview:view.preview?{text:view.preview.model.text,baseRevision:view.preview.baseRevision}:null, type: "model", model: view.binding.core.model, labels, reasons, maxExpression: view.binding.core.limits.maxExpression,
       visual: view.binding.core.limits.visual === true, features: view.binding.core.limits, statement: view.statement,
       metadata: { catalog: view.catalog, details: [...view.browsed], fields: view.fields ?? [], resultFields: view.resultFields ?? [], failed: view.metadataFailed === true },
       busy: view.busy, paused: !view.binding.current || view.failedApply, pausedText: this.text(view.failedApply ? "constructorReceiptFailed" : "constructorChanged") });

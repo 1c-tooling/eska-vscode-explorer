@@ -373,3 +373,18 @@ for(const locale of ['ru-RU','en-US']) {
   await core.cancel();assert.equal(await readFile(f.files.module,'utf8'),f.owner);
  });
 }
+
+/** Preview and matrix inspection never publish a working revision or fill an absent cell implicitly. */
+test('union matrix previews alignment without changing the acknowledged constructor',{skip:!executable},async t=>{
+ const f=await fixture(t,'en-US');const text='SELECT 1 AS N UNION ALL SELECT 2 AS N, 3 AS Extra';await f.store.saveDraft(f.source.record.id,text);
+ const core=await f.source.openConstructor(),before=structuredClone(core.model);assert.equal(core.limits.unionMatrix,true);assert.equal(core.model.statements[0].unionMatrix.canAlign,true);assert.equal(core.model.statements[0].unionMatrix.columns[1].cells[0],null);
+ const action={kind:'alignUnion',statement:0},preview=await core.preview(action);assert.match(preview.text,/NULL AS Extra/);assert.deepEqual(core.model,before);assert.equal(f.source.record.draft,text);
+ await core.action(action);assert.equal(core.model.text,preview.text);assert.equal(core.model.revision,'2');assert.deepEqual(core.model.issues,[]);
+ const malformed=structuredClone(core.model);malformed.statements[0].unionMatrix.columns[0].cells[0].item=100;
+ assert.throws(()=>constructorModel(malformed,core.limits),{code:'protocolInvalid'});await core.cancel();assert.equal(f.source.record.draft,text);
+});
+/** Preview goes through the same source/session protection as an accepted edit. */
+test('read-only constructor refuses preview without allocating a new revision',{skip:!executable},async t=>{
+ const f=await fixture(t,'en-US',true),core=await f.source.openConstructor(),before=structuredClone(core.model);
+ await assert.rejects(core.preview({kind:'editItems',statement:0,clause:0,items:[0],operation:{kind:'copy',to:2}}),error=>error.details?.reason==='user_read_only');assert.deepEqual(core.model,before);await core.cancel();
+});

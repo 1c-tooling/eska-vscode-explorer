@@ -9,7 +9,7 @@ import { predicateForm, emptyPredicate } from './predicates.mjs';
   const layout = new ConstructorLayout(api, root);
   const basePages = ["tablesFields", "joins", "group", "conditions", "order"];
   let state, totalSection = 0, totalScope = -1, selected = 0, page = layout.page(0), editing, pendingEdit, search = "", chosenField = "";
-  const expanded = new Set(layout.preferences.expanded), itemSelections = new Map(), cellDrafts = new Map();
+  const expanded = new Set(layout.preferences.expanded), itemSelections = new Map(), cellDrafts = new Map(), matrixSelections = new Map();
 
   /** Untrusted names and expressions are always text nodes, never markup. */
   function element(tag, text, className) {
@@ -40,7 +40,7 @@ import { predicateForm, emptyPredicate } from './predicates.mjs';
     const node = element("button", label, className); node.type = "button";
     const accessible = label === "↑" ? state.labels.up : label === "↓" ? state.labels.down : label === "+" ? state.labels.add : label;
     node.title = accessible; node.setAttribute("aria-label", accessible);
-    node.disabled = !!reason || state.busy || state.paused;
+    node.disabled = !!reason || state.busy || state.paused || !!state.preview && !className?.startsWith("preview-");
     if (reason) node.title = `${accessible}: ${state.reasons[reason] ?? reason}`;
     node.addEventListener("click", action); return node;
   }
@@ -259,6 +259,21 @@ import { predicateForm, emptyPredicate } from './predicates.mjs';
   function unions() {
     const l = state.labels, node = panel(l.unions, "union-branches"), scope = state.model.scopes[statement().scope];
     node.querySelector(".section-title").append(button(l.addUnion, () => send({ kind: "addUnion", statement: selected, all: true }), statement().unavailable, "add-union"));
+    const matrix=state.features.unionMatrix&&state.model.statements[scope.branches[0]].unionMatrix;
+    if(matrix){
+      const chosen=matrixSelections.get(matrix.scope)??0, selection=matrix.columns[chosen]?.cells.find(Boolean), toolbar=node.querySelector('.section-title');
+      const preview=action=>api.postMessage({type:'preview',action});
+      toolbar.append(button(l.alignUnion,()=>preview({kind:'alignUnion',statement:selected}),matrix.canAlign&&!state.busy?null:'unsupported','align-union'));
+      for(const [label,to] of [['↑',chosen-1],['↓',chosen+2]])toolbar.append(button(label,()=>preview({kind:'editItems',statement:selection.statement,clause:selection.clause,items:[selection.item],operation:{kind:'move',to}}),!selection||chosen===0&&to<0||to>matrix.columns.length||matrix.canAlign?'unsupported':null,'matrix-move'));
+      const table=element('table',undefined,'union-matrix'), head=element('tr');head.append(element('th',l.alias));
+      for(const id of matrix.branches)head.append(element('th',`${l.branch} ${state.model.statements[id].branch+1}`));table.append(head);
+      for(const column of matrix.columns){
+        const row=element('tr');row.dataset.column=String(column.index);row.setAttribute('aria-selected',String(chosen===column.index));
+        const name=element('td'),pick=button(column.alias??String(column.index+1),()=>{matrixSelections.set(matrix.scope,column.index);render();},null,'matrix-column');name.append(pick);row.append(name);
+        for(const cell of column.cells){const td=element('td');if(cell){const item=state.model.statements[cell.statement].clauses[cell.clause].items[cell.item];td.append(button(item.preview,()=>begin({kind:'replace',selection:cell},item.visual,item.expression??''),item.unavailable.replace,'matrix-cell'));}else td.append(element('span','—'));row.append(td);}table.append(row);
+      }
+      node.append(table);
+    }
     for (const [index, id] of scope.branches.entries()) {
       const owner = state.model.statements[id], row = element("div", undefined, "row"); row.dataset.branch = String(id);
       row.append(button(`${l.branch} ${index + 1}`, () => navigate(id)), element("pre", owner.columns.join(", ")));
@@ -535,7 +550,7 @@ import { predicateForm, emptyPredicate } from './predicates.mjs';
     root.replaceChildren(); if (!state) return;
     const l = state.labels, header = element("header"), actions = element("div", undefined, "header-actions");
     actions.append(button(l.apply, () => api.postMessage({ type: "apply" }), state.model.issues?.length ? "union_field_count" : null, "primary"));
-    const cancel = button(l.cancel, () => api.postMessage({ type: "cancel" })); cancel.disabled = state.busy; actions.append(cancel); header.append(actions);
+    const cancel = button(l.cancel, () => api.postMessage({ type: "cancel" })); cancel.disabled = state.busy || !!state.preview; actions.append(cancel); header.append(actions);
     const previous = selected;
     selected = Math.min(state.statement ?? selected, Math.max(0, state.model.statements.length - 1));
     if (selected !== previous) page = layout.page(selected, state.model.scopes?.[statement()?.scope]?.parent != null ? "tablesFields" : page);
@@ -583,6 +598,15 @@ import { predicateForm, emptyPredicate } from './predicates.mjs';
     root.append(content); if (editing) renderEditor();
     const preview = element("details", undefined, "query-preview"), text = element("pre", state.model.text); text.id = "query-text";
     text.tabIndex = 0; text.setAttribute("aria-label", l.text); preview.append(element("summary", l.text), text); root.append(preview);
+    if(state.preview){
+      content.inert=true;preview.inert=true;
+      const dialog=element('section',undefined,'action-preview');dialog.setAttribute('role','dialog');dialog.setAttribute('aria-modal','true');dialog.setAttribute('aria-label',l.previewChanges);dialog.append(element('h2',l.previewChanges));
+      const panes=element('div',undefined,'preview-diff');for(const [label,value]of [[l.beforeChanges,state.model.text],[l.afterChanges,state.preview.text]]){const pane=element('div');pane.append(element('h3',label),element('pre',value));panes.append(pane);}dialog.append(panes);
+      dialog.append(button(l.acceptChanges,()=>api.postMessage({type:'applyPreview'}),null,'preview-accept'),button(l.close,()=>api.postMessage({type:'cancelPreview'}),null,'preview-cancel'));
+      dialog.addEventListener('keydown',event=>{if(event.key==='Escape'){event.preventDefault();api.postMessage({type:'cancelPreview'});}if(event.key==='Tab'){const buttons=[...dialog.querySelectorAll('button:not(:disabled)')];const next=buttons[(buttons.indexOf(document.activeElement)+(event.shiftKey?-1:1)+buttons.length)%buttons.length];if(next){event.preventDefault();next.focus();}}});
+      for(const child of root.querySelectorAll(':scope > *'))child.inert=true;root.append(dialog);
+      queueMicrotask(()=>{if(!dialog.contains(document.activeElement))dialog.querySelector('button:not(:disabled)')?.focus();});
+    }
     root.setAttribute("aria-busy", String(state.busy));
     layout.mount(selected, page, state.model.revision, l);
   }

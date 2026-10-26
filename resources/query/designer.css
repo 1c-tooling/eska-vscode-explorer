@@ -99,3 +99,13 @@ body.vscode-high-contrast [role=separator], body.vscode-high-contrast-light [rol
 
 .predicate-node { min-width: 0; flex-basis: 100%; display: flex; flex-wrap: wrap; gap: 6px; border: 1px solid var(--vscode-panel-border); padding: 6px; }
 .predicate-node .predicate-node { margin-left: 12px; flex-basis: calc(100% - 12px); }
+
+.union-matrix { border-collapse: collapse; min-width: 100%; }
+.union-matrix td, .union-matrix th { border: 1px solid var(--vscode-panel-border); padding: 2px 4px; min-width: 100px; max-width: 260px; }
+.union-matrix button { display: block; width: 100%; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.union-matrix tr[aria-selected=true] { background: var(--vscode-list-inactiveSelectionBackground); }
+.action-preview { position: fixed; inset: 24px; z-index: 20; background: var(--vscode-editor-background); border-color: var(--vscode-focusBorder); display: flex; flex-wrap: wrap; gap: 6px; overflow: auto; }
+.action-preview h2 { flex-basis: 100%; }
+.preview-diff { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; width: 100%; flex: 1 1 100%; min-height: 0; }
+.preview-diff > div { min-width: 0; overflow: auto; }
+.preview-diff pre { white-space: pre; max-height: 65vh; overflow: auto; }

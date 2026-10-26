@@ -8,8 +8,8 @@ export const CLAUSES = [...BASE_CLAUSES, "totals", "totalGroups"] as const;
 export const PACKAGE_CLAUSES = [...CLAUSES, "into", "destroy", "index"] as const;
 export const HAVING_CLAUSES = [...PACKAGE_CLAUSES, "having"] as const;
 export type ConstructorClauseKind = typeof HAVING_CLAUSES[number];
-export type ConstructorMethod = "query/constructorOpen" | "query/constructorPlan" | "query/constructorModel" | "query/constructorAction" | "query/constructorFinish" | "query/constructorCancel" | "query/constructorCatalog";
-export interface ConstructorLimits { maxExpression: number; maxModel: number; visual?: boolean; virtualTables?: boolean; nestedQueries?: boolean; unions?: boolean; totals?: boolean; packages?: boolean; having?: boolean; totalSections?: boolean; maxTotalSections?: number; dcs?: boolean; bulkItems?: boolean; maxBulkItems?: number; addSourceFields?: boolean; predicates?: boolean }
+export type ConstructorMethod = "query/constructorOpen" | "query/constructorPlan" | "query/constructorModel" | "query/constructorAction" | "query/constructorFinish" | "query/constructorCancel" | "query/constructorCatalog" | "query/constructorPreview";
+export interface ConstructorLimits { maxExpression: number; maxModel: number; visual?: boolean; virtualTables?: boolean; nestedQueries?: boolean; unions?: boolean; totals?: boolean; packages?: boolean; having?: boolean; totalSections?: boolean; maxTotalSections?: number; dcs?: boolean; bulkItems?: boolean; maxBulkItems?: number; addSourceFields?: boolean; predicates?: boolean; unionMatrix?:boolean; actionPreview?:boolean }
 export interface ConstructorSelection { statement: number; clause: number; item: number }
 export type Comparison = "equal" | "notEqual" | "less" | "lessOrEqual" | "greater" | "greaterOrEqual" | "like" | "in" | "inHierarchy";
 export type Aggregate = "sum" | "count" | "minimum" | "maximum" | "average" | null;
@@ -32,7 +32,8 @@ export interface CatalogField { russian: string; english: string }
 export interface CatalogPage { tables: CatalogTable[]; fields: CatalogField[]; parameters?: CatalogParameter[]; temporaryTables?: { name: string; scope: number; statement: number }[]; nextOffset: number | null; found: boolean; limitedContext: boolean; contextFingerprint: string }
 export interface CatalogQuery { search?: string; offset?: number; limit?: number; table?: string; qualifier?: string; virtualTables?: boolean; source?: ConstructorSelection; scope?: number; atStatement?: number }
 export type Predicate = {kind:'all'|'any';children:Predicate[]}|{kind:'not';child:Predicate}|{kind:'compare';left:string;comparison:Comparison;right:string}|{kind:'between';expression:string;begin:string;end:string}|{kind:'isNull';expression:string;negated:boolean}|{kind:'raw';expression:string};
-export type ConstructorAction = {kind:'setJoinKind';selection:ConstructorSelection;join:'inner'|'left'|'right'|'full'}
+export type ConstructorAction = {kind:'alignUnion';statement:number}
+  | {kind:'setJoinKind';selection:ConstructorSelection;join:'inner'|'left'|'right'|'full'}
   | {kind:'setPredicate';statement:number;clause:'conditions'|'having'|'joins';selection:ConstructorSelection|null;predicate:Predicate}
   | {kind:'movePredicate';selection:ConstructorSelection;target:'conditions'|'having'}
   | { kind: "compose"; statement: number; selection: ConstructorSelection | null; expression: VisualExpression }
@@ -67,6 +68,7 @@ export interface ConstructorStatement {
   russian?: boolean; sources?: ConstructorSource[];
   scope?: number; branch?: number; nested?: boolean; result?: boolean; columns?: string[];
   package?: PackageControls;
+  unionMatrix?:UnionMatrix|null;
   totalSections?: ConstructorTotalSection[]; addTotals?: boolean;
   dcs?: { russian: boolean; addSelect: boolean; addWhere: boolean; nodes: DcsNode[] };
 }
@@ -77,6 +79,7 @@ export interface DcsNode { preview: string; index: number; kind: DcsKind; range:
 export interface ConstructorTotalSection { index: number; fields: number; groups: number; range: ByteRange; remove: boolean; moveUp: number | null; moveDown: number | null }
 export interface PackageControls { operation: "select" | "destroy" | null; position: number | null; first: number; destination: string | null; add: boolean; remove: boolean; setInto: boolean; moveUp: number | null; moveDown: number | null }
 export interface ConstructorSource { table: string; alias: string; clause?: number; item?: number; derived?: boolean; nestedScope?: number | null; parameters?: string[] }
+export interface UnionMatrix {scope:number;branches:number[];columns:{index:number;alias:string|null;cells:(ConstructorSelection|null)[]}[];canAlign:boolean}
 export interface ConstructorScope { index: number; range: ByteRange; parent: number | null; branches: number[]; result: number; unions: { all: boolean }[] }
 export interface ConstructorModel {
   id: string; revision: string; snapshot: string; text: string; bytes: number; writable: boolean; statements: ConstructorStatement[];
@@ -130,6 +133,7 @@ export function constructorCapabilities(hello: unknown): ConstructorLimits | und
     flags.bulkItems = true; flags.addSourceFields = true; flags.maxBulkItems = value.maxBulkItems;
   }
   if(value.predicates!==undefined) {if(hello.apiVersion.minor<32||value.predicates!==true)invalid();flags.predicates=true;}
+  for(const key of ['unionMatrix','actionPreview'] as const)if(value[key]!==undefined){if(hello.apiVersion.minor<32||value[key]!==true)invalid();flags[key]=true;}
   const clauses = flags.having ? HAVING_CLAUSES : flags.packages ? PACKAGE_CLAUSES : flags.totals ? CLAUSES : BASE_CLAUSES;
   if (value.clauses.length !== clauses.length || !value.clauses.every((kind, index) => kind === clauses[index])) invalid();
   const visual = value.visualExpressions !== undefined || value.metadataCatalog !== undefined;
@@ -185,6 +189,13 @@ export function constructorModel(raw: unknown, limits: ConstructorLimits, id?: s
   if (limits.bulkItems && (!Array.isArray(raw.itemFocus) || raw.itemFocus.length > (limits.maxBulkItems ?? 0)
     || !raw.itemFocus.every(selection => isRecord(selection) && unsigned(selection.statement) && unsigned(selection.clause) && unsigned(selection.item)
       && !!statements[selection.statement]?.clauses[selection.clause]?.items[selection.item]))) invalid();
+  if(limits.unionMatrix)for(const statement of statements){
+    const matrix=statement.unionMatrix;
+    if(matrix===null)continue;
+    if(!isRecord(matrix)||!unsigned(matrix.scope)||!Array.isArray(matrix.branches)||matrix.branches.length>256||!matrix.branches.every(id=>unsigned(id)&&!!statements[id])||typeof matrix.canAlign!=='boolean'||!Array.isArray(matrix.columns)||matrix.columns.length>512)invalid();
+    const branches=matrix.branches;
+    for(const [index,column] of matrix.columns.entries())if(!isRecord(column)||column.index!==index||!(column.alias===null||shortText(column.alias))||!Array.isArray(column.cells)||column.cells.length!==matrix.branches.length||!column.cells.every((cell,branch)=>cell===null||isRecord(cell)&&unsigned(cell.statement)&&cell.statement===branches[branch]&&unsigned(cell.clause)&&unsigned(cell.item)&&!!statements[cell.statement]?.clauses[cell.clause]?.items[cell.item]))invalid();
+  }
   return raw as unknown as ConstructorModel;
 }
 
@@ -231,8 +242,17 @@ export class QueryConstructor {
     return value as unknown as CatalogPage;
   }
 
+  /** A preview is validated against the same snapshot and never replaces this acknowledged model. */
+  async preview(action:ConstructorAction):Promise<ConstructorModel>{
+    if(!this.limits.actionPreview)throw new ExplorerError('incompatible');
+    const revision=this.current.revision,result=await this.request('query/constructorPreview',{action});
+    if(!isRecord(result)||result.baseRevision!==revision||this.current.revision!==revision)throw new ExplorerError('obsolete');
+    return constructorModel(result.preview,this.limits,this.current.id);
+  }
+
   /** Stale indices are rejected by ESKA, including parallel actions captured before the previous reply. */
   async action(action: ConstructorAction): Promise<void> {
+    if(action.kind==="alignUnion"&&!this.limits.unionMatrix)throw new ExplorerError("incompatible");
     if (["setJoinKind","setPredicate","movePredicate"].includes(action.kind)&&!this.limits.predicates)throw new ExplorerError("incompatible");
     if (action.kind === "editItems" && !this.limits.bulkItems || action.kind === "addSourceFields" && !this.limits.addSourceFields) throw new ExplorerError("incompatible");
     if (action.kind === "setDcs" && !this.limits.dcs) throw new ExplorerError("incompatible");
