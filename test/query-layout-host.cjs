@@ -17,6 +17,8 @@ exports.run = async function () {
     const draft = await openQuery(uri), original = draft.getText(), start = performance.now();
     await vscode.commands.executeCommand('workbench.action.joinAllGroups');
     await vscode.commands.executeCommand('workbench.action.closeSidebar');
+    await vscode.commands.executeCommand('workbench.action.closeAuxiliaryBar');
+    await vscode.commands.executeCommand('workbench.action.closePanel');
     await vscode.commands.executeCommand('eska.explorer.queryConstructor', draft.uri);
     client = await connect(until); workbench = await connectWorkbench(until);
     const openMs = performance.now() - start;
@@ -29,11 +31,11 @@ exports.run = async function () {
         await vscode.workspace.getConfiguration('window').update('zoomLevel', Math.log(zoom / 100) / Math.log(1.2), vscode.ConfigurationTarget.Global);
         await settleViewport(client);
         const geometry = await client.evaluate(`(() => {
-          const root = document.getElementById('root'), header = root.querySelector('header'), fields = root.querySelector('[data-section="fields"]'), rows = [...fields.querySelectorAll('.row')];
+          const root = document.getElementById('root'), header = root.querySelector('header'), fields = root.querySelector('[data-section="fields"]'), rows = [...fields.querySelectorAll('.row,tbody tr')];
           const bounds = node => {const {x,y,width,height}=node.getBoundingClientRect();return {x,y,width,height};};
-          const pane=fields.getBoundingClientRect(),title=fields.querySelector('.section-title').getBoundingClientRect();
+          const pane=fields.getBoundingClientRect(),title=fields.querySelector('.section-title').getBoundingClientRect(), toolbar=fields.querySelector('.item-toolbar')?.getBoundingClientRect(),head=fields.querySelector('thead')?.getBoundingClientRect();
           return {viewport:{width:innerWidth,height:innerHeight},body:{width:document.body.scrollWidth,height:document.body.scrollHeight},
-            header:bounds(header),row:rows[0]&&bounds(rows[0]),visibleRows:rows.filter(node=>{const r=node.getBoundingClientRect();return r.top>=Math.max(pane.top,title.bottom,0)&&r.bottom<=Math.min(pane.bottom,innerHeight);}).length,
+            header:bounds(header),row:rows[0]&&bounds(rows[0]),visibleRows:rows.filter(node=>{const r=node.getBoundingClientRect();return r.top>=Math.max(pane.top,title.bottom,toolbar?.bottom??0,head?.bottom??0,0)&&r.bottom<=Math.min(pane.bottom,innerHeight);}).length,
             compact:!!root.querySelector('.pane-separator'),buttons:[...header.querySelectorAll('button')].map(node=>({label:node.textContent,...bounds(node)}))};
         })()`);
         samples.push({ theme: slug, width, height, zoom, ...geometry });
@@ -41,6 +43,7 @@ exports.run = async function () {
           assert.ok(geometry.body.width <= geometry.viewport.width + 1, JSON.stringify(geometry));
           assert.ok(geometry.body.height <= geometry.viewport.height + 1, JSON.stringify(geometry));
           assert.ok(geometry.buttons.every(button => button.y >= 0 && button.y + button.height <= geometry.viewport.height), JSON.stringify(geometry));
+          assert.ok(geometry.visibleRows > 0, JSON.stringify(geometry));
         }
         if (artifacts) await client.screenshot(path.join(artifacts, `${baseline?'before':'after'}-${vscode.env.language}-${slug}-${width}-${height}-${zoom}.png`));
       }
@@ -94,7 +97,7 @@ async function exerciseState(client) {
   assert.deepEqual(await client.evaluate('({name:document.activeElement.name,start:document.activeElement.selectionStart,end:document.activeElement.selectionEnd})'), {name:'expression',start:3,end:7}, JSON.stringify(await client.evaluate('layoutFocusTrace')));
   await client.evaluate('document.querySelector(".expression button:nth-last-child(2)").click()');
   const beforeChild = await client.evaluate('document.querySelector("[data-section=fields]").scrollTop');
-  await client.evaluate('document.querySelector(".source-properties .edit-nested").click()');
+  await client.evaluate('document.querySelector(".source-fields .edit-nested").click()');
   await until(() => client.evaluate('!!document.querySelector(".back-parent") && document.getElementById("root").getAttribute("aria-busy")==="false"'), 'nested layout ready');
   await client.evaluate('document.getElementById("tab-order").click();document.querySelector(".back-parent").click()');
   await until(() => client.evaluate('!document.querySelector(".back-parent") && document.getElementById("root").getAttribute("aria-busy")==="false"'), 'parent layout restored');

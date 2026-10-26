@@ -66,6 +66,8 @@ pre { white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--vscode-
 .query-preview summary { flex: 0 0 auto; }
 .query-preview pre { flex: 1; min-height: 0; margin: 0; overflow: auto; white-space: pre; }
 @media (max-width: 700px) {
+  header { flex-wrap: wrap; }
+  .header-actions { flex-basis: 100%; }
   .constructor-status { display: none; }
   .catalog-toggle { max-width: 100px; overflow: hidden; text-overflow: ellipsis; }
   header .primary { max-width: 140px; overflow: hidden; text-overflow: ellipsis; }
@@ -82,6 +84,8 @@ body.vscode-high-contrast [role=separator], body.vscode-high-contrast-light [rol
 
 .item-table { min-width: 0; overflow: auto; }
 .item-toolbar { position: sticky; top: 30px; z-index: 1; background: var(--vscode-editor-background); padding: 2px 0; flex-wrap: wrap; }
+.item-toolbar.controls { max-width: none; flex-wrap: nowrap; overflow-x: auto; }
+.item-toolbar button { flex: 0 0 auto; }
 .item-table table { width: 100%; border-collapse: collapse; table-layout: fixed; }
 .item-table th, .item-table td { height: 26px; border-bottom: 1px solid var(--vscode-panel-border); text-align: left; padding: 1px 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .item-table th:first-child { width: 26px; }
