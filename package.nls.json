@@ -35,7 +35,7 @@
   "analyzerExecutable": "Path or command name of the published bsl-analyzer-app. Explicit binaries are never overwritten.",
   "checkForAnalyzerUpdates": "Check Analyzer releases at most once per day on this workspace host. Independent of ESKA update checks.",
   "checkAnalyzerUpdates": "Check for BSL Analyzer updates",
-  "prepareTools": "Prepare project and language components",
+  "prepareTools": "Prepare project, formatter and language components",
   "recoverProjectInstallation": "Recover project component installation",
   "recoverAnalyzerInstallation": "Recover Analyzer installation",
   "languageFeatures": "Run Explorer’s own BSL language client for the selected ESKA application. Grammar remains available when disabled.",
@@ -47,5 +47,8 @@
   "command.queryConstructor": "Query constructor",
   "command.placeQueryComments": "Assign source comment positions",
   "formatterExecutable": "Path to eska-fmt. The default eska-fmt resolves the standard component.",
-  "formatOnSave": "Format BSL/SDBL and query drafts through ESKA on save. Style is configured in eska.toml."
+  "formatOnSave": "Format BSL/SDBL and query drafts through ESKA on save. Style is configured in eska.toml.",
+  "checkFormatterUpdates": "Check for eska-fmt updates",
+  "recoverFormatterInstallation": "Recover eska-fmt installation",
+  "checkForFormatterUpdates": "Check for eska-fmt updates independently."
 }

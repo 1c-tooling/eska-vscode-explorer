@@ -26,11 +26,21 @@ exports.run = async function () {
     await vscode.commands.executeCommand('eska.explorer.connect');
     await until(() => explorer.connection.state.kind === 'ready', 'metadata connection');
     const config = vscode.workspace.getConfiguration('eska.explorer');
-    assert.equal(config.get('languageFeatures'), false); assert.equal(config.get('formatOnSave'), false);
+    assert.equal(config.get('languageFeatures'), process.env.ESKA_TEST_LANGUAGE === '1'); assert.equal(config.get('formatOnSave'), false);
     await vscode.workspace.getConfiguration('editor', { languageId: 'bsl' }).update('defaultFormatter', '1c-tooling.eska-explorer', vscode.ConfigurationTarget.Workspace);
     await vscode.workspace.getConfiguration('editor', { languageId: 'sdbl' }).update('defaultFormatter', '1c-tooling.eska-explorer', vscode.ConfigurationTarget.Workspace);
     let owner = await vscode.workspace.openTextDocument(vscode.Uri.file(fixture.module));
     const disk = await fs.readFile(fixture.module), original = owner.getText();
+    if (process.env.ESKA_HOST_RUN === '1') {
+      assert.ok(original.includes('\tЗначение = 3;'));
+      const edits = await vscode.commands.executeCommand('vscode.executeFormatDocumentProvider', owner.uri, { tabSize: 17, insertSpaces: true });
+      assert.equal(edits?.length ?? 0, 0);
+      assert.deepEqual(await fs.readFile(fixture.module), disk);
+      await fs.writeFile(path.join(fixture.root, 'host-result.json'), JSON.stringify({ passed: true, suite: 'formatting-restart', locale: vscode.env.language,
+        accepted: ['installed_vsix_restarted_and_saved_source_remains_idempotent'], formatter: explorer.tooling.states.formatter.info }));
+      return;
+    }
+
     await vscode.window.showTextDocument(owner, { preview: false });
     for (const attempt of ['cold', 'repeat']) {
       if (owner.getText() !== original) await vscode.commands.executeCommand('undo');
@@ -38,6 +48,13 @@ exports.run = async function () {
       timings.push({ attempt, milliseconds: performance.now() - start });
       assert.ok(owner.getText().includes('\tЗначение = 1;'));
       assert.ok(owner.getText().includes('"выбрать 1 как А,2 как Б"'), 'ordinary BSL formatting preserves literal SQL');
+    }
+    if (process.env.ESKA_TEST_LANGUAGE === '1') {
+      await until(() => explorer.tooling.states.analyzer.phase === 'ready', 'independent analyzer session');
+      const position = owner.positionAt(owner.getText().indexOf('Значение') + 2);
+      const hovers = await vscode.commands.executeCommand('vscode.executeHoverProvider', owner.uri, position);
+      assert.ok(hovers?.length, 'analyzer hover remains available alongside eska-fmt');
+      accepted.push('full_set_keeps_independent_analyzer_hover_and_single_eska_formatter');
     }
     const formatted = owner.getText();
     await vscode.commands.executeCommand('undo'); assert.equal(owner.getText(), original);
@@ -51,6 +68,18 @@ exports.run = async function () {
     assert.ok(owner.getText().includes('\tЗначение = 1;')); assert.ok(owner.getText().includes('Текст="выбрать 1 как А,2 как Б";'));
     accepted.push('selection_formats_only_expanded_syntax_unit');
     await vscode.commands.executeCommand('undo');
+    const formatterPath = config.get('formatterExecutable');
+    await config.update('formatterExecutable', config.get('executable'), vscode.ConfigurationTarget.Workspace);
+    const rejectedComponent = await vscode.commands.executeCommand('vscode.executeFormatDocumentProvider', owner.uri, { tabSize: 4, insertSpaces: false });
+    assert.equal(rejectedComponent?.length ?? 0, 0); assert.equal(owner.getText(), original);
+    await config.update('formatterExecutable', formatterPath, vscode.ConfigurationTarget.Workspace);
+    accepted.push('incompatible_formatter_identity_rejected_before_edits_without_analyzer_fallback');
+    const changing = vscode.commands.executeCommand('vscode.executeFormatDocumentProvider', owner.uri, { tabSize: 4, insertSpaces: false });
+    await until(() => explorer.formatting.requests.has(owner), 'native formatting request starts');
+    await replace(owner, original.replace('Значение=1', 'Значение=8'));
+    await changing; assert.ok(owner.getText().includes('Значение=8;'));
+    await vscode.commands.executeCommand('undo'); assert.equal(owner.getText(), original);
+    accepted.push('native_edit_cancels_obsolete_formatter_reply');
     const at = owner.positionAt(owner.getText().indexOf('выбрать') + 2); editor.selection = new vscode.Selection(at, at);
     await vscode.commands.executeCommand('eska.explorer.editBslQuery');
     await until(() => vscode.window.activeTextEditor?.document.uri.scheme === 'eska-query', 'private query draft');
@@ -75,6 +104,14 @@ exports.run = async function () {
     await vscode.commands.executeCommand('editor.action.formatDocument');
     assert.ok(draft.getText().startsWith('ВЫБРАТЬ\r\n')); assert.equal(draft.eol, vscode.EndOfLine.CRLF);
     accepted.push('query_crlf_snapshot_matches_acknowledged_lf_checkpoint');
+    await config.update('formatOnSave', true, vscode.ConfigurationTarget.Workspace);
+    await replace(draft, 'выбрать 3 как А,4 как Б');
+    assert.equal(await draft.save(), true);
+    assert.ok(draft.getText().startsWith('ВЫБРАТЬ'));
+    assert.deepEqual(await fs.readFile(fixture.module), disk);
+    await config.update('formatOnSave', false, vscode.ConfigurationTarget.Workspace);
+    accepted.push('query_format_on_save_only_checkpoints_private_bsl_draft');
+
     explorer.queries.closeDecision = async () => 'discard';
     await vscode.window.tabGroups.close(vscode.window.tabGroups.activeTabGroup.activeTab);
     await until(() => !explorer.queries.sessions.size, 'query closes and releases owner');

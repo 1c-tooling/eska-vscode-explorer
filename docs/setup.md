@@ -26,3 +26,15 @@ The extension does not initialize a project or build a 1C configuration automati
 
 Install the VSIX using **Extensions → Install from VSIX…**. The extension ID is
 `1c-tooling.eska-explorer`. [Packaging instructions](packaging.md).
+
+## Standalone formatting
+
+Install `eska-fmt` for its CLI, add `eska` for the `eska fmt` facade, or add
+`eska-project` API 1.33 for Explorer. The analyzer is independent. Managed archives
+use `designer-xml-4`; keep the installed ESKA component contracts compatible.
+The formatter has its own status item, update and recovery commands.
+`eska.explorer.formatterExecutable` selects an explicit executable or the default
+managed/PATH lookup. `eska.explorer.formatOnSave` is disabled by default.
+Set formatting rules in `[format]` in `eska.toml`; native indentation settings do
+not override them. Missing/incompatible formatters never fall back to the analyzer.
+For offline operation disable `checkForFormatterUpdates` as well as other update checks.

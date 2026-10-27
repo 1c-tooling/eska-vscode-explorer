@@ -32,7 +32,7 @@ function fixture(t) {
       : name === '../query/tabs.js' ? { QUERY_SCHEME: 'eska-query' }
         : name === '../query/owner.js' ? { nativeReadOnly: async () => readonly } : require(name), adapter, adapter.exports);
   const service = new adapter.exports.FormattingService('test', { formatting: (doc, range, formatter, signal) => produce('query', { text: doc.getText(), version: String(doc.version), range, formatter, signal }) },
-    { async ensureProject() { projectCalls++; return '/owned/eska-project'; } }, () => {});
+    { async ensureFormatter() { return { path: "/owned/eska-fmt" }; }, async ensureProject() { projectCalls++; return '/owned/eska-project'; } }, () => {});
   t.after(() => service.shutdown());
   const document = { version: 1, isClosed: false, languageId: 'bsl', uri: { scheme: 'file', fsPath: '/owned/source.bsl' }, getText() { return 'Value=1;\n'; }, offsetAt: position => position.character, positionAt: offset => ({ line: 0, character: offset }) };
   return { handlers, providers, warnings, calls, params, settings, document, service, get projectCalls() { return projectCalls; },

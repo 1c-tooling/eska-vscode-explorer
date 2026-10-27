@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
-import { dirname, isAbsolute } from "node:path";
+import { dirname } from "node:path";
+import { ToolFailure } from "../tooling/contracts.js";
 import type { ToolingSetup } from "../tooling/setup.js";
 import type { DiagnosticLog } from "../diagnostics.js";
 import { ExplorerError } from "../protocol.js";
@@ -65,8 +66,9 @@ export class FormattingService {
     try {
       const configuration = vscode.workspace.getConfiguration("eska.explorer", document.uri);
       const configured = configuration.get<string>("formatterExecutable", "eska-fmt");
-      if (configured !== "eska-fmt" && !isAbsolute(configured)) throw new ExplorerError("invalidExecutable");
-      const formatter = configured === "eska-fmt" ? undefined : configured;
+      const info = await this.tooling.ensureFormatter(signal, token !== undefined, configured);
+      if (!info) return [];
+      const formatter = info.path;
       const bytes = range ? { start: Buffer.byteLength(text.slice(0, document.offsetAt(range.start))), end: Buffer.byteLength(text.slice(0, document.offsetAt(range.end))) } : undefined;
       let result: unknown;
       if (document.uri.scheme === QUERY_SCHEME) result = await this.tabs.formatting(document, bytes, formatter, signal);
@@ -98,8 +100,8 @@ export class FormattingService {
   /** Errors describe the user's action; raw source or formatter output never enters notifications. */
   private report(error: unknown): void {
     const failure = error instanceof ExplorerError ? error : undefined, code = failure?.details?.code;
-    const key: MessageKey = code === "missing" || code === "component_missing" ? "formatMissing"
-      : failure?.code === "incompatible" || code === "component_incompatible" ? "formatIncompatible"
+    const key: MessageKey = failure?.code === "executableMissing" || code === "missing" || code === "component_missing" ? "formatMissing"
+      : failure?.code === "incompatible" || error instanceof ToolFailure && error.code === "incompatible" || code === "component_incompatible" ? "formatIncompatible"
       : ["source_read_only", "source_busy", "support_read_only", "support_unknown"].includes(String(code)) ? "formatReadonly"
       : ["source_conflict", "config_conflict"].includes(String(code)) ? "sourceChanged" : "formatFailed";
     this.log(JSON.stringify({ event: "formatting_rejected", code: failure?.code, domain: failure?.domain, reason: code }));
