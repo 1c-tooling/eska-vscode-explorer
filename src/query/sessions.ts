@@ -1,3 +1,4 @@
+import { withFormatText, type FormatEndpoint } from "../formatting/protocol.js";
 import { withQueryText, type QueryTextInput } from "./text-transfer.js";
 import { sourceCommentState, type SourceCommentState } from "./comments.js";
 import { QueryConstructor, type ConstructorMethod } from "./constructors.js";
@@ -21,6 +22,13 @@ export class QuerySessions {
     private readonly context: () => QuerySessionContext, readonly limits: QueryCapabilities) {
     if (!endpoint.sessions) throw new ExplorerError("incompatible");
     this.transport = endpoint.sessions;
+  }
+
+  /** Formatting shares this source-owning process but never the analyzer projection contract. */
+  formattingEndpoint(): FormatEndpoint {
+    const endpoint = this.endpoint.formatting;
+    if (!endpoint) throw new ExplorerError("incompatible");
+    return { limits: endpoint.limits, request: (method, params, signal) => endpoint.request(method, { ...this.context(), ...params }, signal) };
   }
 
   /** The language adapter can use only an explicitly negotiated immutable projection contract. */
@@ -104,6 +112,20 @@ export class QuerySourceSession {
       return { record: current.record, projection };
     });
     return result.projection;
+  }
+
+  /** Checkpoint ordering binds formatting to one acknowledged draft revision without mutating the owner. */
+  async formatting(text: string, version: number, userReadOnly: boolean, range: { start: number; end: number } | undefined,
+    formatter: string | undefined, signal: AbortSignal): Promise<unknown> {
+    return this.client.recovery.withCheckpoint(this.current.id, async storeId => {
+      this.current = await this.call("query/sessionGet", storeId, {});
+      const endpoint = this.client.formattingEndpoint();
+      const plan = await withFormatText(endpoint, text, input => endpoint.request("format/query", {
+        ...input, version: String(version), userReadOnly, querySessionId: this.current.querySessionId, revision: this.current.revision,
+        ...(range ? { range } : {}), ...(formatter ? { formatter: { value: formatter, encoding: "utf-8" } } : {}),
+      }, signal), signal);
+      return { record: this.current.record, plan };
+    }).then(result => result.plan);
   }
 
   /** The same source session acquires the canonical draft lock and exposes its portable visual model. */

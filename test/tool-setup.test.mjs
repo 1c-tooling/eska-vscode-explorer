@@ -114,7 +114,7 @@ test("approved project updates stop and restart only the selected managed compon
   replace(t, releases, "latestToolRelease", async kind => ({ kind, version: "0.14.3", target, asset: { name: "component", sha256: "a".repeat(64), size: 1, url: "https://example.invalid/component" } }));
   replace(t, releases, "downloadAsset", async (_asset, signal) => { assert.equal(signal.aborted, false); return Buffer.from("candidate"); });
   let installed = 0;
-  replace(t, installation, "installProject", async root => { installed++; return { kind: "project", version: "0.14.3", path: installation.managedPath(root, "project") }; });
+  replace(t, installation, "installComponent", async root => { installed++; return { kind: "project", version: "0.14.3", path: installation.managedPath(root, "project") }; });
   replace(t, installation, "installAnalyzer", async () => assert.fail("unselected analyzer updated"));
   setup.states.project.info = { kind: "project", version: "0.14.2", path: installation.managedPath(setup.root, "project") };
   setup.states.analyzer.info = { kind: "analyzer", version: "0.4.0", path: join(setup.root, "custom-analyzer") };
@@ -136,7 +136,7 @@ test("analyzer update and cancellation preserve a suspended client's ownership a
   replace(t, releases, "latestToolRelease", async kind => ({ kind, version: "0.4.0", target, asset: { name: "analyzer", sha256: "b".repeat(64), size: 1, url: "https://example.invalid/analyzer" } }));
   replace(t, releases, "downloadAsset", async (_asset, signal) => { signal.throwIfAborted(); return Buffer.from("candidate"); });
   replace(t, installation, "installAnalyzer", async root => ({ kind: "analyzer", version: "0.4.0", path: installation.managedPath(root, "analyzer") }));
-  replace(t, installation, "installProject", async () => assert.fail("unselected project updated"));
+  replace(t, installation, "installComponent", async () => assert.fail("unselected project updated"));
   setup.states.analyzer.info = { kind: "analyzer", version: "0.4.0", path: installation.managedPath(setup.root, "analyzer") };
   setup.analyzerState("suspended", "foreign-extension"); ui.approved = true;
   await setup.check("analyzer");
@@ -229,3 +229,18 @@ for (const scenario of ["success", "failure", "custom", "declined", "current", "
     if (scenario === "failure") assert.ok(ui.messages.at(-1).includes("failed"));
   });
 }
+
+/** Formatter setup never probes, stops or installs the analyzer or metadata backend. */
+test("formatter status, independent checks and discovery preserve other component states", async t => {
+  const {setup, requests, actions}=await fixture(t);
+  const inspect=require("../out/tooling/inspect.js");
+  replace(t,inspect,"findTool",async (_configured,name)=> { assert.equal(name,"eska-fmt"); return "/owned/eska-fmt"; });
+  replace(t,inspect,"inspectFormatter",async path=>({kind:"formatter",path,version:"0.18.0"}));
+  const project=setup.states.project, analyzer=setup.states.analyzer;
+  const info=await setup.ensureFormatter(undefined,false);
+  assert.equal(info.kind,"formatter"); assert.equal(setup.states.project,project); assert.equal(setup.states.analyzer,analyzer);
+  assert.match(setup.formatterStatus.text,/eska-fmt v0.18.0/);
+  assert.equal(setup.formatterStatus.command,"eska.explorer.checkFormatterUpdates");
+  await setup.background("formatter");
+  assert.ok(requests.every(kind=>kind==="formatter")); assert.equal(actions.length,0);
+});

@@ -142,18 +142,17 @@ test("code actions recheck permissions and original source versions when the use
   assert.equal(f.applications.length, 1);
 });
 
-test("formatting and rename preserve valid results but reject a changed or voluntarily read-only buffer", async t => {
-  const f = await fixture(t), token = { isCancellationRequested: false }, options = { tabSize: 4, insertSpaces: true };
-  const result = [{ range: { start: new Position(0, 0), end: new Position(0, 10) }, newText: "Значение" }];
-  assert.equal(await f.middleware.provideDocumentFormattingEdits(f.opened[0], options, token, async () => result), result);
-  f.readonly.add(f.files[0]); assert.equal(await f.middleware.provideDocumentFormattingEdits(f.opened[0], options, token, async () => result), undefined);
-  f.readonly.clear(); f.reply.rename = { documentChanges: [f.change(0), f.change(1)] };
+test("analyzer formatting is absent while rename retains native version and read-only guards", async t => {
+  const f = await fixture(t), token = { isCancellationRequested: false };
+  assert.equal(f.middleware.provideDocumentFormattingEdits, undefined);
+  assert.equal(f.middleware.provideDocumentRangeFormattingEdits, undefined);
+  assert.equal(f.middleware.provideOnTypeFormattingEdits, undefined);
+  f.reply.rename = { documentChanges: [f.change(0), f.change(1)] };
   assert.ok(await f.middleware.provideRenameEdits(f.opened[0], new Position(0, 1), "Другое", token));
-  f.reply.rename.documentChanges[1].textDocument.version = 99;
+  f.readonly.add(f.files[0]);
   assert.equal(await f.middleware.provideRenameEdits(f.opened[0], new Position(0, 1), "Другое", token), undefined);
-  const entered = barrier(), held = barrier();
-  const pending = f.middleware.provideDocumentFormattingEdits(f.opened[0], options, token, async () => { entered.release(); await held.promise; return result; });
-  await entered.promise; f.opened[0].version++; held.release(); assert.equal(await pending, undefined);
+  f.readonly.clear(); f.reply.rename.documentChanges[1].textDocument.version = 99;
+  assert.equal(await f.middleware.provideRenameEdits(f.opened[0], new Position(0, 1), "Другое", token), undefined);
 });
 
 test("an unversioned quick fix retains the disk snapshot captured before its action was offered", async t => {

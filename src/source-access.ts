@@ -14,7 +14,7 @@ export interface SourceEndpoint { readonly limits: SourceLimits; request(method:
 export interface SourceContext { sessionId: string; projectId: string; generation: string }
 export interface SourceProtection {
   path: WirePath; objects: string[]; supportReadOnly: boolean; supportReason: string; supportUnknown: boolean; mixed: boolean;
-  supportEnforced: boolean; userReadOnly: boolean; filesystemReadOnly: boolean; exists: boolean; writable: boolean;
+  sharedReadOnly?: boolean; supportEnforced: boolean; userReadOnly: boolean; filesystemReadOnly: boolean; exists: boolean; writable: boolean;
   diagnostics: string[]; restrictions: { id: string; source: WirePath }[];
 }
 export interface NativeSourceSnapshot { version: string; text: string; userReadOnly: boolean }
@@ -45,6 +45,7 @@ function protection(value: unknown): SourceProtection {
     || typeof value.supportReason !== "string" || !Array.isArray(value.diagnostics) || value.diagnostics.some(item => typeof item !== "string")
     || !Array.isArray(value.restrictions) || value.restrictions.length > 16 || value.restrictions.some(owner => !isRecord(owner)
       || !isToken(owner.id) || owner.id === "0" || !isWirePath(owner.source))
+    || value.sharedReadOnly !== undefined && typeof value.sharedReadOnly !== "boolean"
     || ["supportReadOnly", "supportUnknown", "mixed", "supportEnforced", "userReadOnly", "filesystemReadOnly", "exists", "writable"]
       .some(key => typeof value[key] !== "boolean")) invalid();
   return value as unknown as SourceProtection;

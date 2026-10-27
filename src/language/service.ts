@@ -29,6 +29,14 @@ interface Session {
 const CONFLICTING_EXTENSION = "elishevkirill.bsl-analyzer-lsp";
 const SHARED_READS = new Set(["textDocument/documentSymbol", "textDocument/inlayHint"]);
 
+/** Formatting is owned by eska-fmt; no analyzer formatter is registered, including dynamic and on-type routes. */
+class EskaLanguageClient extends LanguageClient {
+  override registerFeature(feature: Parameters<LanguageClient["registerFeature"]>[0]): void {
+    if ("registrationType" in feature && ["textDocument/formatting", "textDocument/rangeFormatting", "textDocument/onTypeFormatting"].includes(feature.registrationType.method)) return;
+    super.registerFeature(feature);
+  }
+}
+
 /** One language session owns its config lease, client, child and generation independently of TreeView visibility. */
 export class LanguageService implements vscode.Disposable {
   private target: Ready | undefined;
@@ -307,7 +315,7 @@ export class LanguageService implements vscode.Disposable {
       const middleware = this.readingMiddleware(revision, signal);
       session.progress = new LanguageProgress(() => this.current(revision, signal), () => this.queryLanguage?.changed());
       middleware.handleWorkDoneProgress = session.progress.handle;
-      const client = new LanguageClient("eska-bsl", "BSL Analyzer (ESKA Explorer)", async () => {
+      const client = new EskaLanguageClient("eska-bsl", "BSL Analyzer (ESKA Explorer)", async () => {
         if (!this.current(revision, signal)) throw new ExplorerError("obsolete");
         session.owner = new LanguageProcess(info.path, context.root, this.log, () => {
           if (!this.current(revision, signal)) return;

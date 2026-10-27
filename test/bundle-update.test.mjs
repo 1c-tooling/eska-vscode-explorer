@@ -97,3 +97,19 @@ test("a successful task cannot claim an unchanged project was updated", { skip: 
   const f = await fixture(t), update = await inspectBundle(f.root);
   await assert.rejects(installBundle(f.root, update, async () => {}, () => {}), { code: "probe", detail: "bundle-version" });
 });
+
+/** Old five-command receipts remain recognized; new complete receipts additionally own formatter bytes. */
+test("bundle ownership includes the optional formatter and rejects a separately managed formatter receipt", { skip: process.platform === "win32" }, async t => {
+  const f = await fixture(t);
+  f.receipt.binaries.push("eska-fmt");
+  await writeFile(join(f.root,"bin/eska-fmt"),await readFile(f.cli),{mode:0o755});
+  await writeFile(f.receiptFile,JSON.stringify(f.receipt));
+  const update=await inspectBundle(f.root); assert.equal(update.version,"0.15.2");
+  await writeFile(join(f.root,"bin/eska-fmt"),"modified formatter");
+  let called=false;
+  await assert.rejects(installBundle(f.root,update,async()=>{called=true;},()=>{}),{code:"modified"});
+  assert.equal(called,false);
+  f.receipt.binaries.pop(); await writeFile(f.receiptFile,JSON.stringify(f.receipt));
+  await mkdir(join(f.root,"components")); await writeFile(join(f.root,"components/eska-fmt.json"),"independent receipt");
+  await assert.rejects(inspectBundle(f.root),{code:"unmanaged"});
+});

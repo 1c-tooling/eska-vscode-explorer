@@ -233,6 +233,16 @@
         "title": "%command.placeQueryComments%",
         "category": "ESKA",
         "icon": "$(comment-discussion)"
+      },
+      {
+        "command": "eska.explorer.checkFormatterUpdates",
+        "title": "%checkFormatterUpdates%",
+        "category": "ESKA Explorer"
+      },
+      {
+        "command": "eska.explorer.recoverFormatterInstallation",
+        "title": "%recoverFormatterInstallation%",
+        "category": "ESKA Explorer"
       }
     ],
     "views": {
@@ -494,6 +504,24 @@
           "default": true,
           "scope": "window",
           "description": "%languageFeatures%"
+        },
+        "eska.explorer.formatterExecutable": {
+          "type": "string",
+          "default": "eska-fmt",
+          "scope": "machine-overridable",
+          "description": "%formatterExecutable%"
+        },
+        "eska.explorer.formatOnSave": {
+          "type": "boolean",
+          "default": false,
+          "scope": "resource",
+          "description": "%formatOnSave%"
+        },
+        "eska.explorer.checkForFormatterUpdates": {
+          "type": "boolean",
+          "default": true,
+          "scope": "window",
+          "description": "%checkForFormatterUpdates%"
         }
       }
     },

@@ -1,10 +1,10 @@
 import { isRecord } from "../protocol.js";
 
-export type ToolKind = "project" | "analyzer";
-export const TOOL_NAMES = { project: "eska-project", analyzer: "bsl-analyzer-app" } as const;
+export type ToolKind = "project" | "analyzer" | "formatter";
+export const TOOL_NAMES = { project: "eska-project", analyzer: "bsl-analyzer-app", formatter: "eska-fmt" } as const;
 export const ANALYZER_VERSION = "0.4.0";
 export const ANALYZER_CONTRACT = "3.5";
-export const PROJECT_CONFIG = "designer-xml-3";
+export const PROJECT_CONFIG = "designer-xml-4";
 export const TARGETS = ["aarch64-apple-darwin", "aarch64-unknown-linux-gnu", "aarch64-unknown-linux-musl",
   "x86_64-apple-darwin", "x86_64-unknown-linux-gnu", "x86_64-unknown-linux-musl", "x86_64-pc-windows-msvc"] as const;
 export type NativeTarget = typeof TARGETS[number];
@@ -19,15 +19,17 @@ export class ToolFailure extends Error {
   }
 }
 
-export interface ProjectContract {
+export type ComponentName = "eska-project" | "eska-fmt";
+export interface ComponentContract {
   schema_version: 2;
-  tool: "eska-project";
+  tool: ComponentName;
   target: NativeTarget;
   version: string;
   config_schema: typeof PROJECT_CONFIG;
   bridge_schema: 1;
-  metadata_api: { major: 1; minor: number };
+  metadata_api: { major: 1; minor: number } | null;
 }
+export type ProjectContract = ComponentContract & { tool: "eska-project"; metadata_api: { major: 1; minor: number } };
 
 /** Release metadata never interprets prereleases, leading zeros or unsafe integers as stable versions. */
 export function stableVersion(value: unknown): string {
@@ -44,18 +46,24 @@ export function exactKeys(value: unknown, fields: readonly string[]): asserts va
 }
 
 /** Match the T97 schema independently of locale, filename and the reported release number. */
-export function projectContract(value: unknown, expectedTarget?: NativeTarget): ProjectContract {
+export function componentContract(value: unknown, tool: ComponentName, expectedTarget?: NativeTarget): ComponentContract {
   exactKeys(value, ["schema_version", "tool", "target", "version", "config_schema", "bridge_schema", "metadata_api"]);
-  exactKeys(value.metadata_api, ["major", "minor"]);
   const version = stableVersion(value.version);
-  if (value.schema_version !== 2 || value.tool !== "eska-project" || value.config_schema !== PROJECT_CONFIG
+  if (value.schema_version !== 2 || value.tool !== tool || value.config_schema !== PROJECT_CONFIG
     || value.bridge_schema !== 1 || !TARGETS.includes(value.target as NativeTarget)
-    || (expectedTarget !== undefined && value.target !== expectedTarget) || value.metadata_api.major !== 1
-    || !Number.isSafeInteger(value.metadata_api.minor) || (value.metadata_api.minor as number) < 12) {
-    throw new ToolFailure("incompatible", "project-contract");
-  }
-  return { schema_version: 2, tool: "eska-project", target: value.target as NativeTarget, version,
-    config_schema: PROJECT_CONFIG, bridge_schema: 1, metadata_api: { major: 1, minor: value.metadata_api.minor as number } };
+    || (expectedTarget !== undefined && value.target !== expectedTarget)) throw new ToolFailure("incompatible", "component-contract");
+  let metadata: ComponentContract["metadata_api"] = null;
+  if (tool === "eska-project") {
+    exactKeys(value.metadata_api, ["major", "minor"]);
+    if (value.metadata_api.major !== 1 || !Number.isSafeInteger(value.metadata_api.minor) || (value.metadata_api.minor as number) < 12) throw new ToolFailure("incompatible", "metadata-api");
+    metadata = { major: 1, minor: value.metadata_api.minor as number };
+  } else if (value.metadata_api !== null) throw new ToolFailure("incompatible", "formatter-metadata-api");
+  return { schema_version: 2, tool, target: value.target as NativeTarget, version, config_schema: PROJECT_CONFIG, bridge_schema: 1, metadata_api: metadata };
+}
+
+/** Metadata probes retain the narrower project contract while sharing exact component field validation. */
+export function projectContract(value: unknown, expectedTarget?: NativeTarget): ProjectContract {
+  return componentContract(value, "eska-project", expectedTarget) as ProjectContract;
 }
 
 /** A command name alone does not establish support for its required configuration/report flags. */

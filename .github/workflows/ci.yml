@@ -44,4 +44,5 @@ jobs:
         run: |
           bun run --bun package
           export ESKA_TEST_VSIX="$(realpath "eska-explorer-$(node -p 'require("./package.json").version').vsix")"
+          python3 scripts/check-vsix.py "$ESKA_TEST_VSIX"
           timeout 180s xvfb-run -a node test/run-host.mjs test/language-host.cjs

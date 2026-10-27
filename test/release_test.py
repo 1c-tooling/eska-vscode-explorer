@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 from unittest.mock import patch
 
@@ -203,7 +204,8 @@ class VsixReleaseTests(unittest.TestCase):
     def test_upload_follows_successful_build_and_verification(self):
         """API/build/check failures propagate before any asset upload."""
         module = load('release-vsix')
-        for failed_step in [None, 'install', 'package', 'scripts/check-vsix.py']:
+        checker = str(ROOT / 'scripts/check-vsix.py')
+        for failed_step in [None, 'install', 'package', checker]:
             calls = []
 
             def fake_run(*args, cwd=None):
@@ -221,7 +223,7 @@ class VsixReleaseTests(unittest.TestCase):
                     self.assertFalse(any(call[:3] == ('gh', 'release', 'upload') for call in calls))
                 else:
                     module.publish('0.0.1')
-                    self.assertEqual(calls[-2], ('python3', 'scripts/check-vsix.py', 'eska-explorer-0.0.1.vsix'))
+                    self.assertEqual(calls[-2], ('python3', checker, 'eska-explorer-0.0.1.vsix', '--source', str(self.root)))
                     self.assertEqual(calls[-1][:3], ('gh', 'release', 'upload'))
                     self.assertNotIn('--clobber', calls[-1])
 
@@ -256,6 +258,58 @@ class VsixReleaseTests(unittest.TestCase):
             git('tag', 'v0.0.2')
             with self.assertRaises(RuntimeError):
                 module.stage_tag('0.0.2', self.root)
+
+
+class VsixPayloadTests(unittest.TestCase):
+    """Validate runtime modules and tagged bytes using the same checker as CI and publication."""
+
+    def setUp(self):
+        """Build a small tagged-source fixture independent of the current checkout's version."""
+        ReleaseTests.setUp(self)
+        self.module = load('check-vsix')
+        self.source = self.root / 'source'
+        self.source.mkdir()
+        manifest = {'name': 'eska-explorer', 'publisher': '1c-tooling', 'version': '0.0.1', 'main': './out/extension.js'}
+        self.files = {'package.json': json.dumps(manifest), 'package.nls.json': '{}', 'package.nls.ru.json': '{}',
+                      'README.md': 'Tagged README', 'CHANGELOG.md': 'Tagged changes', 'LICENSE': 'License',
+                      'resources/icons/support/LICENSE': 'Icon license', 'resources/icons/support/NOTICE.md': 'Icon notices',
+                      'out/extension.js': 'exports.activate = () => {};', 'resources/query/expression.mjs': 'export const value = 1;'}
+        for name, content in self.files.items():
+            path = self.source / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(content, encoding='utf-8')
+        self.archive = self.root / 'release.vsix'
+
+    def package(self, removed=None, changed=None, extra=None):
+        """Create valid ZIP bytes with a deliberate omission, modification or accidental source leak."""
+        files = {**self.files, **(changed or {}), **(extra or {})}
+        with zipfile.ZipFile(self.archive, 'w') as archive:
+            archive.writestr('[Content_Types].xml', '<Types/>')
+            archive.writestr('extension.vsixmanifest', '<PackageManifest><Metadata><Identity Publisher="1c-tooling" Id="eska-explorer" Version="0.0.1"/></Metadata></PackageManifest>')
+            for name, content in files.items():
+                if name != removed:
+                    archive.writestr('extension/' + ('LICENSE.txt' if name == 'LICENSE' else name), content)
+
+    def test_query_modules_are_verified_against_tagged_sources(self):
+        """The six constructor modules use .mjs and belong in the runtime payload."""
+        self.package()
+        self.module.check(self.archive, self.source)
+
+    def test_missing_or_changed_query_module_stops_publication(self):
+        """Allowing .mjs must not weaken completeness or byte verification."""
+        name = 'resources/query/expression.mjs'
+        self.package(removed=name)
+        with self.assertRaisesRegex(AssertionError, 'missing archive files:.*expression.mjs'):
+            self.module.check(self.archive, self.source)
+        self.package(changed={name: 'different bytes'})
+        with self.assertRaisesRegex(AssertionError, 'expression.mjs'):
+            self.module.check(self.archive, self.source)
+
+    def test_unexpected_sources_are_reported_by_name(self):
+        """A precise file diff makes packaging failures actionable before a release exists."""
+        self.package(extra={'src/extension.ts': 'source must not ship'})
+        with self.assertRaisesRegex(AssertionError, 'Unexpected archive files:.*src/extension.ts'):
+            self.module.check(self.archive, self.source)
 
 
 if __name__ == "__main__":

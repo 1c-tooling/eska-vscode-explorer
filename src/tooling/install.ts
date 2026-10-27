@@ -4,43 +4,44 @@ import { join } from "node:path";
 import { compareVersions } from "../installation.js";
 import { isRecord } from "../protocol.js";
 import type { DiagnosticLog } from "../diagnostics.js";
-import { ANALYZER_VERSION, PROJECT_CONFIG, ToolFailure, assertCurrent, exactKeys, stableVersion, type NativeTarget, type ToolKind } from "./contracts.js";
-import { projectPackage, unpackProject, type ProjectPackage } from "./archive.js";
+import { ANALYZER_VERSION, PROJECT_CONFIG, ToolFailure, assertCurrent, exactKeys, stableVersion, TOOL_NAMES, type NativeTarget, type ToolKind, type ComponentName } from "./contracts.js";
+import { componentPackage, unpackComponent, type ComponentPackage } from "./archive.js";
 import { checksum, destination, fileHash, installationLock, readMetadata, recoverAbandonedClaim, writeJson } from "./files.js";
-import { inspectAnalyzer, inspectProjectContract, type ToolInfo } from "./inspect.js";
+import { inspectAnalyzer, inspectComponentContract, type ToolInfo } from "./inspect.js";
 import { hostTarget, type ToolRelease } from "./releases.js";
 import { cleanStage, pendingTransactions, publishTransaction, restoreTransaction } from "./transaction.js";
 
-interface ProjectReceipt { schema_version: 1; method: "component-archive"; archive_sha256: string; package: ProjectPackage }
+interface ComponentReceipt { schema_version: 1; method: "component-archive"; archive_sha256: string; package: ComponentPackage }
 interface AnalyzerReceipt { schema_version: 1; method: "upstream-binary"; version: string; target: NativeTarget; sha256: string; size: number; files: Record<string, string> }
 
-/** Analyzer files have their own private root; the T97 root keeps only the five ESKA component receipts. */
-export function toolRoot(root: string, kind: ToolKind): string { return kind === "project" ? root : join(root, "analyzer"); }
+/** Analyzer files have their own private root; the T97 root keeps only ESKA component receipts. */
+export function toolRoot(root: string, kind: ToolKind): string { return kind === "analyzer" ? join(root, "analyzer") : root; }
 
 /** Stable paths are independent of whichever executable a user explicitly selected. */
 export function managedPath(root: string, kind: ToolKind, target?: NativeTarget): string {
   const windows = target ? target.includes("windows") : process.platform === "win32";
-  return join(toolRoot(root, kind), "bin", `${kind === "project" ? "eska-project" : "bsl-analyzer-app"}${windows ? ".exe" : ""}`);
+  return join(toolRoot(root, kind), "bin", `${TOOL_NAMES[kind]}${windows ? ".exe" : ""}`);
 }
 
 /** Map package notices into the exact namespace also owned by the Python installer. */
-function projectFiles(value: ProjectPackage): Map<string, string> {
-  return new Map(value.files.map(item => [item.executable ? item.path : `share/eska/eska-project/${item.path.slice("licenses/".length)}`, item.sha256]));
+function componentFiles(value: ComponentPackage): Map<string, string> {
+  return new Map(value.files.map(item => [item.executable ? item.path : `share/eska/${value.tool}/${item.path.slice("licenses/".length)}`, item.sha256]));
 }
 
 /** A missing receipt never authorizes replacement of an existing executable. */
-async function projectReceipt(root: string, target: NativeTarget): Promise<ProjectReceipt | undefined> {
-  const path = await destination(root, "components/eska-project.json");
+async function componentReceipt(root: string, target: NativeTarget, tool: ComponentName = "eska-project"): Promise<ComponentReceipt | undefined> {
+  const path = await destination(root, `components/${tool}.json`);
   if (!await lstat(path).catch(error => { if (error.code === "ENOENT") return undefined; throw error; })) return undefined;
   const value = await readMetadata(path);
   exactKeys(value, ["schema_version", "method", "archive_sha256", "package"]);
   if (value.schema_version !== 1 || value.method !== "component-archive") throw new ToolFailure("unmanaged", path);
-  return { schema_version: 1, method: "component-archive", archive_sha256: checksum(value.archive_sha256), package: projectPackage(value.package, target) };
+  return { schema_version: 1, method: "component-archive", archive_sha256: checksum(value.archive_sha256), package: componentPackage(value.package, target, tool) };
 }
 
 /** Reject incompatible neighbouring components while preserving their files and independent versions. */
-async function compatibleNeighbours(root: string, target: NativeTarget): Promise<void> {
-  for (const tool of ["eska", "eska-check", "eska-build", "eska-vcs"]) {
+async function compatibleNeighbours(root: string, target: NativeTarget, selected: ComponentName): Promise<void> {
+  for (const tool of ["eska", "eska-project", "eska-check", "eska-build", "eska-vcs", "eska-fmt"]) {
+    if (tool === selected) continue;
     const path = await destination(root, `components/${tool}.json`);
     if (!await lstat(path).catch(error => { if (error.code === "ENOENT") return undefined; throw error; })) continue;
     const receipt = await readMetadata(path);
@@ -50,8 +51,11 @@ async function compatibleNeighbours(root: string, target: NativeTarget): Promise
     const contract = receipt.package.contract;
     exactKeys(contract, ["schema_version", "tool", "target", "version", "config_schema", "bridge_schema", "metadata_api"]);
     stableVersion(contract.version);
+    if (tool === "eska-project") exactKeys(contract.metadata_api, ["major", "minor"]);
     if (contract.schema_version !== 2 || contract.tool !== tool || contract.target !== target || contract.config_schema !== PROJECT_CONFIG
-      || contract.bridge_schema !== 1 || contract.metadata_api !== null || receipt.package.version !== contract.version
+      || contract.bridge_schema !== 1 || (tool === "eska-project" ? !isRecord(contract.metadata_api) || contract.metadata_api.major !== 1
+        || !Number.isSafeInteger(contract.metadata_api.minor) || (contract.metadata_api.minor as number) < 12 : contract.metadata_api !== null)
+      || receipt.package.version !== contract.version
       || receipt.package.tool !== tool || receipt.package.target !== target) throw new ToolFailure("incompatible", tool);
   }
 }
@@ -86,35 +90,37 @@ function verified(release: ToolRelease, data: Buffer, kind: ToolKind): void {
   if (data.length !== release.asset.size || createHash("sha256").update(data).digest("hex") !== checksum(release.asset.sha256)) throw new ToolFailure("checksum");
 }
 
-/** Install one project archive without the monolith, Python, Cargo, Git or a platform runtime. */
-export async function installProject(root: string, data: Buffer, release: ToolRelease, log: DiagnosticLog, signal?: AbortSignal): Promise<ToolInfo> {
-  verified(release, data, "project");
+/** Install one project/formatter archive without the monolith, Python, Cargo, Git or a platform runtime. */
+export async function installComponent(root: string, data: Buffer, release: ToolRelease, log: DiagnosticLog, signal?: AbortSignal): Promise<ToolInfo> {
+  if (release.kind === "analyzer") throw new ToolFailure("incompatible", "component-kind");
+  const kind = release.kind, tool = TOOL_NAMES[kind];
+  verified(release, data, kind);
   return installationLock(root, signal, async () => {
     const stage = await mkdtemp(join(root, ".eska-component-"));
     try {
-      const payload = join(stage, "payload"), value = await unpackProject(data, payload, release.target, signal);
+      const payload = join(stage, "payload"), value = await unpackComponent(data, payload, release.target, signal, tool);
       if (value.version !== release.version) throw new ToolFailure("incompatible", "release-version");
-      await compatibleNeighbours(root, release.target);
-      const previous = await projectReceipt(root, release.target), old = previous ? projectFiles(previous.package) : new Map<string, string>();
-      const next = projectFiles(value), same = previous?.archive_sha256 === release.asset!.sha256;
+      await compatibleNeighbours(root, release.target, tool);
+      const previous = await componentReceipt(root, release.target, tool), old = previous ? componentFiles(previous.package) : new Map<string, string>();
+      const next = componentFiles(value), same = previous?.archive_sha256 === release.asset!.sha256;
       await preflight(root, old, next.keys(), previous?.package.version, release, same);
-      const path = managedPath(root, "project", release.target);
+      const path = managedPath(root, kind, release.target);
       // The probe uses stage as its cwd; finally must not remove it before every child exits.
-      if (same) return await inspectProjectContract(path, stage, value.contract, log, signal);
+      if (same) return await inspectComponentContract(path, stage, value.contract, log, signal);
       const space = await statfs(root), required = [...value.files, ...(previous?.package.files ?? [])].reduce((sum, item) => sum + item.size, 0);
       if (space.bavail * space.bsize < required + 16 * 1024 * 1024) throw new ToolFailure("io", "space");
       const executable = value.files.find(item => item.executable)!;
-      await inspectProjectContract(join(payload, executable.path), stage, value.contract, log, signal);
+      await inspectComponentContract(join(payload, executable.path), stage, value.contract, log, signal);
       const receipt = { schema_version: 1, method: "component-archive", archive_sha256: release.asset!.sha256, package: value };
       await writeJson(join(stage, "receipt.json"), receipt);
-      const receiptName = "components/eska-project.json";
+      const receiptName = `components/${tool}.json`;
       if (previous) await receiptHash(root, receiptName, old);
-      const incoming = new Map(value.files.map(item => [item.executable ? item.path : `share/eska/eska-project/${item.path.slice(9)}`, join(payload, item.path)]));
+      const incoming = new Map(value.files.map(item => [item.executable ? item.path : `share/eska/${value.tool}/${item.path.slice(9)}`, join(payload, item.path)]));
       incoming.set(receiptName, join(stage, "receipt.json"));
       let info: ToolInfo | undefined;
-      await publishTransaction(root, stage, "eska-project", release.target, old, incoming, async () => {
+      await publishTransaction(root, stage, tool, release.target, old, incoming, async () => {
         await verifyFiles(root, next);
-        info = await inspectProjectContract(path, stage, value.contract, log, signal);
+        info = await inspectComponentContract(path, stage, value.contract, log, signal);
       }, signal);
       return info!;
     } finally { await cleanStage(stage); }
@@ -180,7 +186,7 @@ export async function installAnalyzer(root: string, data: Buffer, release: ToolR
 
 /** Managed version lookup is local; selecting a custom executable never adopts it into these receipts. */
 export async function managedVersion(root: string, kind: ToolKind, target = hostTarget()): Promise<string | undefined> {
-  return kind === "project" ? (await projectReceipt(root, target))?.package.version : (await analyzerReceipt(toolRoot(root, kind), target))?.version;
+  return kind === "analyzer" ? (await analyzerReceipt(toolRoot(root, kind), target))?.version : (await componentReceipt(root, target, TOOL_NAMES[kind]))?.package.version;
 }
 
 /** Explicit recovery restores verified transactions only and never removes unrecognized temporary/user directories. */
@@ -189,7 +195,7 @@ export async function recoverInstallation(root: string, kind: ToolKind, target =
   await recoverAbandonedClaim(root);
   await installationLock(root, undefined, async () => {
     for (const stage of await pendingTransactions(root)) {
-      await restoreTransaction(root, stage, kind === "project" ? "eska-project" : "bsl-analyzer-app", target);
+      await restoreTransaction(root, stage, TOOL_NAMES[kind], target);
       await cleanStage(stage);
     }
   });

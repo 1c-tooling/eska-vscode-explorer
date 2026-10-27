@@ -35,7 +35,7 @@
   "analyzerExecutable": "Путь или имя команды опубликованного bsl-analyzer-app. Явно выбранный бинарник не перезаписывается.",
   "checkForAnalyzerUpdates": "Проверять релизы анализатора не чаще раза в сутки на текущем workspace host. Независимо от проверок ESKA.",
   "checkAnalyzerUpdates": "Проверить обновления BSL Analyzer",
-  "prepareTools": "Подготовить проектный и языковой компоненты",
+  "prepareTools": "Подготовить project, форматтер и языковой компонент",
   "recoverProjectInstallation": "Восстановить установку project-компонента",
   "recoverAnalyzerInstallation": "Восстановить установку Analyzer",
   "languageFeatures": "Запускать собственный BSL-клиент Explorer для выбранного приложения ESKA. При отключении базовая подсветка сохраняется.",
@@ -45,5 +45,10 @@
   "queryApply": "Применить запрос к модулю",
   "queryCancel": "Отменить редактирование запроса",
   "command.queryConstructor": "Конструктор запросов",
-  "command.placeQueryComments": "Назначить позиции исходных комментариев"
+  "command.placeQueryComments": "Назначить позиции исходных комментариев",
+  "formatterExecutable": "Путь к eska-fmt. Значение eska-fmt включает поиск стандартного компонента.",
+  "formatOnSave": "Форматировать BSL/SDBL и черновики запросов через ESKA при сохранении. Стиль задаётся в eska.toml.",
+  "checkFormatterUpdates": "Проверить обновления eska-fmt",
+  "recoverFormatterInstallation": "Восстановить установку eska-fmt",
+  "checkForFormatterUpdates": "Независимо проверять обновления eska-fmt."
 }

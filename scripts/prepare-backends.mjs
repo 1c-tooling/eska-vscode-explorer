@@ -6,7 +6,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ANALYZER_VERSION } from "../out/tooling/contracts.js";
 import { downloadAsset, fetchBytes, hostTarget, parseRelease } from "../out/tooling/releases.js";
-import { installAnalyzer, installProject } from "../out/tooling/install.js";
+import { installAnalyzer, installComponent } from "../out/tooling/install.js";
 
 const repository = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const playground = resolve(process.env.ESKA_TEST_ROOT ?? join(repository, "../eska-playground"));
@@ -40,8 +40,8 @@ if (local) {
     await writeFile(join(pythonTools, name), data);
   }
 }
-const project = await installProject(prefix, projectData, projectRelease, () => {});
-assert.deepEqual(await installProject(prefix, projectData, projectRelease, () => {}), project);
+const project = await installComponent(prefix, projectData, projectRelease, () => {});
+assert.deepEqual(await installComponent(prefix, projectData, projectRelease, () => {}), project);
 let analyzerRelease, analyzerData;
 if (local && process.env.ESKA_TEST_ANALYZER_BINARY) {
   analyzerData = await readFile(process.env.ESKA_TEST_ANALYZER_BINARY);

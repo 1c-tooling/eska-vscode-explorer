@@ -76,9 +76,6 @@ export class LanguageEdits implements vscode.Disposable {
           return edit;
         } catch (error) { this.explain(error); return undefined; }
       },
-      provideDocumentFormattingEdits: (document, options, token, next) => this.format(document, token, () => next(document, options, token)),
-      provideDocumentRangeFormattingEdits: (document, range, options, token, next) => this.format(document, token, () => next(document, range, options, token)),
-      provideOnTypeFormattingEdits: (document, position, ch, options, token, next) => this.format(document, token, () => next(document, position, ch, options, token), false),
       provideCodeActions: async (document, range, context, token) => {
         const origin = this.origin(token);
         try {
@@ -236,21 +233,6 @@ export class LanguageEdits implements vscode.Disposable {
     const applying = Promise.resolve(vscode.workspace.applyEdit(converted));
     this.applying.add(applying);
     try { return await applying; } finally { this.applying.delete(applying); }
-  }
-
-  /** Formatting edits target only the original buffer and retain its captured version across the server request. */
-  private async format(document: vscode.TextDocument, token: vscode.CancellationToken,
-    next: () => vscode.ProviderResult<vscode.TextEdit[]>, explain = true): Promise<vscode.TextEdit[] | undefined> {
-    const origin = this.origin(token);
-    try {
-      const edit: ProtocolEdit = { documentChanges: [{ textDocument: { uri: document.uri.toString(), version: document.version }, edits: [] }] };
-      const prepared = await this.prepare(edit, origin, false), result = await next();
-      if (!result) return undefined;
-      this.ranges(document, result.map(value => ({ range: value.range, newText: value.newText })));
-      await this.recheck(prepared, origin);
-      this.assertPrepared(prepared, origin);
-      return result;
-    } catch (error) { if (explain) this.explain(error); return undefined; }
   }
 
   /** Translate policy categories without exposing internal DTOs or file contents in user flows. */

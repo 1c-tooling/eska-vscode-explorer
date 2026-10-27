@@ -1,14 +1,14 @@
 import * as vscode from "vscode";
 import { homedir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import { compareVersions } from "../installation.js";
 import { ExplorerError } from "../protocol.js";
 import { message, type MessageKey } from "../messages.js";
 import type { ConnectionState } from "../connection.js";
 import type { DiagnosticLog } from "../diagnostics.js";
 import { TOOL_NAMES, ToolFailure, assertCurrent, type ToolKind } from "./contracts.js";
-import { findTool, inspectAnalyzer, type ToolInfo } from "./inspect.js";
-import { installAnalyzer, installProject, managedPath, managedVersion, recoverInstallation } from "./install.js";
+import { findTool, inspectAnalyzer, inspectFormatter, type ToolInfo } from "./inspect.js";
+import { installAnalyzer, installComponent, managedPath, managedVersion, recoverInstallation } from "./install.js";
 import { downloadAsset, latestToolRelease, type ToolRelease } from "./releases.js";
 import { cancellableChoice } from "./choice.js";
 import { inspectBundle, installBundle, type BundleUpdate } from "./bundle.js";
@@ -26,8 +26,9 @@ const DAY = 24 * 60 * 60 * 1000;
 /** Own independent setup/update state while project metadata and language lifecycles remain separate consumers. */
 export class ToolingSetup implements vscode.Disposable {
   readonly root = join(homedir(), ".eska");
+  readonly formatterStatus = vscode.window.createStatusBarItem("eska.explorer.formatter", vscode.StatusBarAlignment.Right, -2);
   readonly analyzerStatus = vscode.window.createStatusBarItem("eska.explorer.analyzer", vscode.StatusBarAlignment.Right, -1);
-  readonly states: Record<ToolKind, ToolState> = { project: { phase: "disconnected" }, analyzer: { phase: "missing" } };
+  readonly states: Record<ToolKind, ToolState> = { project: { phase: "disconnected" }, analyzer: { phase: "missing" }, formatter: { phase: "missing" } };
   private readonly checking = new Set<ToolKind>();
   private readonly installing = new Set<ToolKind>();
   private readonly pending = new Set<Promise<unknown>>();
@@ -41,6 +42,9 @@ export class ToolingSetup implements vscode.Disposable {
     this.analyzerStatus.name = "BSL Analyzer (ESKA Explorer)";
     this.analyzerStatus.command = "eska.explorer.checkAnalyzerUpdates";
     this.renderAnalyzer();
+    this.formatterStatus.name = "eska-fmt (ESKA Explorer)";
+    this.formatterStatus.command = "eska.explorer.checkFormatterUpdates";
+    this.renderFormatter();
   }
 
   /** Component names are stable identities; all surrounding instructions use the editor locale. */
@@ -107,17 +111,42 @@ export class ToolingSetup implements vscode.Disposable {
     }
   }
 
+  /** Formatter discovery has its own contract, installation and status; no analyzer is queried or started. */
+  async ensureFormatter(signal = this.lifetime.signal, offer = true,
+    configured = vscode.workspace.getConfiguration("eska.explorer").get<string>("formatterExecutable", TOOL_NAMES.formatter)): Promise<ToolInfo | undefined> {
+    signal = AbortSignal.any([signal, this.lifetime.signal]);
+    if (!vscode.workspace.isTrusted || this.disposed) return undefined;
+    if (configured !== TOOL_NAMES.formatter && !isAbsolute(configured)) throw new ExplorerError("invalidExecutable");
+    const path = await this.track(findTool(configured, TOOL_NAMES.formatter, dirname(managedPath(this.root, "formatter"))));
+    assertCurrent(signal);
+    if (!path) {
+      this.states.formatter = { phase: "missing" }; this.renderFormatter();
+      if (offer && configured === TOOL_NAMES.formatter) return this.offerInstall("formatter", signal);
+      if (offer) throw new ExplorerError("executableMissing");
+      return undefined;
+    }
+    try {
+      const info = await this.track(inspectFormatter(path, homedir(), signal));
+      assertCurrent(signal);
+      this.states.formatter = { ...this.states.formatter, info, phase: "verified" }; this.renderFormatter();
+      void this.background("formatter"); return info;
+    } catch (error) {
+      if (!signal.aborted && !this.disposed) { this.states.formatter = { phase: "error" }; this.renderFormatter(); }
+      throw error;
+    }
+  }
+
   /** One explicit preparation command exposes both selected versions before installing missing components. */
   async prepare(configured: string, signal: AbortSignal): Promise<void> {
     if (!vscode.workspace.isTrusted || this.disposed) return;
     const project = await this.ensureProject(signal, configured);
     assertCurrent(signal);
-    if (project) await this.ensureAnalyzer(signal);
+    if (project) { await this.ensureFormatter(signal); await this.ensureAnalyzer(signal); }
   }
 
   /** Background timestamps and in-flight flags belong to each component on this workspace host. */
   async background(kind: ToolKind): Promise<void> {
-    const setting = kind === "project" ? "checkForUpdates" : "checkForAnalyzerUpdates";
+    const setting = kind === "project" ? "checkForUpdates" : kind === "analyzer" ? "checkForAnalyzerUpdates" : "checkForFormatterUpdates";
     if (this.disposed || this.checking.has(kind) || this.installing.has(kind)
       || !vscode.workspace.getConfiguration("eska.explorer").get<boolean>(setting, true)) return;
     const key = `toolUpdateChecked.${kind}.${vscode.env.remoteName ?? "local"}.${process.platform}.${process.arch}`;
@@ -244,7 +273,7 @@ export class ToolingSetup implements vscode.Disposable {
           assertCurrent(combined);
           if (used && selected) { await this.stop(kind); stopped = true; }
           assertCurrent(combined);
-          const info = kind === "project" ? await installProject(this.root, data, release, this.log, combined)
+          const info = kind !== "analyzer" ? await installComponent(this.root, data, release, this.log, combined)
             : await installAnalyzer(this.root, data, release, join(this.context.extensionPath, "resources", "analyzer-notices"), combined);
           assertCurrent(combined);
           if (used) {
@@ -307,8 +336,16 @@ export class ToolingSetup implements vscode.Disposable {
     this.analyzerStatus.show();
   }
 
+  /** Optional formatting remains visible independently of project connection and language readiness. */
+  private renderFormatter(): void {
+    if (this.disposed) return;
+    const state = this.states.formatter;
+    this.formatterStatus.text = `eska-fmt${state.info ? ` v${state.info.version}` : ""} · ${this.text(`toolPhase_${state.phase}`)}${state.activity ? ` · ${this.text(`toolPhase_${state.activity}`)}` : ""}`;
+    this.formatterStatus.tooltip = this.tooltip("formatter"); this.formatterStatus.show();
+  }
+
   /** Project rendering stays with its actual metadata connection; analysis has its own status item. */
-  private render(kind: ToolKind): void { if (!this.disposed) { if (kind === "analyzer") this.renderAnalyzer(); else this.repaint(); } }
+  private render(kind: ToolKind): void { if (!this.disposed) { if (kind === "analyzer") this.renderAnalyzer(); else if (kind === "formatter") this.renderFormatter(); else this.repaint(); } }
 
   /** Track only owned work, so an open user dialog cannot prevent extension shutdown. */
   private track<T>(operation: PromiseLike<T>): Promise<T> {
@@ -322,5 +359,5 @@ export class ToolingSetup implements vscode.Disposable {
   async shutdown(): Promise<void> { this.dispose(); while (this.pending.size) await Promise.allSettled([...this.pending]); }
 
   /** Disposal never terminates a user or foreign analyzer process. */
-  dispose(): void { if (!this.disposed) { this.disposed = true; this.lifetime.abort(); this.analyzerStatus.dispose(); } }
+  dispose(): void { if (!this.disposed) { this.disposed = true; this.lifetime.abort(); this.analyzerStatus.dispose(); this.formatterStatus.dispose(); } }
 }

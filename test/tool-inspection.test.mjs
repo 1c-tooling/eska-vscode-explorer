@@ -4,12 +4,12 @@ import { mkdtemp, mkdir, writeFile, chmod, rm, realpath } from "node:fs/promises
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { projectContract, analyzerContract, nativeTarget, analyzerAsset, ToolFailure } from "../out/tooling/contracts.js";
-import { findTool, inspectProject, inspectAnalyzer, inspectProjectContract } from "../out/tooling/inspect.js";
+import { findTool, inspectProject, inspectAnalyzer, inspectComponentContract } from "../out/tooling/inspect.js";
 
 /** A complete T97 contract identifies exactly the project component and its compiled target. */
 function contract() {
   return { schema_version: 2, tool: "eska-project", target: "x86_64-unknown-linux-gnu", version: "0.14.3",
-    config_schema: "designer-xml-3", bridge_schema: 1, metadata_api: { major: 1, minor: 12 } };
+    config_schema: "designer-xml-4", bridge_schema: 1, metadata_api: { major: 1, minor: 12 } };
 }
 
 /** Assertions cover the declared flags actually used by check/configuration, not a list of names alone. */
@@ -80,7 +80,7 @@ test("real project inspection negotiates its API and validates the installed con
   assert.equal(info.kind, "project"); assert.ok(info.version);
   const { runProbe } = await import("../out/installation.js");
   const expected = projectContract(JSON.parse((await runProbe(path, ["__tool-contract"], root, 10_000, 65536)).stdout));
-  assert.deepEqual(await inspectProjectContract(path, root, expected, () => {}), info);
+  assert.deepEqual(await inspectComponentContract(path, root, expected, () => {}), info);
   await assert.rejects(inspectProject(path, root, () => {}, AbortSignal.abort()), { code: "cancelled" });
 });
 

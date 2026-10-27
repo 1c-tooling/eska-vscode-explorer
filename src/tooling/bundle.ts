@@ -10,7 +10,7 @@ import { destination, fileHash, installationLock, readMetadata } from "./files.j
 import { inspectProject, type ToolInfo } from "./inspect.js";
 import { pendingTransactions } from "./transaction.js";
 
-const COMPONENTS = ["eska", "eska-project", "eska-check", "eska-build", "eska-vcs"];
+const COMPONENTS = ["eska", "eska-project", "eska-check", "eska-build", "eska-vcs", "eska-fmt"];
 export interface BundleUpdate { cli: string; project: string; version: string; available: string; identity: string }
 
 /** Follow axoupdater's receipt search order, including its explicit configuration overrides. */
@@ -38,13 +38,16 @@ async function ownedBundle(root: string): Promise<{ cli: string; project: string
   if (receipt === undefined) return undefined;
   const pending = await pendingTransactions(root);
   if (pending.length) throw new ToolFailure("recovery", pending[0]);
-  const binaries = COMPONENTS.map(name => `${name}${suffix}`);
+  const required = COMPONENTS.filter(name => name !== "eska-fmt").map(name => `${name}${suffix}`);
+  const supported = COMPONENTS.map(name => `${name}${suffix}`);
   if (!isRecord(receipt) || !isRecord(receipt.source) || receipt.source.owner !== "1c-tooling"
     || receipt.source.name !== "eska" || receipt.source.app_name !== "eska" || receipt.source.release_type !== "github"
     || !isRecord(receipt.provider) || receipt.provider.source !== "cargo-dist" || receipt.install_layout !== "flat"
     || typeof receipt.install_prefix !== "string" || !isAbsolute(receipt.install_prefix)
     || resolve(receipt.install_prefix) !== resolve(root, "bin") || !Array.isArray(receipt.binaries)
-    || receipt.binaries.length !== binaries.length || !binaries.every(name => (receipt.binaries as unknown[]).includes(name))) {
+    || receipt.binaries.length < required.length || receipt.binaries.length > supported.length
+    || !required.every(name => (receipt.binaries as unknown[]).includes(name))
+    || new Set(receipt.binaries).size !== receipt.binaries.length || receipt.binaries.some(name => !supported.includes(String(name)))) {
     throw new ToolFailure("unmanaged", project);
   }
   const hashes: string[] = [];
@@ -52,6 +55,7 @@ async function ownedBundle(root: string): Promise<{ cli: string; project: string
     const metadata = await destination(root, `components/${component}.json`);
     const exists = await lstat(metadata).catch(error => { if (error.code !== "ENOENT") throw error; return undefined; });
     if (exists) throw new ToolFailure("unmanaged", metadata);
+    if (!receipt.binaries.includes(`${component}${suffix}`)) continue;
     const path = await destination(root, `bin/${component}${suffix}`), hash = await fileHash(path);
     if (!hash) throw new ToolFailure("unmanaged", path);
     hashes.push(hash);

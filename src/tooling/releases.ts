@@ -6,7 +6,7 @@ import { MAX_ARCHIVE } from "./archive.js";
 
 export interface Asset { name: string; url: string; sha256: string; size: number }
 export interface ToolRelease { kind: ToolKind; version: string; target: NativeTarget; asset?: Asset; restriction?: string }
-const REPOSITORIES = { project: "1c-tooling/eska", analyzer: "itrous/bsl-analyzer" } as const;
+const REPOSITORIES = { project: "1c-tooling/eska", analyzer: "itrous/bsl-analyzer", formatter: "1c-tooling/eska" } as const;
 let target: NativeTarget | undefined;
 
 /** Resolve the extension host's runtime rather than the desktop UI's platform in Remote workspaces. */
@@ -50,7 +50,7 @@ export function parseRelease(kind: ToolKind, target: NativeTarget, value: unknow
   const version = stableVersion(value.tag_name.slice(1));
   const result: ToolRelease = { kind, version, target };
   if (kind === "analyzer" && version !== ANALYZER_VERSION) return { ...result, restriction: `supported-analyzer-${ANALYZER_VERSION}` };
-  const name = kind === "project" ? `eska-project-${version}-${target}.zip` : analyzerAsset(target);
+  const name = kind === "analyzer" ? analyzerAsset(target) : `${kind === "project" ? "eska-project" : "eska-fmt"}-${version}-${target}.zip`;
   const candidates = value.assets.filter(asset => isRecord(asset) && asset.name === name);
   if (candidates.length !== 1) return { ...result, restriction: `missing-asset:${name}` };
   const asset = candidates[0];

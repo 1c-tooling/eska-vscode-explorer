@@ -7,9 +7,9 @@ import xml.etree.ElementTree as ET
 import zipfile
 
 
-def check(archive):
+def check(archive, source=None):
     """Reject missing runtime assets, accidental source/dependency inclusion and mismatched identity."""
-    root = Path(__file__).resolve().parents[1]
+    root = (source or Path(__file__).resolve().parents[1]).resolve()
     manifest = json.loads((root / 'package.json').read_text())
     with zipfile.ZipFile(archive) as package:
         names = package.namelist()
@@ -24,11 +24,14 @@ def check(archive):
         required = ['package.json', 'package.nls.json', 'package.nls.ru.json', 'README.md', 'CHANGELOG.md', 'LICENSE', 'resources/icons/support/LICENSE', 'resources/icons/support/NOTICE.md']
         if manifest.get('icon'):
             required.append(manifest['icon'])
-        required += [path.relative_to(root).as_posix() for pattern in ['out/*.js', 'out/THIRD-PARTY-NOTICES.txt', 'resources/analyzer-notices/*', 'resources/language/*', 'resources/icons/**/*.svg', 'resources/properties/*.css', 'resources/properties/*.js', 'resources/properties/*.mjs', 'resources/rename/*.css', 'resources/rename/*.js', 'resources/query/*.css', 'resources/query/*.js', 'docs/*.md', 'docs/images/*.png', 'docs/measurements/*.json'] for path in root.glob(pattern)]
+        required += [path.relative_to(root).as_posix() for pattern in ['out/*.js', 'out/THIRD-PARTY-NOTICES.txt', 'resources/analyzer-notices/*', 'resources/language/*', 'resources/icons/**/*.svg', 'resources/properties/*.css', 'resources/properties/*.js', 'resources/properties/*.mjs', 'resources/rename/*.css', 'resources/rename/*.js', 'resources/query/*.css', 'resources/query/*.js', 'resources/query/*.mjs', 'docs/*.md', 'docs/images/*.png', 'docs/measurements/*.json'] for path in root.glob(pattern)]
         # vsce publishes a LICENSE without an extension as LICENSE.txt.
         packaged = {name: 'extension/' + ('LICENSE.txt' if name == 'LICENSE' else name) for name in required}
         expected = set(packaged.values()) | {'extension.vsixmanifest', '[Content_Types].xml'}
-        assert {name.lower() for name in names} == {name.lower() for name in expected}, 'Unexpected or missing archive files'
+        actual = {name.lower() for name in names}
+        expected = {name.lower() for name in expected}
+        assert actual == expected, (f'Unexpected archive files: {sorted(actual - expected)}; '
+                                    f'missing archive files: {sorted(expected - actual)}')
         # vsce may normalize README/CHANGELOG names and augment package.json metadata.
         normalized = {name.lower(): name for name in names}
         for name in required:
@@ -41,4 +44,6 @@ def check(archive):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('archive', type=Path)
-    check(parser.parse_args().archive)
+    parser.add_argument('--source', type=Path, help='Source tree whose manifest and file bytes must match the archive')
+    arguments = parser.parse_args()
+    check(arguments.archive, arguments.source)

@@ -51,9 +51,10 @@ def publish(version):
         return
     with tempfile.TemporaryDirectory(prefix="eska-release-vsix-", dir=os.environ.get("RUNNER_TEMP")) as directory:
         source = stage_tag(version, Path(directory))
+        checker = Path(__file__).resolve().with_name("check-vsix.py")
         for args in [("bun", "install", "--frozen-lockfile", "--ignore-scripts"),
                      ("bun", "run", "package"),
-                     ("python3", "scripts/check-vsix.py", filename)]:
+                     ("python3", str(checker), filename, "--source", str(source))]:
             run(*args, cwd=source)
         run("gh", "release", "upload", f"v{version}", str(source / filename), "--repo", REPOSITORY)
     print(f"Attached: {filename}")

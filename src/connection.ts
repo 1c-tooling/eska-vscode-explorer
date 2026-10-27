@@ -1,3 +1,4 @@
+import { formatCapabilities } from "./formatting/protocol.js";
 import { isAbsolute } from "node:path";
 import { diagnostic, errorContext, type DiagnosticLog } from "./diagnostics.js";
 import { BackendProcess, type ProcessOptions } from "./process.js";
@@ -176,6 +177,7 @@ export class Connection {
         const recovery = backend === "project" ? recoveryCapabilities(response) : undefined;
         const sessions = backend === "project" ? querySessionCapabilities(response) : undefined;
         const sources = backend === "project" ? sourceCapabilities(response) : undefined;
+        const formatting = backend === "project" ? formatCapabilities(response) : undefined;
         negotiated = true;
         if (revision !== this.revision) return;
         const request = async (method: string, params: Record<string, unknown>): Promise<unknown> => {
@@ -191,7 +193,13 @@ export class Connection {
         if (sources) this.sourceEndpoint = { limits: sources, request };
         if (recovery) {
           const endpoint: RecoveryEndpoint = { capabilities: recovery, request,
-            ...(sessions ? { sessions: { capabilities: sessions, request } } : {}) };
+            ...(sessions ? { sessions: { capabilities: sessions, request } } : {}),
+            ...(formatting ? { formatting: { limits: formatting, request: async (method, params, signal) => {
+              if (this.child !== child) throw new ExplorerError("obsolete");
+              const result = await child.request(method, params, 35_000, signal);
+              if (this.child !== child) throw new ExplorerError("obsolete");
+              return result;
+            } } } : {}) };
           this.recoveryEndpoint = endpoint;
           this.publishRecovery();
         }

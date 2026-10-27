@@ -5,25 +5,25 @@ import { dirname, join } from "node:path";
 import { Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { fromBuffer, type Entry, type ZipFile } from "yauzl";
-import { ToolFailure, assertCurrent, exactKeys, projectContract, type NativeTarget, type ProjectContract } from "./contracts.js";
+import { ToolFailure, assertCurrent, exactKeys, componentContract, type NativeTarget, type ComponentContract, type ComponentName } from "./contracts.js";
 import { checksum, relativePath, strictJson } from "./files.js";
 
 export interface Payload { path: string; sha256: string; size: number; executable: boolean }
-export interface ProjectPackage {
-  schema_version: 1; tool: "eska-project"; version: string; target: NativeTarget; contract: ProjectContract; files: Payload[];
+export interface ComponentPackage {
+  schema_version: 1; tool: ComponentName; version: string; target: NativeTarget; contract: ComponentContract; files: Payload[];
 }
 export const MAX_ARCHIVE = 512 * 1024 * 1024;
 const MAX_UNPACKED = 2 * 1024 * 1024 * 1024;
 
 /** The producer and both installer frontends share the same fixed executable/notice namespace. */
-export function projectPackage(value: unknown, target?: NativeTarget): ProjectPackage {
+export function componentPackage(value: unknown, target?: NativeTarget, tool: ComponentName = "eska-project"): ComponentPackage {
   exactKeys(value, ["schema_version", "tool", "version", "target", "contract", "files"]);
-  const contract = projectContract(value.contract, target);
-  if (value.schema_version !== 1 || value.tool !== "eska-project" || value.version !== contract.version
+  const contract = componentContract(value.contract, tool, target);
+  if (value.schema_version !== 1 || value.tool !== tool || value.version !== contract.version
     || value.target !== contract.target || !Array.isArray(value.files) || value.files.length < 2 || value.files.length > 8192) {
     throw new ToolFailure("archive", "package");
   }
-  const binary = `bin/eska-project${contract.target.includes("windows") ? ".exe" : ""}`;
+  const binary = `bin/${tool}${contract.target.includes("windows") ? ".exe" : ""}`;
   const names = new Set<string>(); let size = 0;
   const files: Payload[] = value.files.map(item => {
     exactKeys(item, ["path", "sha256", "size", "executable"]);
@@ -36,7 +36,7 @@ export function projectPackage(value: unknown, target?: NativeTarget): ProjectPa
     return { path, sha256: checksum(item.sha256), size: item.size as number, executable: path === binary };
   });
   if (!names.has(binary) || !names.has("licenses/license") || size > MAX_UNPACKED) throw new ToolFailure("archive", "payloads");
-  return { schema_version: 1, tool: "eska-project", version: contract.version, target: contract.target, contract, files };
+  return { schema_version: 1, tool, version: contract.version, target: contract.target, contract, files };
 }
 
 /** Open a lazy, bounded ZIP without extracting archive-chosen filesystem paths. */
@@ -72,7 +72,7 @@ async function stream(zip: ZipFile, entry: Entry): Promise<NodeJS.ReadableStream
 }
 
 /** Validate the full package and extract regular declared files into an exclusively owned staging directory. */
-export async function unpackProject(data: Buffer, root: string, target: NativeTarget, signal?: AbortSignal): Promise<ProjectPackage> {
+export async function unpackComponent(data: Buffer, root: string, target: NativeTarget, signal?: AbortSignal, tool: ComponentName = "eska-project"): Promise<ComponentPackage> {
   if (data.length > MAX_ARCHIVE) throw new ToolFailure("archive", "size");
   const zip = await openZip(data);
   try {
@@ -80,7 +80,7 @@ export async function unpackProject(data: Buffer, root: string, target: NativeTa
     if (!manifest || manifest.uncompressedSize > 4 * 1024 * 1024) throw new ToolFailure("archive", "manifest");
     const chunks: Buffer[] = [];
     for await (const chunk of await stream(zip, manifest)) { assertCurrent(signal); chunks.push(chunk); }
-    const value = projectPackage(strictJson(Buffer.concat(chunks)), target);
+    const value = componentPackage(strictJson(Buffer.concat(chunks)), target, tool);
     if (list.size !== value.files.length + 1) throw new ToolFailure("archive", "members");
     for (const item of value.files) {
       assertCurrent(signal);
