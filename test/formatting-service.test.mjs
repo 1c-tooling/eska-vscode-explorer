@@ -15,7 +15,7 @@ function fixture(t) {
   const register = name => callback => { handlers[name] = callback; return { dispose() {} }; };
   class Range { constructor(start, end) { this.start = start; this.end = end; } }
   const vscode = { env: { language: 'en-US' }, Range, TextEdit: { replace: (range, text) => ({ range, newText: text }) },
-    workspace: { isTrusted: true, getConfiguration: section => ({ get: (key, fallback) => settings[section + '.' + key] ?? fallback }),
+    workspace: { isTrusted: true, getConfiguration: (section, scope) => ({ get: (key, fallback) => settings[`[${scope?.languageId}].${section}.${key}`] ?? settings[section + '.' + key] ?? fallback }),
       onWillSaveTextDocument: register('save'), onDidChangeTextDocument: register('change'), onDidCloseTextDocument: register('close'), onDidChangeConfiguration: register('configuration') },
     languages: { registerDocumentFormattingEditProvider(selector, provider) { providers.document = provider; providers.selector = selector; return { dispose() {} }; },
       registerDocumentRangeFormattingEditProvider(_selector, provider) { providers.range = provider; return { dispose() {} }; } },
@@ -64,6 +64,21 @@ test('formatting suppresses obsolete native edits and save formatting requires e
   saved = undefined; f.settings['editor.formatOnSave'] = true;
   f.handlers.save({ document: f.document, waitUntil: promise => { saved = promise; } }); assert.equal(saved, undefined);
   assert.equal(f.warnings.length, 0);
+});
+
+/** The save hook follows the document language override instead of an unrelated global editor setting. */
+test('save formatting respects language-specific editor settings in both directions', async t => {
+  const f = fixture(t);
+  f.settings['eska.explorer.formatOnSave'] = true;
+  f.settings['editor.formatOnSave'] = false;
+  f.settings['[bsl].editor.formatOnSave'] = true;
+  let saved;
+  f.handlers.save({ document: f.document, waitUntil: promise => { saved = promise; } });
+  assert.equal(saved, undefined, 'native format-on-save must not be invoked twice');
+  f.settings['editor.formatOnSave'] = true;
+  f.settings['[bsl].editor.formatOnSave'] = false;
+  f.handlers.save({ document: f.document, waitUntil: promise => { saved = promise; } });
+  assert.equal((await saved).length, 1, 'ESKA opt-in still applies when native formatting is disabled for BSL');
 });
 
 /** Query drafts use their source-owning session, never a metadata-free replacement server. */

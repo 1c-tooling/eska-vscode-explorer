@@ -28,7 +28,7 @@ export class FormattingService {
       vscode.workspace.onWillSaveTextDocument(event => {
         if (!this.accepts(event.document) || !vscode.workspace.getConfiguration("eska.explorer", event.document.uri).get<boolean>("formatOnSave", false)) return;
         // If the editor already invokes this provider on save, a second listener would compute the same edit twice.
-        if (vscode.workspace.getConfiguration("editor", event.document.uri).get<boolean>("formatOnSave", false)) return;
+        if (vscode.workspace.getConfiguration("editor", event.document).get<boolean>("formatOnSave", false)) return;
         event.waitUntil(this.track(event.document));
       }),
       vscode.workspace.onDidChangeTextDocument(event => { if (event.contentChanges.length) this.cancel(event.document); }),

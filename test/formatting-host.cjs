@@ -37,7 +37,7 @@ exports.run = async function () {
       assert.equal(edits?.length ?? 0, 0);
       assert.deepEqual(await fs.readFile(fixture.module), disk);
       await fs.writeFile(path.join(fixture.root, 'host-result.json'), JSON.stringify({ passed: true, suite: 'formatting-restart', locale: vscode.env.language,
-        accepted: ['installed_vsix_restarted_and_saved_source_remains_idempotent'], formatter: explorer.tooling.states.formatter.info }));
+        accepted: [`${process.env.ESKA_TEST_VSIX ? 'installed_vsix' : 'development_extension'}_restarted_and_saved_source_remains_idempotent`], formatter: explorer.tooling.states.formatter.info }));
       return;
     }
 
@@ -68,6 +68,16 @@ exports.run = async function () {
     assert.ok(owner.getText().includes('\tЗначение = 1;')); assert.ok(owner.getText().includes('Текст="выбрать 1 как А,2 как Б";'));
     accepted.push('selection_formats_only_expanded_syntax_unit');
     await vscode.commands.executeCommand('undo');
+    await replace(owner, 'А=1;   ');
+    const tailRange = new vscode.Range(owner.positionAt(4), owner.positionAt(7));
+    const tailEdits = await vscode.commands.executeCommand('vscode.executeFormatRangeProvider', owner.uri, tailRange, { tabSize: 4, insertSpaces: false });
+    assert.ok(tailEdits?.length, 'EOF trivia has a valid native edit');
+    assert.equal(await vscode.window.activeTextEditor.edit(edit => {
+      for (const replacement of tailEdits) edit.replace(replacement.range, replacement.newText);
+    }), true);
+    assert.equal(owner.getText(), 'А=1;\r\n');
+    await replace(owner, original);
+    accepted.push('trailing_whitespace_selection_preserves_unselected_bsl_and_returns_valid_coordinates');
     const formatterPath = config.get('formatterExecutable');
     await config.update('formatterExecutable', config.get('executable'), vscode.ConfigurationTarget.Workspace);
     const rejectedComponent = await vscode.commands.executeCommand('vscode.executeFormatDocumentProvider', owner.uri, { tabSize: 4, insertSpaces: false });
@@ -118,6 +128,9 @@ exports.run = async function () {
     owner = await vscode.workspace.openTextDocument(vscode.Uri.file(fixture.module));
     await vscode.window.showTextDocument(owner, { preview: false });
     await config.update('formatOnSave', true, vscode.ConfigurationTarget.Workspace);
+    await vscode.workspace.getConfiguration('editor').update('formatOnSave', true, vscode.ConfigurationTarget.Workspace);
+    await vscode.workspace.getConfiguration('editor', owner).update('formatOnSave', false, vscode.ConfigurationTarget.Workspace, true);
+    assert.equal(vscode.workspace.getConfiguration('editor', owner).get('formatOnSave'), false);
     await replace(owner, original.replace('Значение=1', 'Значение=3'));
     assert.equal(await owner.save(), true);
     assert.ok(owner.getText().includes('\tЗначение = 3;'));
@@ -125,6 +138,9 @@ exports.run = async function () {
     assert.equal(saved[0], 0xef); assert.equal(saved[1], 0xbb); assert.equal(saved[2], 0xbf);
     assert.ok(saved.toString('utf8').includes('\r\n')); assert.equal(saved.toString('utf8').replace(/^\ufeff/, ''), owner.getText());
     accepted.push('opt_in_save_formats_and_preserves_bom_crlf');
+    accepted.push('eska_save_opt_in_respects_language_specific_native_format_on_save');
+    await vscode.workspace.getConfiguration('editor', owner).update('formatOnSave', undefined, vscode.ConfigurationTarget.Workspace, true);
+    await vscode.workspace.getConfiguration('editor').update('formatOnSave', false, vscode.ConfigurationTarget.Workspace);
     await config.update('formatOnSave', false, vscode.ConfigurationTarget.Workspace);
     await explorer.formatting.stop();
     const repeat = await vscode.commands.executeCommand('vscode.executeFormatDocumentProvider', owner.uri, { tabSize: 9, insertSpaces: true });
