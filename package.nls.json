@@ -45,5 +45,7 @@
   "queryApply": "Apply query to module",
   "queryCancel": "Cancel query editing",
   "command.queryConstructor": "Query constructor",
-  "command.placeQueryComments": "Assign source comment positions"
+  "command.placeQueryComments": "Assign source comment positions",
+  "formatterExecutable": "Path to eska-fmt. The default eska-fmt resolves the standard component.",
+  "formatOnSave": "Format BSL/SDBL and query drafts through ESKA on save. Style is configured in eska.toml."
 }

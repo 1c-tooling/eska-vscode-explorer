@@ -1,3 +1,4 @@
+import { FormattingService } from "./formatting/service.js";
 import { QueryDesigner } from "./query/designer.js";
 import { SupportContexts } from "./support-contexts.js";
 import { SupportController } from "./support.js";
@@ -60,6 +61,7 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
   private readonly setup: BackendSetup;
   private readonly tooling: ToolingSetup;
   private readonly language: LanguageService;
+  private readonly formatting: FormattingService;
   private readonly queryDesigner: QueryDesigner;
   private readonly legacyNotices = new Set<string>();
   private readonly view: vscode.TreeView<Element>;
@@ -123,6 +125,7 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
     this.disposables.push(this.language);
     this.queries = new QueryTabs(context, this.connection, () => this.tree, () => this.language.selectedApplication,
       entry => { if (!this.disposed) this.changed.fire(entry); }, value => this.output.warn(value));
+    this.formatting = new FormattingService(String(context.extension.packageJSON.version), this.queries, this.tooling, (text, level) => this.output[level ?? "info"](text));
     this.language.attachQueries(new QueryLanguage(this.queries, value => this.output.warn(value)));
     this.queryDesigner = new QueryDesigner(context, this.queries, value => this.output.warn(value));
     this.setup = new BackendSetup(context, (text, level) => { if (!this.disposed) this.output[level ?? "info"](text); },
@@ -902,7 +905,7 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
       for (const watcher of this.watchers) watcher.dispose();
       this.view.dispose();
       this.changed.dispose();
-      const other = Promise.allSettled([this.supportContexts.stop(), this.support.shutdown(), this.setup.shutdown(), this.tooling.shutdown()]);
+      const other = Promise.allSettled([this.formatting.shutdown(), this.supportContexts.stop(), this.support.shutdown(), this.setup.shutdown(), this.tooling.shutdown()]);
       const queries = this.queryDesigner.shutdown().then(() => Promise.allSettled([this.queries.shutdown()]));
       this.stopping = (async () => {
         const language = await Promise.allSettled([this.language.shutdown()]);

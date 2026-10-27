@@ -45,5 +45,7 @@
   "queryApply": "Применить запрос к модулю",
   "queryCancel": "Отменить редактирование запроса",
   "command.queryConstructor": "Конструктор запросов",
-  "command.placeQueryComments": "Назначить позиции исходных комментариев"
+  "command.placeQueryComments": "Назначить позиции исходных комментариев",
+  "formatterExecutable": "Путь к eska-fmt. Значение eska-fmt включает поиск стандартного компонента.",
+  "formatOnSave": "Форматировать BSL/SDBL и черновики запросов через ESKA при сохранении. Стиль задаётся в eska.toml."
 }

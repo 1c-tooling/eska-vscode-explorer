@@ -299,6 +299,22 @@ export class QueryTabs implements vscode.FileSystemProvider {
     return { owner: owner.document, projection };
   }
 
+  /** Formatting is available for either query owner kind and checks native lifetime after checkpoint acknowledgement. */
+  async formatting(document: vscode.TextDocument, range: { start: number; end: number } | undefined,
+    formatter: string | undefined, signal: AbortSignal): Promise<unknown> {
+    await this.ready;
+    const session = this.session(document.uri), tree = this.currentTree(), version = document.version;
+    if (!session || !tree || this.isOwnerSnapshot(document.uri) || !session.resumed || session.pending || session.review || session.design) throw new ExplorerError("obsolete");
+    if (session.saving) await session.saving;
+    const text = document.getText();
+    await this.requiredRecovery().saveDraft(session.record.id, canonical(text));
+    const source = await this.source(session, tree), endpoint = this.recoveryEndpoint;
+    const result = await source.formatting(text, version, await nativeReadOnly(document), range, formatter, signal);
+    if (this.disposed || session.source !== source || endpoint !== this.recoveryEndpoint || tree !== this.currentTree() || session.design
+      || !session.resumed || session.pending || document.isClosed || document.version !== version || signal.aborted) throw new ExplorerError("obsolete");
+    return result;
+  }
+
   /** A visual adapter receives an owned native binding; all model and text operations remain in ESKA. */
   async beginConstructor(document: vscode.TextDocument): Promise<NativeQueryConstructor> {
     await this.ready;

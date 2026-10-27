@@ -1,3 +1,4 @@
+import type { FormatEndpoint } from "../formatting/protocol.js";
 import { isRecord } from "../protocol.js";
 import { invalid, isSnapshot, unsigned } from "./protocol.js";
 import { isToken } from "../protocol.js";
@@ -13,6 +14,7 @@ export type RecoveryMethod = "query/recoveryOpen" | "query/recoveryRead" | "quer
 export interface RecoveryEndpoint {
   readonly capabilities: RecoveryCapabilities;
   readonly sessions?: QuerySessionTransport;
+  readonly formatting?: FormatEndpoint;
   request(method: RecoveryMethod, params: Record<string, unknown>): Promise<unknown>;
 }
 export const RECOVERY_PARTS = ["metadata", "ownerText", "base", "draft"] as const;
