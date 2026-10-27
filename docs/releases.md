@@ -96,6 +96,11 @@ release-ветки. Это позволяет использовать штат�
 Тестовые Git-репозитории создаются только в собственных временных каталогах
 `ESKA_TEST_ROOT` внутри соседнего `eska-playground`.
 
+`test/tool-installation.test.mjs` запускает сам `prepare-backends.mjs` через Node
+с локальным архивом настоящего `eska-project` и бинарником bsl-analyzer. Проверяются
+установка, receipts и пути в `GITHUB_ENV` для последующих шагов CI; такой тест
+выявляет рассогласование скрипта с экспортами установщика.
+
 ```bash
 ESKA_TEST_ROOT="$(realpath ../eska-playground)" \
 KNOPE_TEST_BINARY="$(command -v knope)" \

@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
 import { once } from "node:events";
-import { chmod, mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { chmod, copyFile, mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { strictJson, relativePath, installationLock, fileHash, recoverAbandonedClaim } from "../out/tooling/files.js";
@@ -166,6 +166,34 @@ test("real upstream app installs independently and verifies all five notices wit
   assert.equal((await installAnalyzer(prefix, data, release, join(repository, "resources/analyzer-notices"))).version, "0.4.0");
   await writeFile(info.path, "user modification");
   await assert.rejects(installAnalyzer(prefix, data, release, join(repository, "resources/analyzer-notices")), { code: "modified" });
+});
+
+/** Exercise the CI entry point under Node, including real installation and its exported environment. */
+test("backend preparation installs native tools and exports verified paths for subsequent CI steps", {
+  skip: !process.env.ESKA_TEST_BINARY || !process.env.ESKA_TEST_ANALYZER_BINARY || process.platform === "win32",
+  timeout: 30_000,
+}, async t => {
+  const root = await fixture(t), binary = process.env.ESKA_TEST_BINARY;
+  const contract = JSON.parse((await runProbe(binary, ["__tool-contract"], root, 10_000, 65536)).stdout);
+  const packed = await archive(root, binary, contract), githubEnv = join(root, "github-env");
+  await writeFile(join(root, "release.json"), JSON.stringify({ version: contract.version, target: contract.target,
+    components: { "eska-project": { archive: "component.zip", size: packed.data.length, sha256: packed.release.asset.sha256 } } }));
+  const bootstrap = ["components.py", "component_installation.py", "component_package.py"];
+  for (const name of bootstrap) await copyFile(join(pythonTools, name), join(root, name));
+  const { stdout } = await run("node", [join(repository, "scripts/prepare-backends.mjs"), root], {
+    cwd: repository, env: { ...process.env, ESKA_TEST_ROOT: root, GITHUB_ENV: githubEnv }, timeout: 30_000,
+  });
+  const prepared = JSON.parse(stdout), prefix = join(prepared.root, "installation"), environment = prepared.environment;
+  assert.equal(prepared.project, contract.version); assert.equal(prepared.analyzer, "0.4.0");
+  assert.equal(environment.ESKA_TEST_ROOT, root);
+  assert.equal(environment.ESKA_TEST_BINARY, managedPath(prefix, "project"));
+  assert.equal(environment.ESKA_TEST_ANALYZER_BINARY, managedPath(prefix, "analyzer"));
+  assert.equal(environment.ESKA_TEST_LANGUAGE, "1");
+  assert.equal(await managedVersion(prefix, "project"), contract.version);
+  assert.equal(await managedVersion(prefix, "analyzer"), "0.4.0");
+  assert.deepEqual(JSON.parse(await readFile(join(prepared.root, "environment.json"), "utf8")), environment);
+  assert.equal(await readFile(githubEnv, "utf8"), Object.entries(environment).map(([name, value]) => `${name}=${value}\n`).join(""));
+  for (const name of bootstrap) assert.deepEqual(await readFile(join(environment.ESKA_TEST_PYTHON_TOOLS, name)), await readFile(join(root, name)));
 });
 
 /** The real optional formatter archive uses the same producer/receipt boundary as the project component. */
