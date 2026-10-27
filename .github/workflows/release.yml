@@ -51,6 +51,7 @@ jobs:
           sudo apt-get update && sudo apt-get install -y xvfb libasound2t64
           bash scripts/install-editor.sh
           bun run --bun package
+          python3 scripts/check-vsix.py "eska-explorer-$(node -p 'require("./package.json").version').vsix"
       - name: Запуск установленного VSIX
         env:
           ESKA_HOST_SUPPORT_DISABLED: '1'
