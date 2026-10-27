@@ -102,6 +102,9 @@ export class FormattingService {
     const failure = error instanceof ExplorerError ? error : undefined, code = failure?.details?.code;
     const key: MessageKey = failure?.code === "executableMissing" || code === "missing" || code === "component_missing" ? "formatMissing"
       : failure?.code === "incompatible" || error instanceof ToolFailure && error.code === "incompatible" || code === "component_incompatible" ? "formatIncompatible"
+      : code === "selection_required" ? "formatSelectionRequired"
+      : code === "selection_expansion" ? "formatSelectionExpansion"
+      : code === "change_control_protected" ? "formatChangeControlProtected"
       : ["source_read_only", "source_busy", "support_read_only", "support_unknown"].includes(String(code)) ? "formatReadonly"
       : ["source_conflict", "config_conflict"].includes(String(code)) ? "sourceChanged" : "formatFailed";
     this.log(JSON.stringify({ event: "formatting_rejected", code: failure?.code, domain: failure?.domain, reason: code }));

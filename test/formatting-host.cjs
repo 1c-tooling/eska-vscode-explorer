@@ -127,6 +127,14 @@ exports.run = async function () {
     await until(() => !explorer.queries.sessions.size, 'query closes and releases owner');
     owner = await vscode.workspace.openTextDocument(vscode.Uri.file(fixture.module));
     await vscode.window.showTextDocument(owner, { preview: false });
+    const controlled = '&ChangeAndValidate("Run")\r\nProcedure Custom()\r\n   A=1; // original  \r\n#Insert\r\nB= 2;\r\n#EndInsert\r\nEndProcedure';
+    await replace(owner, `X=1;\r\n${controlled}\r\n\r\nProcedure Other()\r\nC=3;\r\nEndProcedure\r\n`);
+    await vscode.commands.executeCommand('editor.action.formatDocument');
+    assert.ok(owner.getText().includes(controlled)); assert.ok(owner.getText().includes('\tC = 3;'));
+    await replace(owner, original);
+    accepted.push('controlled_method_remains_byte_identical_while_ordinary_code_formats');
+    await protectedSelection(fixture.root, accepted);
+    await vscode.window.showTextDocument(owner, { preview: false });
     await config.update('formatOnSave', true, vscode.ConfigurationTarget.Workspace);
     await vscode.workspace.getConfiguration('editor').update('formatOnSave', true, vscode.ConfigurationTarget.Workspace);
     await vscode.workspace.getConfiguration('editor', owner).update('formatOnSave', false, vscode.ConfigurationTarget.Workspace, true);
@@ -150,3 +158,35 @@ exports.run = async function () {
     await fs.writeFile(path.join(fixture.root, 'host-result.json'), JSON.stringify({ passed: false, suite: 'formatting', accepted, timings, error: String(error.stack ?? error) })); throw error;
   } finally { await explorer?.shutdown(); }
 };
+
+/** Exercise actual core supplier checks through native document/range providers in a separate owned project. */
+async function protectedSelection(root, accepted) {
+  const project = path.join(root, 'fmt-protection'), ext = path.join(project, 'src', 'Ext');
+  await fs.mkdir(ext, { recursive: true });
+  const uuid = '11111111-1111-1111-1111-111111111111';
+  await fs.writeFile(path.join(project, 'eska.toml'), "[project]\ntype='configuration'\n");
+  await fs.writeFile(path.join(project, 'src', 'Configuration.xml'), `<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses"><Configuration uuid="${uuid}"><Properties><Name>FmtProtection</Name></Properties><ChildObjects/></Configuration></MetaDataObject>`);
+  const rules = rule => `{6,0,1,${uuid},0,${uuid},"1","Vendor","Demo",1,${rule},0,${uuid},${uuid},0,0,${Array(13).fill('0').join(',')}}`;
+  const policy = path.join(ext, 'ParentConfigurations.bin'), source = path.join(ext, 'ManagedApplicationModule.bsl');
+  const text = 'Procedure Run()\n    A=1;\n    B=2;\nEndProcedure\n';
+  await fs.writeFile(policy, rules(1)); await fs.writeFile(source, text);
+  const document = await vscode.workspace.openTextDocument(source);
+  const editor = await vscode.window.showTextDocument(document, { preview: false });
+  const options = { tabSize: 4, insertSpaces: false };
+  assert.equal((await vscode.commands.executeCommand('vscode.executeFormatDocumentProvider', document.uri, options))?.length ?? 0, 0);
+  const line = text.indexOf('    A=1;');
+  const partial = new vscode.Range(document.positionAt(line + 4), document.positionAt(line + 5));
+  assert.equal((await vscode.commands.executeCommand('vscode.executeFormatRangeProvider', document.uri, partial, options))?.length ?? 0, 0);
+  const selected = new vscode.Range(document.positionAt(line), document.positionAt(line + '    A=1;'.length));
+  const edits = await vscode.commands.executeCommand('vscode.executeFormatRangeProvider', document.uri, selected, options);
+  assert.ok(edits?.length);
+  assert.equal(await editor.edit(builder => { for (const edit of edits) builder.replace(edit.range, edit.newText); }), true);
+  assert.equal(document.getText(), text.replace('    A=1;', '\tA = 1;'));
+  assert.equal(await fs.readFile(source, 'utf8'), text);
+  await vscode.commands.executeCommand('undo'); assert.equal(document.getText(), text);
+  accepted.push('supported_file_rejects_whole_document_and_expansion_but_accepts_exact_selection_with_native_undo');
+  await fs.writeFile(policy, rules(0));
+  assert.equal((await vscode.commands.executeCommand('vscode.executeFormatRangeProvider', document.uri, selected, options))?.length ?? 0, 0);
+  assert.equal(document.getText(), text); assert.equal(await fs.readFile(source, 'utf8'), text);
+  accepted.push('locked_supplier_file_rejects_selection_without_source_changes');
+}

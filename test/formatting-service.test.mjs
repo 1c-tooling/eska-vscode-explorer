@@ -87,3 +87,19 @@ test('query formatting delegates to the current source session without starting 
   const edits = await f.providers.document.provideDocumentFormattingEdits(f.document, {}, { isCancellationRequested: false, onCancellationRequested: () => ({ dispose() {} }) });
   assert.equal(edits.length, 1); assert.equal(f.calls[0], 'query'); assert.equal(f.projectCalls, 0);
 });
+
+/** Backend policy failures stay actionable without implementing supplier or BSL rules in the adapter. */
+test('formatting explains selection and controlled-method restrictions', async t => {
+  const require = createRequire(import.meta.url), { ExplorerError } = require('../out/protocol.js');
+  const f = fixture(t);
+  for (const [code, explanation] of [
+    ['selection_required', 'Select a nonempty part'],
+    ['selection_expansion', 'outside the selection'],
+    ['change_control_protected', 'ChangeAndValidate'],
+  ]) {
+    f.pending = async () => { throw new ExplorerError('domain', 'formatting_failed', { code }); };
+    const result = await f.providers.document.provideDocumentFormattingEdits(f.document, {}, { isCancellationRequested: false, onCancellationRequested: () => ({ dispose() {} }) });
+    assert.equal(result.length, 0);
+    assert.ok(f.warnings.at(-1).includes(explanation), f.warnings.at(-1));
+  }
+});
