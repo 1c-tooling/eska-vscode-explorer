@@ -8,6 +8,7 @@ from pathlib import Path
 import re
 import subprocess
 import tempfile
+import time
 import xml.etree.ElementTree as ET
 import zipfile
 from urllib.error import HTTPError
@@ -52,11 +53,25 @@ def publish_command(authentication, path):
     return command
 
 
+def open_registry(url):
+    """Retry only transient GET failures; callers keep metadata and asset errors distinct."""
+    for attempt in range(4):
+        try:
+            return urlopen(url, timeout=30)
+        except HTTPError as error:
+            if error.code not in (500, 502, 503, 504) or attempt == 3:
+                raise
+            error.close()
+            delay = 2 ** attempt
+            print(f"Open VSX returned HTTP {error.code}; retrying request in {delay}s", flush=True)
+            time.sleep(delay)
+
+
 def remote_digest(version):
     """Hash the registry's existing universal VSIX; only a missing version permits upload."""
     base = f"https://open-vsx.org/api/1c-tooling/eska-explorer/{version}"
     try:
-        response = urlopen(base, timeout=30)
+        response = open_registry(base)
     except HTTPError as error:
         if error.code == 404:
             return None
@@ -67,7 +82,7 @@ def remote_digest(version):
             "1c-tooling", "eska-explorer", version, "universal"):
         raise ValueError("Unexpected Open VSX version identity")
     digest = hashlib.sha256()
-    with urlopen(f"{base}/file/1c-tooling.eska-explorer-{version}.vsix", timeout=30) as package:
+    with open_registry(f"{base}/file/1c-tooling.eska-explorer-{version}.vsix") as package:
         while chunk := package.read(1024 * 1024):
             digest.update(chunk)
     return "sha256:" + digest.hexdigest()

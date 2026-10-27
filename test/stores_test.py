@@ -22,6 +22,9 @@ class StoreTests(unittest.TestCase):
         remote = patch.object(self.module, "remote_digest", return_value=None)
         self.remote = remote.start()
         self.addCleanup(remote.stop)
+        sleep = patch("time.sleep")
+        self.sleep = sleep.start()
+        self.addCleanup(sleep.stop)
         directory = tempfile.TemporaryDirectory(prefix="explorer-stores-", dir=Path(os.environ.get("ESKA_TEST_ROOT", ROOT.parent / "eska-playground")))
         self.addCleanup(directory.cleanup)
         self.root = Path(directory.name)
@@ -126,16 +129,60 @@ class StoreTests(unittest.TestCase):
 
     def test_remote_lookup_distinguishes_missing_from_errors(self):
         """API/network errors and inaccessible existing packages never become a fresh upload."""
-        for status in (404, 403, 429, 500):
-            with self.subTest(status=status), patch.object(self.module, "urlopen", side_effect=HTTPError("https://open-vsx.org", status, "error", {}, None)):
+        for status in (404, 403, 429, 500, 502, 503, 504):
+            self.sleep.reset_mock()
+            with self.subTest(status=status), patch.object(self.module, "urlopen", side_effect=HTTPError("https://open-vsx.org", status, "error", {}, io.BytesIO())) as request:
                 if status == 404:
                     self.assertIsNone(self.read_remote_digest("0.1.0"))
                 else:
                     with self.assertRaises(HTTPError):
                         self.read_remote_digest("0.1.0")
+                retryable = status in (500, 502, 503, 504)
+                self.assertEqual(request.call_count, 4 if retryable else 1)
+                self.assertEqual([call.args[0] for call in self.sleep.call_args_list], [1, 2, 4] if retryable else [])
         metadata = {"namespace": "1c-tooling", "name": "eska-explorer", "version": "0.1.0", "targetPlatform": "universal"}
         with patch.object(self.module, "urlopen", side_effect=[io.BytesIO(json.dumps(metadata).encode()), io.BytesIO(self.payload)]):
             self.assertEqual(self.read_remote_digest("0.1.0"), self.asset["digest"])
-        with patch.object(self.module, "urlopen", side_effect=[io.BytesIO(json.dumps(metadata).encode()), HTTPError("https://open-vsx.org", 404, "error", {}, None)]):
+        with patch.object(self.module, "urlopen", side_effect=[io.BytesIO(json.dumps(metadata).encode()), HTTPError("https://open-vsx.org", 404, "error", {}, io.BytesIO())]):
             with self.assertRaises(HTTPError):
                 self.read_remote_digest("0.1.0")
+
+    def test_transient_lookup_failure_requires_confirmed_absence_before_upload(self):
+        """A 502 alone never permits upload; a later metadata 404 permits exactly one attempt."""
+        responses = [HTTPError("https://open-vsx.org", code, "error", {}, io.BytesIO()) for code in (502, 404)]
+        with patch.dict(os.environ, {"OVSX_PAT": "secret"}), patch.object(self.module, "run", side_effect=self.forge), \
+                patch.object(self.module, "remote_digest", side_effect=self.read_remote_digest), \
+                patch.object(self.module, "urlopen", side_effect=responses) as request, \
+                patch.object(self.module.subprocess, "run") as publish:
+            self.module.publish("0.1.0", "token", False)
+            self.assertEqual(request.call_count, 2)
+            self.sleep.assert_called_once_with(1)
+            publish.assert_called_once()
+
+    def test_transient_package_download_retries_without_republishing(self):
+        """An existing VSIX must still match byte-for-byte after a temporary download failure."""
+        metadata = {"namespace": "1c-tooling", "name": "eska-explorer", "version": "0.1.0", "targetPlatform": "universal"}
+        responses = [io.BytesIO(json.dumps(metadata).encode()), HTTPError("https://open-vsx.org", 502, "error", {}, io.BytesIO()),
+                     io.BytesIO(self.payload)]
+        with patch.object(self.module, "run", side_effect=self.forge), \
+                patch.object(self.module, "remote_digest", side_effect=self.read_remote_digest), \
+                patch.object(self.module, "urlopen", side_effect=responses) as request, \
+                patch.object(self.module.subprocess, "run") as publish:
+            self.module.publish("0.1.0", "token", False)
+            self.assertEqual(request.call_count, 3)
+            self.assertEqual(request.call_args_list[1], request.call_args_list[2])
+            self.sleep.assert_called_once_with(1)
+            publish.assert_not_called()
+
+    def test_missing_package_after_transient_failure_is_not_a_missing_version(self):
+        """Once metadata confirms a version, its unavailable asset never permits an upload."""
+        metadata = {"namespace": "1c-tooling", "name": "eska-explorer", "version": "0.1.0", "targetPlatform": "universal"}
+        responses = [io.BytesIO(json.dumps(metadata).encode()),
+                     *[HTTPError("https://open-vsx.org", code, "error", {}, io.BytesIO()) for code in (502, 404)]]
+        with patch.object(self.module, "run", side_effect=self.forge), \
+                patch.object(self.module, "remote_digest", side_effect=self.read_remote_digest), \
+                patch.object(self.module, "urlopen", side_effect=responses), \
+                patch.object(self.module.subprocess, "run") as publish:
+            with self.assertRaises(HTTPError):
+                self.module.publish("0.1.0", "token", False)
+            publish.assert_not_called()
