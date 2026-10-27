@@ -36,7 +36,10 @@ exports.connectWorkbench = async function (until) {
     if (!target) return false;
     connection = await attach(target); return true;
   }, 'native workbench endpoint');
-  return { close: () => connection.close(), viewport: async (width, height) => {
+  return { close: () => connection.close(), screenshot: async file => {
+    const result = await connection.request('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false });
+    await fs.writeFile(file, Buffer.from(result.data, 'base64'));
+  }, viewport: async (width, height) => {
     await connection.request('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
   }, evaluate: async expression => {
     const value = await connection.request('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true });

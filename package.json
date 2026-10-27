@@ -142,6 +142,11 @@
         "category": "ESKA Explorer"
       },
       {
+        "command": "eska.explorer.components",
+        "title": "%components%",
+        "category": "ESKA Explorer"
+      },
+      {
         "command": "eska.explorer.sortObjects",
         "title": "%sortObjects%",
         "category": "ESKA Explorer",

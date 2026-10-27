@@ -32,7 +32,7 @@ Install the VSIX using **Extensions → Install from VSIX…**. The extension ID
 Install `eska-fmt` for its CLI, add `eska` for the `eska fmt` facade, or add
 `eska-project` API 1.33 for Explorer. The analyzer is independent. Managed archives
 use `designer-xml-4`; keep the installed ESKA component contracts compatible.
-The formatter has its own status item, update and recovery commands.
+The single ESKA status item opens the component list with versions, paths, update and recovery actions for the project backend, formatter and analyzer.
 `eska.explorer.formatterExecutable` selects an explicit executable or the default
 managed/PATH lookup. `eska.explorer.formatOnSave` is disabled by default.
 Set formatting rules in `[format]` in `eska.toml`; native indentation settings do
