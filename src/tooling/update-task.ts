@@ -4,10 +4,11 @@ import { ExplorerError } from "../protocol.js";
 import { assertCurrent } from "./contracts.js";
 
 /** Let the editor own the installer process tree and await the exact task, including early completion. */
-export async function runUpdateTask(cli: string, args: string[], title: string, signal: AbortSignal): Promise<void> {
+export async function runUpdateTask(cli: string, args: string[], title: string, signal: AbortSignal,
+  options: { cwd?: string; env?: Record<string, string> } = {}): Promise<void> {
   assertCurrent(signal);
   const task = new vscode.Task({ type: "eska-bundle-update" }, vscode.TaskScope.Global, title, "ESKA",
-    new vscode.ProcessExecution(cli, args, { cwd: homedir() }));
+    new vscode.ProcessExecution(cli, args, { cwd: homedir(), ...options }));
   task.presentationOptions = { reveal: vscode.TaskRevealKind.Always, panel: vscode.TaskPanelKind.Dedicated };
   await new Promise<void>((resolve, reject) => {
     let execution: vscode.TaskExecution | undefined;

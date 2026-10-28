@@ -9,6 +9,7 @@ import { runInNewContext } from "node:vm";
 const require = createRequire(import.meta.url), os = require("node:os");
 const releases = require("../out/tooling/releases.js"), installation = require("../out/tooling/install.js");
 const bundle = require("../out/tooling/bundle.js");
+const globalInstallation = require("../out/installation.js"), inspection = require("../out/tooling/inspect.js");
 const updateTask = { async runUpdateTask() { assert.fail("unexpected bundle task"); } };
 const originalManagedVersion = installation.managedVersion, originalLatestToolRelease = releases.latestToolRelease;
 const ui = { approved: false, cancelled: false, messages: [], settings: {}, bars: [], picks: [], choices: [], commands: [] };
@@ -51,15 +52,44 @@ async function fixture(t) {
   t.after(() => rm(home, { recursive: true, force: true }));
   replace(t, os, "homedir", () => home);
   ui.approved = false; ui.cancelled = false; ui.messages = []; ui.settings = {}; ui.bars = []; ui.picks = []; ui.choices = []; ui.commands = [];
-  const timestamps = new Map(), requests = [], actions = [];
-  const setup = new ToolingSetup({ extensionPath: resolve("."), globalState: {
+  const timestamps = new Map(), requests = [], actions = [], terminalPaths = [];
+  const setup = new ToolingSetup({ extensionPath: resolve("."), environmentVariableCollection: { prepend(...args) { terminalPaths.push(args); } }, globalState: {
     get(key, fallback) { return timestamps.get(key) ?? fallback; }, async update(key, value) { timestamps.set(key, value); },
   } }, () => {}, () => {}, async kind => actions.push(["stop", kind]), async kind => actions.push(["restart", kind]));
   t.after(() => setup.shutdown());
   replace(t, installation, "managedVersion", async (_root, kind) => kind === "project" ? "0.14.3" : "0.4.0");
   replace(t, releases, "latestToolRelease", async kind => { requests.push(kind); return { kind, version: kind === "project" ? "0.14.3" : "0.4.0", target: releases.hostTarget() }; });
-  return { setup, timestamps, requests, actions };
+  return { setup, timestamps, requests, actions, terminalPaths };
 }
+
+test("first project setup offers the full CLI and populates PATH after approval in both locales", async t => {
+  for (const language of ["en-US", "ru-RU"]) {
+    const { setup, terminalPaths } = await fixture(t);
+    replace(t, vscode.env, "language", language);
+    replace(t, inspection, "findTool", async () => undefined);
+    replace(t, globalInstallation, "latestRelease", async () => ({ version: "0.19.0", installer: "official-installer" }));
+    let installed = 0, executed = 0;
+    replace(t, bundle, "bootstrapBundle", async (root, _release, execute) => {
+      installed++;
+      await execute({ executable: "powershell.exe", args: ["-File", "installer.ps1"], cwd: root, env: { ESKA_INSTALL_DIR: join(root, "bin") } });
+      return { kind: "project", version: "0.19.0", path: join(root, "bin", "eska-project") };
+    });
+    replace(t, updateTask, "runUpdateTask", async (command, args, _title, _signal, options) => {
+      executed++;
+      assert.equal(command, "powershell.exe"); assert.deepEqual(args, ["-File", "installer.ps1"]);
+      assert.equal(options.env.ESKA_INSTALL_DIR, join(setup.root, "bin"));
+    });
+    const signal = new AbortController().signal;
+    assert.equal(await setup.ensureProject(signal, "eska-project"), undefined);
+    assert.equal(installed, 0);
+    ui.approved = true;
+    assert.equal(await setup.ensureProject(signal, "eska-project"), join(setup.root, "bin", "eska-project"));
+    assert.equal(installed, 1); assert.equal(executed, 1);
+    assert.equal(terminalPaths[0][0], "PATH");
+    assert.ok(terminalPaths[0][1].startsWith(join(setup.root, "bin")));
+    assert.ok(ui.messages.some(text => /PATH/.test(text) && /fmt/.test(text)));
+  }
+});
 
 test("component state stays independent while the single status tooltip preserves selected and available versions", async t => {
   const { setup } = await fixture(t);

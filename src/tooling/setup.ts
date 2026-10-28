@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import { homedir } from "node:os";
-import { dirname, isAbsolute, join, resolve } from "node:path";
-import { compareVersions } from "../installation.js";
+import { delimiter, dirname, isAbsolute, join, resolve } from "node:path";
+import { compareVersions, latestRelease } from "../installation.js";
 import { ExplorerError } from "../protocol.js";
 import { message, type MessageKey } from "../messages.js";
 import type { ConnectionState } from "../connection.js";
@@ -11,7 +11,7 @@ import { findTool, inspectAnalyzer, inspectFormatter, type ToolInfo } from "./in
 import { installAnalyzer, installComponent, managedPath, managedVersion, recoverInstallation } from "./install.js";
 import { downloadAsset, latestToolRelease, type ToolRelease } from "./releases.js";
 import { cancellableChoice } from "./choice.js";
-import { inspectBundle, installBundle, type BundleUpdate } from "./bundle.js";
+import { bootstrapBundle, inspectBundle, installBundle, type BundleUpdate } from "./bundle.js";
 import { runUpdateTask } from "./update-task.js";
 
 export interface ToolState {
@@ -63,7 +63,10 @@ export class ToolingSetup implements vscode.Disposable {
     signal = AbortSignal.any([signal, this.lifetime.signal]);
     const path = await this.track(findTool(configured, TOOL_NAMES.project, dirname(managedPath(this.root, "project"))));
     assertCurrent(signal);
-    if (path) return path;
+    if (path) {
+      if (configured === TOOL_NAMES.project) this.terminalPath(path);
+      return path;
+    }
     if (configured !== TOOL_NAMES.project) throw new ExplorerError("executableMissing");
     const installed = await this.offerInstall("project", signal);
     return installed?.path;
@@ -156,11 +159,12 @@ export class ToolingSetup implements vscode.Disposable {
     const controller = new AbortController(), signal = AbortSignal.any([controller.signal, this.lifetime.signal]);
     state.activity = "checking"; this.render();
     try {
-      const load = async (): Promise<{ bundle: BundleUpdate } | { release: ToolRelease; installed: string | undefined }> => {
+      const load = async (): Promise<{ bootstrap: true } | { bundle: BundleUpdate } | { release: ToolRelease; installed: string | undefined }> => {
         const installed = await managedVersion(this.root, kind);
         assertCurrent(signal);
         const bundle = kind === "project" && !installed ? await inspectBundle(this.root, signal) : undefined;
         if (bundle) return { bundle };
+        if (kind === "project" && !installed && !state.info) return { bootstrap: true };
         return { release: await latestToolRelease(kind, undefined, signal), installed };
       };
       const result = await this.track(manual
@@ -170,6 +174,10 @@ export class ToolingSetup implements vscode.Disposable {
           finally { subscription.dispose(); }
         }) : load());
       assertCurrent(signal);
+      if ("bootstrap" in result) {
+        if (manual && await this.offerBundle(signal)) await this.restart("project");
+        return;
+      }
       if ("bundle" in result) {
         const update = result.bundle;
         state.available = update.available;
@@ -229,19 +237,46 @@ export class ToolingSetup implements vscode.Disposable {
     }
   }
 
-  /** The proposal names the pair; each approved installation still changes only its selected component. */
+  /** Project bootstrap installs the full CLI; Analyzer and formatter retain their separate installers. */
   private async offerInstall(kind: ToolKind, signal: AbortSignal): Promise<ToolInfo | undefined> {
+    if (kind === "project") return this.offerBundle(signal);
     const release = await this.track(latestToolRelease(kind, undefined, signal));
     assertCurrent(signal);
     if (release.restriction || !release.asset) {
       void vscode.window.showWarningMessage(this.text("toolReleaseRestricted", TOOL_NAMES[kind], release.version, this.restriction(release)));
       return undefined;
     }
-    const other = this.states[kind === "project" ? "analyzer" : "project"].info;
+    const other = this.states.project.info;
     const choice = await cancellableChoice(vscode.window.showWarningMessage(this.text("toolInstallOffer", TOOL_NAMES[kind], release.version,
       other ? `${TOOL_NAMES[other.kind]} v${other.version}` : this.text("toolMissing")), this.text("toolInstall")), signal);
     if (!choice || signal.aborted || this.disposed) return undefined;
     return this.perform(release, signal, false);
+  }
+
+  /** First-time project setup installs all six ESKA commands, while Analyzer remains independently selected. */
+  private async offerBundle(signal: AbortSignal): Promise<ToolInfo | undefined> {
+    const release = await this.track(latestRelease(signal));
+    assertCurrent(signal);
+    const choice = await cancellableChoice(vscode.window.showWarningMessage(this.text("toolBundleInstallOffer", release.version), this.text("cliInstall")), signal);
+    if (!choice || signal.aborted || this.disposed) return undefined;
+    if (this.installing.has("project")) throw new ToolFailure("busy", "project");
+    this.installing.add("project"); this.states.project.activity = "installing"; this.render();
+    try {
+      const title = this.text("cliInstalling");
+      const info = await this.track(vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title }, () =>
+        bootstrapBundle(this.root, release, command => runUpdateTask(command.executable, command.args, title, signal,
+          { cwd: command.cwd, ...(command.env ? { env: command.env } : {}) }), this.log, signal)));
+      assertCurrent(signal);
+      this.states.project = { info, phase: "disconnected" };
+      this.terminalPath(info.path);
+      void vscode.window.showInformationMessage(this.text("toolInstalled", "ESKA", info.version));
+      return info;
+    } finally { this.installing.delete("project"); delete this.states.project.activity; this.render(); }
+  }
+
+  /** Existing editor processes retain their old environment; new integrated terminals need the selected bin. */
+  private terminalPath(project: string): void {
+    this.context.environmentVariableCollection.prepend("PATH", `${dirname(project)}${delimiter}`);
   }
 
   /** Download before stopping the selected service, then verify the staged and installed executable. */

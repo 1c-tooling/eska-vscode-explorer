@@ -36,6 +36,16 @@ for (const code of [0, 2, undefined]) {
   });
 }
 
+test("PowerShell bootstrap receives the installer directory and PATH controls as process environment", async () => {
+  const f = fixture(finish => { const task = { terminate() {} }; finish(task, 0); return task; });
+  const options = { cwd: String.raw`C:\Users\Test`, env: { ESKA_INSTALL_DIR: String.raw`C:\Users\Test\.eska\bin`, ESKA_NO_MODIFY_PATH: "", INSTALLER_NO_MODIFY_PATH: "" } };
+  await f.run("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", String.raw`C:\Temp\install.ps1`], "Install ESKA", new AbortController().signal, options);
+  const execution = f.tasks[0].args[4].args;
+  assert.equal(execution[0], "powershell.exe");
+  assert.equal(execution[2].cwd, options.cwd);
+  assert.deepEqual(execution[2].env, options.env);
+});
+
 test("cancellation before task startup terminates only that execution and awaits its completion", async () => {
   const controller = new AbortController(); let terminated = 0;
   const f = fixture(finish => {
