@@ -1,7 +1,7 @@
 import { lstat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
-import { compareVersions, runProbe } from "../installation.js";
+import { bootstrapCommand, compareVersions, runProbe, type InstallCommand, type Release } from "../installation.js";
 import { isRecord, isWirePath } from "../protocol.js";
 import { nativePath } from "../source.js";
 import type { DiagnosticLog } from "../diagnostics.js";
@@ -12,6 +12,40 @@ import { pendingTransactions } from "./transaction.js";
 
 const COMPONENTS = ["eska", "eska-project", "eska-check", "eska-build", "eska-vcs", "eska-fmt"];
 export interface BundleUpdate { cli: string; project: string; version: string; available: string; identity: string }
+
+/** Bootstrap the complete global CLI only into an unoccupied prefix; the official installer owns user PATH. */
+export async function bootstrapBundle(root: string, release: Release, execute: (command: InstallCommand) => Promise<void>,
+  log: DiagnosticLog, signal?: AbortSignal): Promise<ToolInfo> {
+  return installationLock(root, signal, async () => {
+    const suffix = process.platform === "win32" ? ".exe" : "";
+    if (resolve(root) !== resolve(homedir(), ".eska")) throw new ToolFailure("unmanaged", root);
+    const pending = await pendingTransactions(root);
+    if (pending.length) throw new ToolFailure("recovery", pending[0]);
+    for (const component of COMPONENTS) {
+      for (const name of [`bin/${component}${suffix}`, `components/${component}.json`]) {
+        const path = await destination(root, name);
+        if (await lstat(path).catch(error => { if (error.code !== "ENOENT") throw error; return undefined; }))
+          throw new ToolFailure("unmanaged", path);
+      }
+    }
+    if (await installerReceipt() !== undefined) throw new ToolFailure("unmanaged", "cargo-dist-receipt");
+    const command = await bootstrapCommand(undefined, release, signal);
+    try {
+      await execute(command);
+      assertCurrent(signal);
+      const owned = await ownedBundle(root);
+      if (!owned) throw new ToolFailure("probe", "bundle-receipt");
+      for (const name of COMPONENTS) {
+        const path = await destination(root, `bin/${name}${suffix}`);
+        const version = (await runProbe(path, ["--version"], homedir(), 10_000, 65536, signal)).stdout.trim();
+        if (version !== `${name} ${release.version}`) throw new ToolFailure("probe", name);
+      }
+      const info = await inspectProject(owned.project, homedir(), log, signal);
+      if (info.version !== release.version) throw new ToolFailure("probe", "bundle-version");
+      return info;
+    } finally { await command.dispose(); }
+  });
+}
 
 /** Follow axoupdater's receipt search order, including its explicit configuration overrides. */
 async function installerReceipt(): Promise<unknown> {

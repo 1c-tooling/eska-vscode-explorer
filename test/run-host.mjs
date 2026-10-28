@@ -30,6 +30,11 @@ try {
     fixture.query = await (await import("./query-fixture.mjs")).createQuerySource(fixture);
     await writeFile(fixture.module, '\ufeff// owner 😀\r\nПроцедура Test()\r\nЗначение=1;\r\nТекст="выбрать 1 как А,2 как Б";\r\nКонецПроцедуры\r\n');
   }
+  if (basename(suite) === "formatting-readonly-host.cjs") {
+    await mkdir(join(fixture.source, "Ext"), { recursive: true });
+    await writeFile(join(fixture.source, "Ext", "ParentConfigurations.bin"), "{6,0,0,0,0,0}");
+    await writeFile(fixture.module, "Procedure Test()\nValue=1;\nOther=2;\nEndProcedure\n");
+  }
   if (basename(suite) === "language-reference-host.cjs") {
     fixture.reference = await (await import("./language-fixture.mjs")).createReferenceSource(fixture, root);
   }
@@ -72,7 +77,9 @@ try {
   if (process.platform === "win32") await cp(globalBinary, join(bin, executableName));
   else await symlink(globalBinary, join(bin, executableName));
   await mkdir(join(fixture.root, ".vscode"), { recursive: true });
-  await writeFile(join(fixture.root, ".vscode/settings.json"), JSON.stringify({ "eska.explorer.checkForUpdates": false, "eska.explorer.checkForAnalyzerUpdates": false, "eska.explorer.checkForFormatterUpdates": false, ...(process.env.ESKA_TEST_FMT_BINARY ? { "eska.explorer.formatterExecutable": process.env.ESKA_TEST_FMT_BINARY } : {}), "eska.explorer.languageFeatures": process.env.ESKA_TEST_LANGUAGE === "1", "eska.explorer.analyzerExecutable": process.env.ESKA_TEST_ANALYZER_BINARY ?? join(root, "missing-analyzer"), "eska.explorer.backend": backend,
+  // Prevent the first-run welcome page from taking focus during native formatting/menu assertions.
+  const nativeUiSettings = ["formatting-readonly-host.cjs", "tool-status-host.cjs"].includes(basename(suite)) ? { "workbench.startupEditor": "none" } : {};
+  await writeFile(join(fixture.root, ".vscode/settings.json"), JSON.stringify({ ...nativeUiSettings, "eska.explorer.checkForUpdates": false, "eska.explorer.checkForAnalyzerUpdates": false, "eska.explorer.checkForFormatterUpdates": false, ...(process.env.ESKA_TEST_FMT_BINARY ? { "eska.explorer.formatterExecutable": process.env.ESKA_TEST_FMT_BINARY } : {}), "eska.explorer.languageFeatures": process.env.ESKA_TEST_LANGUAGE === "1", "eska.explorer.analyzerExecutable": process.env.ESKA_TEST_ANALYZER_BINARY ?? join(root, "missing-analyzer"), "eska.explorer.backend": backend,
     ...(process.env.ESKA_HOST_GLOBAL_BINARY || fixture.query ? { "eska.explorer.executable": binary } : {}),
     ...(process.env.ESKA_HOST_SUPPORT_DISABLED ? { "eska.explorer.supportPolicy": false } : {}) }));
   const executable = process.env.VSCODE_EXECUTABLE ?? "code";

@@ -73,7 +73,7 @@ export class FormattingService {
       let result: unknown;
       if (document.uri.scheme === QUERY_SCHEME) result = await this.tabs.formatting(document, bytes, formatter, signal);
       else {
-        const userReadOnly = await nativeReadOnly(document);
+        const userReadOnly = await formattingReadOnly(document);
         const executable = await this.tooling.ensureProject(signal, configuration.get<string>("executable", "eska-project"));
         if (!executable) return [];
         const endpoint = await this.backend.endpoint(executable, dirname(document.uri.fsPath), vscode.env.language.toLowerCase().startsWith("ru") ? "ru-RU" : "en-US");
@@ -84,7 +84,7 @@ export class FormattingService {
       }
       if (signal.aborted || this.disposed || document.isClosed || document.version !== version) return [];
       const edits = formatEdits(result, text, version);
-      if (await nativeReadOnly(document) || signal.aborted || this.disposed || document.isClosed || document.version !== version) return [];
+      if (await formattingReadOnly(document) || signal.aborted || this.disposed || document.isClosed || document.version !== version) return [];
       return edits.map(edit => vscode.TextEdit.replace(new vscode.Range(document.positionAt(edit.start), document.positionAt(edit.end)), edit.text));
     } catch (error) {
       if (!signal.aborted && !(error instanceof ExplorerError && ["cancelled", "obsolete"].includes(error.code))) this.report(error);
@@ -119,4 +119,11 @@ export class FormattingService {
     this.disposed = true; this.lifetime.abort(); for (const subscription of this.subscriptions) subscription.dispose();
     await this.stop(); await this.backend.shutdown();
   }
+}
+
+/** The editor applies native readonly defaults and session overrides; a provider reports physical restrictions only. */
+async function formattingReadOnly(document: vscode.TextDocument): Promise<boolean> {
+  if (document.uri.scheme !== "file") return nativeReadOnly(document);
+  const stat = await vscode.workspace.fs.stat(document.uri);
+  return stat.permissions === vscode.FilePermission.Readonly;
 }

@@ -25,6 +25,7 @@
   "search": "Search metadata",
   "revealActiveFile": "Reveal Active File in eska Tree",
   "checkUpdates": "Check for ESKA updates",
+  "components": "Manage components",
   "checkForUpdates": "Check for global ESKA updates at most once a day. Installation requires confirmation.",
   "sortObjects": "Enable alphabetical sorting",
   "resetSortOrder": "Disable alphabetical sorting",

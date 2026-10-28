@@ -17,6 +17,9 @@ export async function createReferenceSource(fixture, owner) {
 /** Keep protocol fixtures independent of a platform installation while retaining ordinary Designer XML properties. */
 export async function createLanguageSource(fixture) {
   await addCommonModules(fixture);
+  // Unknown support data is read-only; this editable fixture explicitly has no parent configuration.
+  await mkdir(join(fixture.source, "Ext"), { recursive: true });
+  await writeFile(join(fixture.source, "Ext", "ParentConfigurations.bin"), "{6,0,0,0,0,0}");
   const descriptor = join(fixture.source, "CommonModules", "Обмен.xml");
   await writeFile(descriptor, (await readFile(descriptor, "utf8")).replace("</Properties>",
     "<Global>false</Global><ClientManagedApplication>false</ClientManagedApplication><Server>true</Server><ExternalConnection>true</ExternalConnection><ClientOrdinaryApplication>false</ClientOrdinaryApplication><ServerCall>false</ServerCall><Privileged>false</Privileged><ReturnValuesReuse>DontUse</ReturnValuesReuse></Properties>"));

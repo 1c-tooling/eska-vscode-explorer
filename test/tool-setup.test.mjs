@@ -9,15 +9,18 @@ import { runInNewContext } from "node:vm";
 const require = createRequire(import.meta.url), os = require("node:os");
 const releases = require("../out/tooling/releases.js"), installation = require("../out/tooling/install.js");
 const bundle = require("../out/tooling/bundle.js");
+const globalInstallation = require("../out/installation.js"), inspection = require("../out/tooling/inspect.js");
 const updateTask = { async runUpdateTask() { assert.fail("unexpected bundle task"); } };
 const originalManagedVersion = installation.managedVersion, originalLatestToolRelease = releases.latestToolRelease;
-const ui = { approved: false, cancelled: false, messages: [], settings: {}, bars: [] };
+const ui = { approved: false, cancelled: false, messages: [], settings: {}, bars: [], picks: [], choices: [], commands: [] };
 const vscode = {
   env: { language: "en-US", remoteName: undefined },
   workspace: { isTrusted: true, getConfiguration() { return { get(key, fallback) { return ui.settings[key] ?? fallback; } }; } },
   StatusBarAlignment: { Right: 1 }, ProgressLocation: { Notification: 1 },
+  commands: { async executeCommand(command) { ui.commands.push(command); } },
   window: {
     createStatusBarItem(id) { const bar = { id, show() { this.visible = true; }, dispose() { this.disposed = true; } }; ui.bars.push(bar); return bar; },
+    async showQuickPick(items, options) { ui.picks.push({ items, options }); const choice = ui.choices.shift(); return choice === undefined ? undefined : items.find(item => item.component === choice || item.command === choice); },
     async showInformationMessage(text, action) { ui.messages.push(text); return ui.approved ? action : undefined; },
     async showWarningMessage(text, action) { ui.messages.push(text); return ui.approved ? action : undefined; },
     async showErrorMessage(text) { ui.messages.push(text); },
@@ -48,30 +51,57 @@ async function fixture(t) {
   const home = await mkdtemp(join(process.env.ESKA_TEST_ROOT ?? resolve("../eska-playground"), "explorer-tool-ui-"));
   t.after(() => rm(home, { recursive: true, force: true }));
   replace(t, os, "homedir", () => home);
-  ui.approved = false; ui.cancelled = false; ui.messages = []; ui.settings = {}; ui.bars = [];
-  const timestamps = new Map(), requests = [], actions = [];
-  const setup = new ToolingSetup({ extensionPath: resolve("."), globalState: {
+  ui.approved = false; ui.cancelled = false; ui.messages = []; ui.settings = {}; ui.bars = []; ui.picks = []; ui.choices = []; ui.commands = [];
+  const timestamps = new Map(), requests = [], actions = [], terminalPaths = [];
+  const setup = new ToolingSetup({ extensionPath: resolve("."), environmentVariableCollection: { prepend(...args) { terminalPaths.push(args); } }, globalState: {
     get(key, fallback) { return timestamps.get(key) ?? fallback; }, async update(key, value) { timestamps.set(key, value); },
   } }, () => {}, () => {}, async kind => actions.push(["stop", kind]), async kind => actions.push(["restart", kind]));
   t.after(() => setup.shutdown());
   replace(t, installation, "managedVersion", async (_root, kind) => kind === "project" ? "0.14.3" : "0.4.0");
   replace(t, releases, "latestToolRelease", async kind => { requests.push(kind); return { kind, version: kind === "project" ? "0.14.3" : "0.4.0", target: releases.hostTarget() }; });
-  return { setup, timestamps, requests, actions };
+  return { setup, timestamps, requests, actions, terminalPaths };
 }
 
-test("two status items use separate identities and never replace a selected version with an available one", async t => {
+test("first project setup offers the full CLI and populates PATH after approval in both locales", async t => {
+  for (const language of ["en-US", "ru-RU"]) {
+    const { setup, terminalPaths } = await fixture(t);
+    replace(t, vscode.env, "language", language);
+    replace(t, inspection, "findTool", async () => undefined);
+    replace(t, globalInstallation, "latestRelease", async () => ({ version: "0.19.0", installer: "official-installer" }));
+    let installed = 0, executed = 0;
+    replace(t, bundle, "bootstrapBundle", async (root, _release, execute) => {
+      installed++;
+      await execute({ executable: "powershell.exe", args: ["-File", "installer.ps1"], cwd: root, env: { ESKA_INSTALL_DIR: join(root, "bin") } });
+      return { kind: "project", version: "0.19.0", path: join(root, "bin", "eska-project") };
+    });
+    replace(t, updateTask, "runUpdateTask", async (command, args, _title, _signal, options) => {
+      executed++;
+      assert.equal(command, "powershell.exe"); assert.deepEqual(args, ["-File", "installer.ps1"]);
+      assert.equal(options.env.ESKA_INSTALL_DIR, join(setup.root, "bin"));
+    });
+    const signal = new AbortController().signal;
+    assert.equal(await setup.ensureProject(signal, "eska-project"), undefined);
+    assert.equal(installed, 0);
+    ui.approved = true;
+    assert.equal(await setup.ensureProject(signal, "eska-project"), join(setup.root, "bin", "eska-project"));
+    assert.equal(installed, 1); assert.equal(executed, 1);
+    assert.equal(terminalPaths[0][0], "PATH");
+    assert.ok(terminalPaths[0][1].startsWith(join(setup.root, "bin")));
+    assert.ok(ui.messages.some(text => /PATH/.test(text) && /fmt/.test(text)));
+  }
+});
+
+test("component state stays independent while the single status tooltip preserves selected and available versions", async t => {
   const { setup } = await fixture(t);
   setup.states.analyzer.info = { kind: "analyzer", version: "0.4.0", path: join(setup.root, "custom-analyzer") };
   setup.states.analyzer.available = "0.4.1";
   setup.analyzerState("suspended", "foreign-extension");
-  assert.match(setup.analyzerStatus.text, /^BSL Analyzer v0\.4\.0 · suspended$/);
-  assert.equal(setup.analyzerStatus.command, "eska.explorer.checkAnalyzerUpdates");
-  assert.match(setup.analyzerStatus.tooltip, /custom-analyzer/);
-  assert.match(setup.analyzerStatus.tooltip, /Available release: 0.4.1/);
-  assert.equal(setup.analyzerStatus.visible, true);
+  assert.equal(ui.bars.length, 0, "components do not create status items");
+  assert.match(setup.summary(), /custom-analyzer/);
+  assert.match(setup.summary(), /Available release: 0.4.1/);
   await setup.check("analyzer");
   assert.equal(setup.states.analyzer.phase, "suspended");
-  assert.match(setup.analyzerStatus.text, /v0\.4\.0 · suspended/);
+  assert.equal(setup.states.analyzer.info.version, "0.4.0");
 });
 
 test("daily checks, disabled settings and manual checks are independent for each host component", async t => {
@@ -142,7 +172,7 @@ test("analyzer update and cancellation preserve a suspended client's ownership a
   await setup.check("analyzer");
   assert.deepEqual(actions, [["stop", "analyzer"], ["restart", "analyzer"]]);
   assert.equal(setup.states.analyzer.phase, "suspended");
-  assert.match(setup.analyzerStatus.text, /^BSL Analyzer v0\.4\.0 · suspended$/);
+  assert.equal(setup.states.analyzer.info.version, "0.4.0");
   actions.length = 0; ui.cancelled = true;
   await setup.check("analyzer");
   assert.deepEqual(actions, []); assert.equal(setup.states.analyzer.info.version, "0.4.0");
@@ -159,7 +189,7 @@ test("a conflict arriving during an independent update retains its current reaso
   setup.analyzerState("ready"); ui.approved = true;
   await setup.check("analyzer");
   assert.equal(setup.states.analyzer.phase, "suspended-conflict"); assert.equal(setup.states.analyzer.detail, "enabled inactive foreign client");
-  assert.match(setup.analyzerStatus.tooltip, /enabled inactive foreign client/);
+  assert.match(setup.tooltip("analyzer"), /enabled inactive foreign client/);
 });
 
 test("a missing selected analyzer clears its previous version without hiding an extension conflict", async t => {
@@ -170,8 +200,8 @@ test("a missing selected analyzer clears its previous version without hiding an 
   assert.equal(await setup.ensureAnalyzer(undefined, false), undefined);
   assert.equal(setup.states.analyzer.info, undefined);
   assert.equal(setup.states.analyzer.phase, "suspended-conflict");
-  assert.ok(!setup.analyzerStatus.text.includes("v0.4.0"));
-  assert.match(setup.analyzerStatus.tooltip, /foreign extension/);
+  assert.equal(setup.states.analyzer.info, undefined);
+  assert.match(setup.tooltip("analyzer"), /foreign extension/);
 });
 
 test("a failed binary probe updates the visible version while keeping the conflict reason", { skip: process.platform === "win32" }, async t => {
@@ -184,8 +214,8 @@ test("a failed binary probe updates the visible version while keeping the confli
   await assert.rejects(setup.ensureAnalyzer(undefined, false));
   assert.equal(setup.states.analyzer.info, undefined);
   assert.equal(setup.states.analyzer.phase, "suspended-conflict");
-  assert.ok(!setup.analyzerStatus.text.includes("v0.4.0"));
-  assert.match(setup.analyzerStatus.tooltip, /foreign extension/);
+  assert.equal(setup.states.analyzer.info, undefined);
+  assert.match(setup.tooltip("analyzer"), /foreign extension/);
 });
 
 test("UI scenarios restore shared module functions for following test files", () => {
@@ -239,8 +269,35 @@ test("formatter status, independent checks and discovery preserve other componen
   const project=setup.states.project, analyzer=setup.states.analyzer;
   const info=await setup.ensureFormatter(undefined,false);
   assert.equal(info.kind,"formatter"); assert.equal(setup.states.project,project); assert.equal(setup.states.analyzer,analyzer);
-  assert.match(setup.formatterStatus.text,/eska-fmt v0.18.0/);
-  assert.equal(setup.formatterStatus.command,"eska.explorer.checkFormatterUpdates");
+  assert.equal(setup.states.formatter.info.version,"0.18.0");
+  assert.match(setup.summary(),/eska-fmt/);
+  assert.equal(ui.bars.length,0);
   await setup.background("formatter");
   assert.ok(requests.every(kind=>kind==="formatter")); assert.equal(actions.length,0);
+});
+
+/** Opening ESKA is read-only; only an explicit component action invokes an existing command. */
+test("one component menu exposes all selected versions and routes every action without automatic update checks", async t => {
+  const { setup, requests } = await fixture(t);
+  for (const component of ["project", "formatter", "analyzer"]) {
+    setup.states[component].info = { kind: component, version: "1.2.3", path: join(setup.root, component) };
+    setup.states[component].available = "9.9.9";
+  }
+  const routes = { project: ["checkUpdates", "recoverProjectInstallation"], formatter: ["checkFormatterUpdates", "recoverFormatterInstallation"], analyzer: ["checkAnalyzerUpdates", "recoverAnalyzerInstallation"] };
+  for (const [component, commands] of Object.entries(routes)) {
+    for (const command of [...commands, "showLog"]) {
+      ui.choices = [component, command];
+      await setup.showComponents();
+      assert.equal(ui.commands.at(-1), `eska.explorer.${command}`);
+      const root = ui.picks.at(-2);
+      assert.equal(root.options.title, "ESKA");
+      assert.deepEqual(Array.from(root.items, item => item.component), ["project", "formatter", "analyzer"]);
+      assert.ok(root.items.every(item => item.description.includes("v1.2.3") && !item.description.includes("9.9.9")));
+      assert.equal(ui.picks.at(-1).options.title, `ESKA › ${root.items.find(item => item.component === component).label}`);
+    }
+  }
+  assert.deepEqual(requests, []);
+  ui.choices = []; const count = ui.commands.length; await setup.showComponents();
+  ui.choices = ["formatter"]; await setup.showComponents();
+  assert.equal(ui.commands.length, count, "cancel does not invoke an action");
 });

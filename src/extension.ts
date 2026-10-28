@@ -105,7 +105,7 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
       this.additionalPolicyTrees = trees; this.support.setAdditionalTrees(trees, pending);
     }, () => this.support.invalidate(), text => this.output.info(text));
     this.status.name = "ESKA Explorer";
-    this.status.command = "eska.explorer.checkUpdates";
+    this.status.command = "eska.explorer.components";
     this.disposables.push(this.status, this.decorations, this.protectedSources);
     this.disposables.push(new ProtectedLanguageFeatures(error => this.output.warn(String(error))));
     this.filters = new ProjectFilters(context.workspaceState);
@@ -142,6 +142,7 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
       ["restart", () => this.connect(false)],
       ["disconnect", () => this.disconnect()],
       ["showLog", () => this.output.show(true)],
+      ["components", () => this.tooling.showComponents()],
       ["checkUpdates", () => this.backendKind() === "legacy" ? this.setup.check(true, "legacy") : this.tooling.check("project")],
       ["checkAnalyzerUpdates", () => this.tooling.check("analyzer")],
       ["checkFormatterUpdates", () => this.tooling.check("formatter")],
@@ -875,13 +876,14 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
   /** A disconnected component remains visible without claiming a connected or offered version. */
   private renderProjectStatus(): void {
     if (this.disposed) return;
-    const state = this.connection.state, tool = this.tooling.states.project;
-    const activity = tool.activity ? ` · ${this.text(`toolPhase_${tool.activity}`)}` : "";
+    const state = this.connection.state;
+    const operation = Object.values(this.tooling.states).find(tool => tool.activity)?.activity;
+    const activity = operation ? ` · ${this.text(`toolPhase_${operation}`)}` : "";
     this.status.text = state.kind === "ready"
       ? this.text(state.target.backend === "legacy" ? "legacyStatus" : "projectStatus", state.version) + activity
       : `ESKA · ${this.text(state.kind === "error" ? "toolPhase_error" : "toolPhase_disconnected")}${activity}`;
     this.status.tooltip = state.kind === "ready" && state.target.backend === "legacy"
-      ? this.text("statusTooltip", state.version, state.target.executable) : this.tooling.tooltip("project");
+      ? `${this.text("statusTooltip", state.version, state.target.executable)}\n\n${this.tooling.summary()}` : this.tooling.summary();
     this.status.show();
   }
 

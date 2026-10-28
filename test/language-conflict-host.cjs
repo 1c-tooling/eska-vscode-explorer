@@ -58,8 +58,8 @@ exports.run = async function () {
   const start = { value: fixture.root, encoding: "utf-8" };
   const lease = await explorer.connection.analyzerRequest("analyzer/acquire", { start });
   await explorer.connection.analyzerRequest("analyzer/release", { leaseId: lease.leaseId });
-  assert.ok(explorer.tooling.analyzerStatus.tooltip.includes(ID));
-  assert.ok(explorer.tooling.analyzerStatus.tooltip.includes("ESKA Explorer"));
+  assert.ok(explorer.tooling.tooltip("analyzer").includes(ID));
+  assert.ok(explorer.status.tooltip.includes("ESKA Explorer"));
   await vscode.commands.executeCommand("workbench.extensions.uninstallExtension", ID);
   await until(() => !vscode.extensions.getExtension(ID) && explorer.tooling.states.analyzer.phase === "ready", "second removal resumes own client");
   const lastPid = explorer.language.session.owner.child.pid;

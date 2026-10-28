@@ -14,8 +14,8 @@ function fixture(t) {
   let readonly = false, pending = async () => {}, projectCalls = 0;
   const register = name => callback => { handlers[name] = callback; return { dispose() {} }; };
   class Range { constructor(start, end) { this.start = start; this.end = end; } }
-  const vscode = { env: { language: 'en-US' }, Range, TextEdit: { replace: (range, text) => ({ range, newText: text }) },
-    workspace: { isTrusted: true, getConfiguration: (section, scope) => ({ get: (key, fallback) => settings[`[${scope?.languageId}].${section}.${key}`] ?? settings[section + '.' + key] ?? fallback }),
+  const vscode = { env: { language: 'en-US' }, Range, FilePermission: { Readonly: 1 }, TextEdit: { replace: (range, text) => ({ range, newText: text }) },
+    workspace: { isTrusted: true, fs: { stat: async () => ({ permissions: readonly ? 1 : undefined }) }, getConfiguration: (section, scope) => ({ get: (key, fallback) => settings[`[${scope?.languageId}].${section}.${key}`] ?? settings[section + '.' + key] ?? fallback }),
       onWillSaveTextDocument: register('save'), onDidChangeTextDocument: register('change'), onDidCloseTextDocument: register('close'), onDidChangeConfiguration: register('configuration') },
     languages: { registerDocumentFormattingEditProvider(selector, provider) { providers.document = provider; providers.selector = selector; return { dispose() {} }; },
       registerDocumentRangeFormattingEditProvider(_selector, provider) { providers.range = provider; return { dispose() {} }; } },
@@ -30,7 +30,7 @@ function fixture(t) {
   runInNewContext(`(function(require,module,exports){${readFileSync(new URL('../out/formatting/service.js', import.meta.url), 'utf8')}\n})`, { Buffer, AbortController, AbortSignal, Promise })(name =>
     name === 'vscode' ? vscode : name === './backend.js' ? { FormattingBackend: Backend }
       : name === '../query/tabs.js' ? { QUERY_SCHEME: 'eska-query' }
-        : name === '../query/owner.js' ? { nativeReadOnly: async () => readonly } : require(name), adapter, adapter.exports);
+        : name === '../query/owner.js' ? { nativeReadOnly: async () => readonly || settings['files.readonlyInclude']?.['**/*.bsl'] === true } : require(name), adapter, adapter.exports);
   const service = new adapter.exports.FormattingService('test', { formatting: (doc, range, formatter, signal) => produce('query', { text: doc.getText(), version: String(doc.version), range, formatter, signal }) },
     { async ensureFormatter() { return { path: "/owned/eska-fmt" }; }, async ensureProject() { projectCalls++; return '/owned/eska-project'; } }, () => {});
   t.after(() => service.shutdown());
@@ -102,4 +102,17 @@ test('formatting explains selection and controlled-method restrictions', async t
     assert.equal(result.length, 0);
     assert.ok(f.warnings.at(-1).includes(explanation), f.warnings.at(-1));
   }
+});
+
+/** Native readonly defaults can be overridden by the user; a formatting provider must not recreate that default as a write ban. */
+test('readonly defaults do not reject native formatting plans for an editor unlocked by the user', async t => {
+  const f = fixture(t), token = { isCancellationRequested: false, onCancellationRequested: () => ({ dispose() {} }) };
+  f.settings['files.readonlyInclude'] = { '**/*.bsl': true };
+  assert.equal((await f.providers.document.provideDocumentFormattingEdits(f.document, {}, token)).length, 1);
+  assert.equal(f.params[0].userReadOnly, false);
+  assert.equal((await f.providers.range.provideDocumentRangeFormattingEdits(f.document, { start: { character: 0 }, end: { character: 4 } }, {}, token)).length, 1);
+  assert.equal(f.warnings.length, 0);
+  f.readonly = true;
+  assert.equal((await f.providers.document.provideDocumentFormattingEdits(f.document, {}, token)).length, 0);
+  assert.equal(f.params.at(-1).userReadOnly, true);
 });
