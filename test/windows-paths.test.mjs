@@ -23,11 +23,13 @@ function windowsModules(platform = "win32") {
 test("verbatim Windows roots, descriptors and analyzer configs become ordinary file paths", () => {
   const { nativePath, analysisContext, analyzerConfiguration } = windowsModules();
   const wire = value => ({ value, encoding: "utf-8" });
+  // Bun rewrites non-ASCII raw template chunks; cooked literals retain actual Cyrillic path names.
   for (const [raw, plain] of [
-    [String.raw`\\?\C:\Работа #1\100%`, String.raw`C:\Работа #1\100%`],
-    [String.raw`\\?\UNC\server\share\Проект`, String.raw`\\server\share\Проект`],
-    [String.raw`\\?\unc\server\share`, String.raw`\\server\share`],
+    ["\\\\?\\C:\\Работа #1\\100%", "C:\\Работа #1\\100%"],
+    ["\\\\?\\UNC\\server\\share\\Проект", "\\\\server\\share\\Проект"],
+    ["\\\\?\\unc\\server\\share", "\\\\server\\share"],
   ]) {
+    if (plain.startsWith("C:")) assert.ok(raw.includes("Работа"), "the fixture contains actual Cyrillic characters");
     assert.equal(nativePath(wire(raw)), plain);
     const context = analysisContext({ schema_version: 1, kind: "project-context", status: "ready", context: {
       root: wire(raw), name: null, limited_context: false, sources: [{ root: wire(raw), source: wire(`${raw}\\src`),
@@ -51,10 +53,10 @@ test("verbatim Windows roots, descriptors and analyzer configs become ordinary f
 test("ordinary paths retain their bytes and unsupported Windows namespaces are rejected", () => {
   const wire = value => ({ value, encoding: "utf-8" });
   const windows = windowsModules(), unix = windowsModules("linux");
-  for (const plain of [String.raw`C:\Проект\file #1.bsl`, String.raw`\\server\share\file.bsl`, "src/Module.bsl"])
+  for (const plain of ["C:\\Проект\\file #1.bsl", "\\\\server\\share\\file.bsl", "src/Module.bsl"])
     assert.equal(windows.nativePath(wire(plain)), plain);
-  const verbatim = String.raw`\\?\C:\literal-unix-name`;
+  const verbatim = "\\\\?\\C:\\literal-unix-name";
   assert.equal(unix.nativePath(wire(verbatim)), verbatim);
-  assert.throws(() => windows.nativePath(wire(String.raw`\\?\GLOBALROOT\Device\Harddisk0`)), { code: "unsupportedPath" });
-  assert.throws(() => windows.nativePath(wire(String.raw`\\?\UNC\server`)), { code: "unsupportedPath" });
+  assert.throws(() => windows.nativePath(wire("\\\\?\\GLOBALROOT\\Device\\Harddisk0")), { code: "unsupportedPath" });
+  assert.throws(() => windows.nativePath(wire("\\\\?\\UNC\\server")), { code: "unsupportedPath" });
 });
