@@ -20,6 +20,13 @@ export function nativePath(path: WirePath): string {
     // encodeURIComponent rejects unpaired UTF-16 surrogates, which URI serialization would replace.
     encodeURIComponent(value);
     if (!value || value.includes("\0")) throw new Error();
+    // Rust canonicalization uses Win32 verbatim paths; URI.file would treat '?' as a UNC host.
+    if (process.platform === "win32" && value.startsWith("\\\\?\\")) {
+      const path = value.slice(4);
+      if (/^[a-z]:\\/i.test(path)) value = path;
+      else if (/^UNC\\[^\\]+\\[^\\]+(?:\\|$)/i.test(path)) value = `\\\\${path.slice(4)}`;
+      else throw new Error();
+    }
     return value;
   } catch { throw new ExplorerError("unsupportedPath"); }
 }
