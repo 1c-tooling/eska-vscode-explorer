@@ -388,7 +388,8 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
     const label = node.label.kind === "name" ? node.label.text
       : node.label.translations[this.treeLanguage];
     const commonModule = isCommonModule(entry);
-    const expanded = this.expanded.get(entry.key) ?? node.expandedByDefault;
+    const expanded = this.expanded.get(entry.key) ?? (node.parent ? node.expandedByDefault
+      : this.tree?.projects.length === 1 && entry.project.info.scope.kind === "standalone");
     const item = new vscode.TreeItem(label, isModuleLeaf(entry) || (node.parent && node.state === "empty" && !isForm(entry)
       && !(isXmlQueryOwner(entry) && this.connection.state.kind === "ready" && this.connection.state.queryEditing)) ? vscode.TreeItemCollapsibleState.None
       : expanded ? vscode.TreeItemCollapsibleState.Expanded : vscode.TreeItemCollapsibleState.Collapsed);
