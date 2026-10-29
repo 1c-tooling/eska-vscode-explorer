@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { SupportObjectQueue, objectPolicies } from '../out/support-objects.js';
+import { ExplorerError } from '../out/protocol.js';
 
 /** Let the queue perform real asynchronous batches without imposing a timing benchmark in unit tests. */
 async function until(predicate) {
@@ -82,4 +83,52 @@ test('malformed policy batches cannot partially publish or trigger an automatic 
   assert.equal(calls, 1);
   queue.invalidate(); queue.enqueue(tree, project, 'a'); await until(() => errors.length === 2);
   await queue.shutdown();
+});
+
+test('transient policy failures recover without repainting or reconnecting', async t => {
+  const project = { info: { generation: '1', eventSequence: '0' } }, published = [];
+  let calls = 0;
+  const tree = { request: async (_project, _method, { objectIds }) => {
+    if (++calls < 3) throw new ExplorerError('sourceChanged');
+    return response(objectIds);
+  } };
+  const queue = new SupportObjectQueue((_project, snapshot) => published.push(snapshot), assert.fail);
+  t.after(() => queue.shutdown());
+  queue.enqueue(tree, project, 'a');
+  await until(() => published.length === 1);
+  assert.equal(calls, 3);
+  assert.equal(published[0].objects.get('a').state, 'locked');
+  queue.enqueue(tree, project, 'a');
+  await new Promise(resolve => setTimeout(resolve, 20));
+  assert.equal(calls, 3, 'successful objects remain deduplicated');
+});
+
+test('exhausted transient reads remain retryable and do not create an unbounded loop', async t => {
+  const project = { info: { generation: '1', eventSequence: '0' } }, errors = [], published = [];
+  let calls = 0, available = false;
+  const tree = { request: async (_project, _method, { objectIds }) => {
+    calls++;
+    if (!available) throw new ExplorerError('timeout');
+    return response(objectIds);
+  } };
+  const queue = new SupportObjectQueue((_project, snapshot) => published.push(snapshot), error => errors.push(error));
+  t.after(() => queue.shutdown());
+  queue.enqueue(tree, project, 'a');
+  await until(() => errors.length === 1);
+  await new Promise(resolve => setTimeout(resolve, 30));
+  assert.equal(calls, 3);
+  available = true; queue.enqueue(tree, project, 'a');
+  await until(() => published.length === 1);
+  assert.equal(calls, 4);
+});
+
+test('invalidation during retry backoff prevents an obsolete request from being sent again', async () => {
+  const project = { info: { generation: '1', eventSequence: '0' } };
+  let calls = 0;
+  const tree = { request: async () => { calls++; throw new ExplorerError('sourceChanged'); } };
+  const queue = new SupportObjectQueue(assert.fail, assert.fail);
+  queue.enqueue(tree, project, 'a');
+  await until(() => calls === 1);
+  await queue.shutdown();
+  assert.equal(calls, 1);
 });
