@@ -42,7 +42,7 @@ concurrency:
 
 jobs:
   publish:
-    if: github.repository == '1c-tooling/eska-vscode-explorer' && github.ref == 'refs/heads/main'
+    if: github.repository == 'odineska/eska-vscode-explorer' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     environment: openvsx
     timeout-minutes: 15
