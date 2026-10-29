@@ -35,7 +35,10 @@ exports.run = async function () {
   await vscode.workspace.getConfiguration("eska.explorer").update("executable", process.env.ESKA_TEST_BINARY, vscode.ConfigurationTarget.Workspace);
   const extension = vscode.extensions.all.find(value => value.packageJSON.name === "eska-explorer");
   const explorer = await extension.activate();
-  await until(() => explorer.connection.state.kind === "ready", "metadata ready");
+  await until(() => explorer.connection.state.kind === "ready", () => `metadata ready: ${JSON.stringify({
+    connection: explorer.connection.state, project: explorer.tooling.states.project,
+    selecting: explorer.selecting, attempted: explorer.attempted, aborted: explorer.connecting?.signal.aborted,
+  })}`);
   assert.equal(explorer.language.session, undefined, "tree-only activation does not start an index");
   await assert.rejects(fs.access(path.join(fixture.root, "bsl-analyzer.toml")));
   await vscode.commands.executeCommand("workbench.action.closeSidebar");
