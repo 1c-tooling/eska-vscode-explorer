@@ -75,8 +75,10 @@ export class SearchView implements vscode.Disposable {
 
   /** Verify a result against the current generation before moving focus out of the picker. */
   private async accept(): Promise<void> {
-    const item = this.picker.selectedItems[0] ?? this.picker.activeItems[0];
-    if (this.accepting || !item?.hit || !item.project || !this.picker.items.includes(item)) return;
+    const selected = this.picker.selectedItems[0] ?? this.picker.activeItems[0];
+    // Index progress can repaint items before the native click event reaches the extension host.
+    const item = selected?.identity ? this.picker.items.find(item => item.identity === selected.identity) : undefined;
+    if (this.accepting || !item?.hit || !item.project) return;
     this.accepting = true;
     this.picker.busy = true;
     this.picker.enabled = false;
