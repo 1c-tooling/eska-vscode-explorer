@@ -78,9 +78,11 @@ try {
   else await symlink(globalBinary, join(bin, executableName));
   await mkdir(join(fixture.root, ".vscode"), { recursive: true });
   // Prevent the first-run welcome page from taking focus during native formatting/menu assertions.
-  const nativeUiSettings = ["formatting-readonly-host.cjs", "tool-status-host.cjs"].includes(basename(suite)) ? { "workbench.startupEditor": "none" } : {};
+  const nativeUiSettings = ["formatting-readonly-host.cjs", "tool-status-host.cjs", "language-host.cjs"].includes(basename(suite)) ? { "workbench.startupEditor": "none" } : {};
+  // Language acceptance must select its release binary before activation starts a connection.
+  const explicitBinary = process.env.ESKA_HOST_GLOBAL_BINARY || fixture.query || basename(suite) === "language-host.cjs";
   await writeFile(join(fixture.root, ".vscode/settings.json"), JSON.stringify({ ...nativeUiSettings, "eska.explorer.checkForUpdates": false, "eska.explorer.checkForAnalyzerUpdates": false, "eska.explorer.checkForFormatterUpdates": false, ...(process.env.ESKA_TEST_FMT_BINARY ? { "eska.explorer.formatterExecutable": process.env.ESKA_TEST_FMT_BINARY } : {}), "eska.explorer.languageFeatures": process.env.ESKA_TEST_LANGUAGE === "1", "eska.explorer.analyzerExecutable": process.env.ESKA_TEST_ANALYZER_BINARY ?? join(root, "missing-analyzer"), "eska.explorer.backend": backend,
-    ...(process.env.ESKA_HOST_GLOBAL_BINARY || fixture.query ? { "eska.explorer.executable": binary } : {}),
+    ...(explicitBinary ? { "eska.explorer.executable": binary } : {}),
     ...(process.env.ESKA_HOST_SUPPORT_DISABLED ? { "eska.explorer.supportPolicy": false } : {}) }));
   const executable = process.env.VSCODE_EXECUTABLE ?? "code";
   let extensionPath = repository;
