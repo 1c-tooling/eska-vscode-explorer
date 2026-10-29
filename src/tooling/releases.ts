@@ -6,7 +6,7 @@ import { MAX_ARCHIVE } from "./archive.js";
 
 export interface Asset { name: string; url: string; sha256: string; size: number }
 export interface ToolRelease { kind: ToolKind; version: string; target: NativeTarget; asset?: Asset; restriction?: string }
-const REPOSITORIES = { project: "1c-tooling/eska", analyzer: "itrous/bsl-analyzer", formatter: "1c-tooling/eska" } as const;
+const REPOSITORIES = { project: "odineska/eska", analyzer: "itrous/bsl-analyzer", formatter: "odineska/eska" } as const;
 let target: NativeTarget | undefined;
 
 /** Resolve the extension host's runtime rather than the desktop UI's platform in Remote workspaces. */

@@ -6,15 +6,15 @@
 **Метаданные 1С, свойства объектов и BSL в VS Code и VSCodium.**
 
 Explorer работает с выгрузкой **Designer XML** через самостоятельный
-[`eska-project`](https://github.com/1c-tooling/eska). Поддерживает конфигурации,
+[`eska-project`](https://github.com/odineska/eska). Поддерживает конфигурации,
 расширения, внешние обработки и отчёты. Языковые функции выполняет внешний
 [`bsl-analyzer-app`](https://github.com/itrous/bsl-analyzer), а дерево и запись
 свойств работают независимо от него.
 
-[Общее пошаговое руководство](https://github.com/1c-tooling/eska/blob/main/docs/user-guide.md) ·
+[Общее пошаговое руководство](https://github.com/odineska/eska/blob/main/docs/user-guide.md) ·
 [Руководство по дереву](docs/usage.md) ·
 [Установка компонентов](docs/component-setup.md) ·
-[Сайт](https://1c-tooling.github.io/eska/docs/)
+[Сайт](https://odineska.github.io/eska/docs/)
 
 ## Возможности
 
@@ -115,8 +115,8 @@ eska build
 платформа 1С. Эти операции выполняются над тем же проектом, который открыт
 в Explorer. Полная оболочка пока не предоставляет входы для всех мини-команд:
 контекст и конфиг анализатора обслуживает `eska-project`.
-[Таблица команд и различий](https://1c-tooling.github.io/eska/docs/#components) ·
-[Сценарии от подключения XML до сборки](https://1c-tooling.github.io/eska/docs/#scenarios).
+[Таблица команд и различий](https://odineska.github.io/eska/docs/#components) ·
+[Сценарии от подключения XML до сборки](https://odineska.github.io/eska/docs/#scenarios).
 
 Компонентная поставка ESKA доступна начиная с `0.15.0`.
 Проверяйте состав Assets выбранного выпуска и используйте совместимый **VSIX**.
@@ -155,7 +155,7 @@ Explorer. Анализатор берите из [последнего офиц�
 
 Команда **Подготовить проектный и языковой компоненты** проверяет оба инструмента
 и предлагает доступную установку. При отсутствии project asset используйте
-локальную сборку или [локальный компонентный комплект](https://github.com/1c-tooling/eska/blob/main/docs/component-installation.md).
+локальную сборку или [локальный компонентный комплект](https://github.com/odineska/eska/blob/main/docs/component-installation.md).
 Явно заданный путь не подменяется другой программой при ошибке.
 [Пути, установка, обновления и восстановление](docs/component-setup.md).
 
@@ -179,7 +179,7 @@ codium --install-extension ./eska-explorer-0.0.12.vsix --force
 
 Для VS Code замените `codium` на `code`. Bun нужен для упаковки, в установленном
 расширении он не требуется. Публичный VSIX доступен в
-[GitHub Releases](https://github.com/1c-tooling/eska-vscode-explorer/releases),
+[GitHub Releases](https://github.com/odineska/eska-vscode-explorer/releases),
 но может отставать от исходников. [Проверка пакета](docs/packaging.md).
 
 ### 3. Подключите проект
@@ -359,7 +359,7 @@ workspace не поддерживаются.
 В меню **…** заголовка дерева доступны выбор проекта, отключение
 и **Показать журнал подключения**. Для ошибок языка откройте Output;
 проверьте app, конфиг и состояние конфликта расширений.
-В [сообщении об ошибке](https://github.com/1c-tooling/eska-vscode-explorer/issues)
+В [сообщении об ошибке](https://github.com/odineska/eska-vscode-explorer/issues)
 укажите ОС, версии редактора, VSIX, project и app, выбранное приложение
 и шаги воспроизведения.
 

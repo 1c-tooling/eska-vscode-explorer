@@ -7,7 +7,7 @@ import re
 import subprocess
 from pathlib import Path
 
-REPOSITORY = "1c-tooling/eska-vscode-explorer"
+REPOSITORY = "odineska/eska-vscode-explorer"
 
 
 def run(*args: str) -> str:

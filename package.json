@@ -10,7 +10,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/1c-tooling/eska-vscode-explorer.git"
+    "url": "https://github.com/odineska/eska-vscode-explorer.git"
   },
   "categories": [
     "Other"
@@ -593,9 +593,9 @@
     ]
   },
   "publisher": "1c-tooling",
-  "homepage": "https://github.com/1c-tooling/eska-vscode-explorer#readme",
+  "homepage": "https://github.com/odineska/eska-vscode-explorer#readme",
   "bugs": {
-    "url": "https://github.com/1c-tooling/eska-vscode-explorer/issues"
+    "url": "https://github.com/odineska/eska-vscode-explorer/issues"
   },
   "keywords": [
     "1C",

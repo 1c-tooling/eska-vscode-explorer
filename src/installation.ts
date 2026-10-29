@@ -8,7 +8,7 @@ import { LEGACY_API_VERSION, ExplorerError, isRecord, parseHandshake } from "./p
 import type { DiagnosticLog } from "./diagnostics.js";
 
 export const MIN_CLI_VERSION = "0.11.0";
-const RELEASES = "https://api.github.com/repos/1c-tooling/eska/releases";
+const RELEASES = "https://api.github.com/repos/odineska/eska/releases";
 export interface GlobalCli { path: string; version: string; compatible: boolean; selfUpdate: boolean }
 export interface Release { version: string; installer: string }
 export interface InstallCommand { executable: string; args: string[]; cwd: string; env?: Record<string, string>; dispose(): Promise<void> }
@@ -112,7 +112,7 @@ export function parseRelease(value: unknown, platform = process.platform): Relea
   const version = value.tag_name.replace(/^v/, "");
   if (compareVersions(version, MIN_CLI_VERSION) < 0) throw new ExplorerError("incompatible");
   const name = platform === "win32" ? "eska-installer.ps1" : "eska-installer.sh";
-  const expected = `https://github.com/1c-tooling/eska/releases/download/${value.tag_name}/${name}`;
+  const expected = `https://github.com/odineska/eska/releases/download/${value.tag_name}/${name}`;
   if (!value.assets.some(asset => isRecord(asset) && asset.name === name && asset.browser_download_url === expected)) throw new ExplorerError("updateFailed");
   return { version, installer: expected };
 }

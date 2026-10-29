@@ -25,7 +25,7 @@ if (local) {
   projectData = await readFile(join(local, item.archive));
   for (const name of bootstrap) await copyFile(join(local, name), join(pythonTools, name));
 } else {
-  const release = JSON.parse(await fetchBytes("https://api.github.com/repos/1c-tooling/eska/releases/latest", 4 * 1024 * 1024));
+  const release = JSON.parse(await fetchBytes("https://api.github.com/repos/odineska/eska/releases/latest", 4 * 1024 * 1024));
   projectRelease = parseRelease("project", target, release);
   assert.ok(projectRelease.asset, `ESKA release cannot be installed: ${projectRelease.restriction}`);
   projectData = await downloadAsset(projectRelease.asset);
@@ -35,7 +35,7 @@ if (local) {
     const asset = candidates[0];
     assert.equal(asset.state, "uploaded");
     assert.match(asset.digest, /^sha256:[a-f0-9]{64}$/);
-    assert.equal(asset.browser_download_url, `https://github.com/1c-tooling/eska/releases/download/${release.tag_name}/${name}`);
+    assert.equal(asset.browser_download_url, `https://github.com/odineska/eska/releases/download/${release.tag_name}/${name}`);
     const data = await downloadAsset({ name, url: asset.browser_download_url, size: asset.size, sha256: asset.digest.slice(7) });
     await writeFile(join(pythonTools, name), data);
   }
