@@ -139,8 +139,10 @@ export class MetadataTree {
     if (entry.node.id.kind === "object") {
       const state = nodes.length === 0 ? "empty" : "non_empty";
       if (entry.node.state !== state) {
+        const repaint = state === "empty" || entry.node.state === "empty" || entry.node.state === "error";
         entry.node = { ...entry.node, state };
-        this.changed([entry]);
+        // A non-empty lazy load keeps its expander; refreshing it after reveal clears the native selection.
+        if (repaint) this.changed([entry]);
       }
     }
     return entry.children;

@@ -481,6 +481,8 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
         if (this.tree !== tree) throw new ExplorerError("obsolete");
         await vscode.commands.executeCommand("eska.explorer.projects.focus");
         if (this.tree !== tree) throw new ExplorerError("obsolete");
+        // Support updates can repaint ancestors before native expansion events reach the extension host.
+        for (let parent = tree.parent(entry); parent; parent = tree.parent(parent)) this.expanded.set(parent.key, true);
         await this.view.reveal(entry, { select: true, focus: true });
       } catch (error) { this.showError(error instanceof ExplorerError ? error : new ExplorerError("sourceMissing")); }
     }, () => { this.searchView = undefined; });

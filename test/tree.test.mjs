@@ -301,7 +301,9 @@ test("empty lazy objects lose their expander and regain children after invalidat
     affected: ["leaf"], requiresRefresh: false, requiresReopen: false });
   await tree.children(top);
   assert.equal(entry.node.state, "unloaded");
+  repaints.length = 0;
   assert.equal((await tree.children(entry)).length, 1);
   assert.equal(entry.node.state, "non_empty");
+  assert.equal(repaints.length, 0, "a non-empty lazy load must not refresh away a newly revealed selection");
   tree.dispose();
 });

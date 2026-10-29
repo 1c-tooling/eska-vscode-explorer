@@ -39,6 +39,11 @@ exports.connectWorkbench = async function (until) {
   return { close: () => connection.close(), screenshot: async file => {
     const result = await connection.request('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false });
     await fs.writeFile(file, Buffer.from(result.data, 'base64'));
+  },
+  /** Exercise the native pointer path instead of synthetic DOM event dispatch. */
+  click: async (x, y) => {
+    await connection.request('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', clickCount: 1 });
+    await connection.request('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', clickCount: 1 });
   }, viewport: async (width, height) => {
     await connection.request('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
   }, evaluate: async expression => {
