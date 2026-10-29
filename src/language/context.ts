@@ -1,7 +1,6 @@
 import { isAbsolute, join, relative, sep } from "node:path";
 import { ExplorerError, isRecord, isWirePath } from "../protocol.js";
 import { nativePath } from "../source.js";
-import { ANALYZER_VERSION } from "../tooling/contracts.js";
 
 export interface AnalysisSource { root: string; source: string; descriptor: string; member: string | null; projectType: "configuration" | "extension" | "processing" | "report" }
 export interface AnalysisContext { root: string; name: string | null; limited: boolean; sources: AnalysisSource[] }
@@ -60,8 +59,6 @@ export function analyzerConfiguration(value: unknown): AnalyzerConfiguration {
   const config = { path: absolute(value.path), status: value.status as ConfigStatus, token: value.preview_token as string,
     context: name(ownership.context), fingerprint: ownership.input_fingerprint as string, body: ownership.body_sha256 as string,
     ...(value.leaseId === undefined ? {} : { lease: value.leaseId as string }) };
-  if (ownership.analyzer_version !== ANALYZER_VERSION) throw new ExplorerError("analyzerVersionMismatch", undefined,
-    { backendAnalyzer: ownership.analyzer_version, expectedAnalyzer: ANALYZER_VERSION });
   return config;
 }
 

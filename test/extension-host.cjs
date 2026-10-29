@@ -65,14 +65,14 @@ exports.run = async function () {
   assert.equal(explorer.status.text, `${explorer.connection.state.target.backend === "legacy" ? "ESKA Legacy" : "ESKA"} v${explorer.connection.state.version}`);
   assert.ok(explorer.status.tooltip.includes(explorer.connection.state.version));
   assert.ok(explorer.status.tooltip.includes(explorer.connection.state.target.executable));
-  assert.equal(explorer.status.command, 'eska.explorer.checkUpdates');
-  const updates = explorer.connection.state.target.backend === "legacy" ? explorer.setup : explorer.tooling;
-  const checkUpdates = updates.check;
-  let manualCheck;
-  updates.check = async (first, manual = true) => { manualCheck = typeof first === "boolean" ? first : manual; };
+  assert.equal(explorer.status.command, 'eska.explorer.updateTools');
+  const updates = explorer.tooling;
+  const updateAll = updates.updateAll;
+  let manualUpdate = false;
+  updates.updateAll = async () => { manualUpdate = true; };
   try { await vscode.commands.executeCommand(explorer.status.command); }
-  finally { updates.check = checkUpdates; }
-  assert.equal(manualCheck, true, 'status bar invokes the manual update check');
+  finally { updates.updateAll = updateAll; }
+  assert.equal(manualUpdate, true, 'status bar invokes the complete update');
   assert.ok(!explorer.view.message, 'connection status does not occupy the tree');
   const top = await children();
   const [root] = top;

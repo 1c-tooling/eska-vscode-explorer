@@ -116,14 +116,12 @@ function fixture({ available = false, enabled = true, hold, outside = false, sta
 /** Follow any queued generation created by the controller itself, without fixed sleeps. */
 async function settled(service) { let pending; do { pending = service.queue; await pending; } while (pending !== service.queue); }
 
-test("an older backend's analyzer contract names the ESKA update action without starting a language process", async t => {
+test("a different configuration dialect baseline does not pin the running analyzer release", async t => {
   const f = fixture(); t.after(() => f.service.shutdown());
   f.dto.ownership.analyzer_version = "0.3.2";
   f.connect(); await settled(f.service);
-  assert.equal(f.tooling.states.analyzer.phase, "error");
-  assert.match(f.tooling.states.analyzer.detail, /Check for ESKA Updates/);
-  assert.ok(!f.tooling.states.analyzer.detail.includes("protocolInvalid"));
-  assert.equal(f.owners.length, 0); assert.equal(f.leased, false);
+  assert.equal(f.tooling.states.analyzer.phase, "ready");
+  assert.equal(f.owners.length, 1); assert.equal(f.leased, true);
 });
 
 test("an enabled inactive extension blocks preparation and repeated restarts warn once per conflict episode", async t => {

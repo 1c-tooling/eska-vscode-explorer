@@ -37,8 +37,7 @@ test("language context accepts only versioned DTOs and leases for the exact curr
     ownership: { schema_version: 1, generator_version: 1, analyzer_version: "0.4.0", context: null, input_fingerprint: "b".repeat(64), body_sha256: "c".repeat(64) }, leaseId: "d".repeat(64) };
   assert.equal(analyzerConfiguration(config).lease, config.leaseId);
   assert.throws(() => analyzerConfiguration({ ...config, status: "stale" }));
-  assert.throws(() => analyzerConfiguration({ ...config, ownership: { ...config.ownership, analyzer_version: "0.3.2" } }),
-    { code: "analyzerVersionMismatch", details: { backendAnalyzer: "0.3.2", expectedAnalyzer: "0.4.0" } });
+  assert.equal(analyzerConfiguration({ ...config, ownership: { ...config.ownership, analyzer_version: "0.5.0" } }).lease, config.leaseId);
   assert.throws(() => analyzerConfiguration({ ...config, ownership: { ...config.ownership, analyzer_version: null } }), { code: "protocolInvalid" });
   assert.throws(() => analyzerConfiguration({ ...config, preview_token: "invalid", ownership: { ...config.ownership, analyzer_version: "0.3.2" } }), { code: "protocolInvalid" });
 });

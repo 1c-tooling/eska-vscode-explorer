@@ -34,7 +34,10 @@ exports.run = async function () {
   const { file, text } = fixture.languageSource;
   const extension = vscode.extensions.all.find(value => value.packageJSON.name === "eska-explorer");
   const explorer = await extension.activate();
-  await until(() => explorer.connection.state.kind === "ready", "metadata ready");
+  await until(() => explorer.connection.state.kind === "ready", () => `metadata ready: ${JSON.stringify({
+    connection: explorer.connection.state, project: explorer.tooling.states.project,
+    selecting: explorer.selecting, attempted: explorer.attempted, aborted: explorer.connecting?.signal.aborted,
+  })}`);
   assert.equal(explorer.language.session, undefined, "tree-only activation does not start an index");
   await assert.rejects(fs.access(path.join(fixture.root, "bsl-analyzer.toml")));
   await vscode.commands.executeCommand("workbench.action.closeSidebar");
@@ -47,7 +50,7 @@ exports.run = async function () {
   const session = explorer.language.session, pid = session.owner.child.pid;
   const capabilities = session.client.initializeResult.capabilities;
   assert.equal(session.client.initializeResult.serverInfo.name, "bsl-analyzer");
-  assert.equal(session.client.initializeResult.serverInfo.version, "0.4.0");
+  assert.equal(session.client.initializeResult.serverInfo.version, explorer.tooling.states.analyzer.info.version);
   const generated = await fs.readFile(path.join(fixture.root, "bsl-analyzer.toml"), "utf8");
   assert.ok(generated.startsWith("# eska-generated "));
   assert.ok(session.lease);
@@ -78,8 +81,13 @@ exports.run = async function () {
   // Await the renderer acknowledgement; assigning editor.selection only queues an RPC.
   await vscode.window.showTextDocument(document, { selection: new vscode.Range(5, 0, 5, 0), preview: false });
   await vscode.commands.executeCommand("workbench.action.focusActiveEditorGroup");
+  await until(() => vscode.window.activeTextEditor?.document === document
+    && vscode.window.activeTextEditor.selection.active.isEqual(new vscode.Position(5, 0)), "comment editor selection");
   await vscode.commands.executeCommand("editor.action.commentLine");
-  await until(() => /^\s*\/\/\s*Результат/.test(document.lineAt(5).text), () => `comment command did not update BSL: ${document.getText()}`);
+  await until(() => /^\s*\/\/\s*Результат/.test(document.lineAt(5).text), () => `comment command did not update BSL: ${JSON.stringify({
+    active: vscode.window.activeTextEditor?.document.uri.toString(), selection: vscode.window.activeTextEditor?.selection,
+    tab: vscode.window.tabGroups.activeTabGroup.activeTab?.label,
+  })}\n${document.getText()}`);
   assert.match(document.lineAt(5).text, /^\s*\/\/\s*Результат/);
   await vscode.commands.executeCommand("undo");
   await until(() => document.getText() === text, "native undo restores the original BSL text");

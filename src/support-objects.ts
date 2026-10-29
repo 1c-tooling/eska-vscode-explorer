@@ -66,17 +66,37 @@ export class SupportObjectQueue {
       for (const id of ids) pending.ids.delete(id);
       if (!pending.ids.size) this.pending.delete(project);
       try {
-        const result = await pending.tree.request(project, 'metadata/supportObjects', { objectIds: ids });
+        const result = await this.read(pending.tree, project, ids, epoch);
         if (this.stopped || epoch !== this.epoch) return;
+        if (!result) return;
         const objects = objectPolicies(result.objects, ids);
         if (!Array.isArray(result.diagnostics) || result.diagnostics.some(value => typeof value !== 'string')) throw new ExplorerError('protocolInvalid');
         this.publish(project, { generation: project.info.generation, eventSequence: project.info.eventSequence,
           objects: new Map(objects.map(object => [object.objectId, object])), diagnostics: result.diagnostics });
       } catch (error) {
-        if (!this.stopped && epoch === this.epoch) this.failure(error);
+        if (!this.stopped && epoch === this.epoch) {
+          if (!(error instanceof ExplorerError && error.code === 'protocolInvalid')) {
+            for (const id of ids) this.requested.get(project)?.delete(id);
+          }
+          this.failure(error);
+        }
       }
       if (this.pending.size) await new Promise(resolve => setTimeout(resolve, 0));
     }
+  }
+
+  /** Retry transient reads briefly; invalid data and obsolete sessions never enter a retry loop. */
+  private async read(tree: MetadataTree, project: ProjectTree, ids: string[], epoch: number): Promise<Record<string, unknown> | undefined> {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      if (this.stopped || epoch !== this.epoch) return undefined;
+      try { return await tree.request(project, 'metadata/supportObjects', { objectIds: ids }); }
+      catch (error) {
+        if (attempt === 2 || (error instanceof ExplorerError
+          && !['sourceChanged', 'timeout', 'requestFailed', 'branchInvalid'].includes(error.code))) throw error;
+        await new Promise(resolve => setTimeout(resolve, 100 * (attempt + 1)));
+      }
+    }
+    return undefined;
   }
 
   /** Stop publishing before waiting for an in-flight bounded transport request. */

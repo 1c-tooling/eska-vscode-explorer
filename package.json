@@ -147,6 +147,11 @@
         "category": "ESKA Explorer"
       },
       {
+        "command": "eska.explorer.updateTools",
+        "title": "%updateTools%",
+        "category": "ESKA Explorer"
+      },
+      {
         "command": "eska.explorer.sortObjects",
         "title": "%sortObjects%",
         "category": "ESKA Explorer",

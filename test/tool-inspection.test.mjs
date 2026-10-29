@@ -33,9 +33,12 @@ test("project compatibility checks complete fields, config, bridge and target in
   assert.throws(() => projectContract(value, "aarch64-apple-darwin"), ToolFailure);
 });
 
-test("analyzer contract rejects unsupported versions, incomplete commands and missing configuration flags", () => {
+test("analyzer contract accepts compatible releases and rejects incomplete commands and configuration flags", () => {
   assert.equal(analyzerContract(analyzer()), "0.4.0");
-  for (const mutate of [value => { value.build_version = "0.3.2"; }, value => { value.contract_version = "3.4"; },
+  for (const version of ["0.4.1", "0.5.0", "1.2.3"]) {
+    assert.equal(analyzerContract({ ...analyzer(), build_version: version, contract_version: "4.0" }), version);
+  }
+  for (const mutate of [value => { value.build_version = "invalid"; },
     value => { value.cli.commands[0].args = undefined; }, value => { value.cli.commands[1].args = []; },
     value => { value.cli.commands[0].args[0].values = ["auto"]; },
     value => { value.cli.commands[2].args[0].values = ["console"]; }]) {
@@ -101,6 +104,6 @@ test("real analyzer inspection verifies both bounded processes against the pinne
   const root = await mkdtemp(join(process.env.ESKA_TEST_ROOT ?? resolve("../eska-playground"), "explorer-tool-analyzer-"));
   t.after(() => rm(root, { recursive: true, force: true }));
   const info = await inspectAnalyzer(process.env.ESKA_TEST_ANALYZER_BINARY, root);
-  assert.equal(info.version, "0.4.0"); assert.equal(info.kind, "analyzer");
+  assert.match(info.version, /^\d+\.\d+\.\d+$/); assert.equal(info.kind, "analyzer");
   await assert.rejects(inspectAnalyzer(process.env.ESKA_TEST_ANALYZER_BINARY, root, AbortSignal.abort()), { code: "cancelled" });
 });

@@ -5,7 +5,7 @@ import type { Connection, ConnectionState } from "../connection.js";
 import { ExplorerError, isRecord } from "../protocol.js";
 import { message, type MessageKey } from "../messages.js";
 import type { DiagnosticLog } from "../diagnostics.js";
-import { ANALYZER_VERSION, ToolFailure } from "../tooling/contracts.js";
+import { ToolFailure } from "../tooling/contracts.js";
 import type { ToolingSetup } from "../tooling/setup.js";
 import { analysisContext, analyzerConfiguration, analyzerFailure, type AnalysisContext, type AnalyzerConfiguration } from "./context.js";
 import { LanguageProcess } from "./process.js";
@@ -357,7 +357,7 @@ export class LanguageService implements vscode.Disposable {
       if (!this.current(revision, signal)) return;
       await client.start();
       if (!this.current(revision, signal)) return;
-      if (client.initializeResult?.serverInfo?.name !== "bsl-analyzer" || client.initializeResult.serverInfo.version !== ANALYZER_VERSION) throw new ToolFailure("incompatible", "lsp-server-info");
+      if (client.initializeResult?.serverInfo?.name !== "bsl-analyzer" || client.initializeResult.serverInfo.version !== info.version) throw new ToolFailure("incompatible", "lsp-server-info");
       await this.context.workspaceState.update(this.selectionKey(state), context.name ?? undefined);
       if (!this.current(revision, signal)) return;
       started = true;
@@ -529,11 +529,9 @@ export class LanguageService implements vscode.Disposable {
   private failure(error: unknown): void {
     if (this.disposed) return;
     const code = analyzerFailure(error) ?? (error instanceof ToolFailure ? error.detail || error.code : error instanceof ExplorerError ? error.code : "language");
-    this.log(JSON.stringify({ event: "language_failed", code, ...(error instanceof ExplorerError && error.code === "analyzerVersionMismatch"
-      ? { backendAnalyzer: error.details?.backendAnalyzer, expectedAnalyzer: error.details?.expectedAnalyzer } : {}) }), "error");
+    this.log(JSON.stringify({ event: "language_failed", code }), "error");
     if (this.refreshConflict()) { this.showConflictState(); return; }
-    const detail = code === "analyzerVersionMismatch" ? this.text("analyzerVersionMismatch")
-      : code === "migration_required" ? this.text("languageMigrationRequired") : code === "managed_conflict" ? this.text("languageManagedConflict") : this.text("languageFailed", code);
+    const detail = code === "migration_required" ? this.text("languageMigrationRequired") : code === "managed_conflict" ? this.text("languageManagedConflict") : this.text("languageFailed", code);
     this.tooling.analyzerState("error", detail);
     void vscode.window.showErrorMessage(detail);
   }

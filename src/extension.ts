@@ -105,7 +105,7 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
       this.additionalPolicyTrees = trees; this.support.setAdditionalTrees(trees, pending);
     }, () => this.support.invalidate(), text => this.output.info(text));
     this.status.name = "ESKA Explorer";
-    this.status.command = "eska.explorer.components";
+    this.status.command = "eska.explorer.updateTools";
     this.disposables.push(this.status, this.decorations, this.protectedSources);
     this.disposables.push(new ProtectedLanguageFeatures(error => this.output.warn(String(error))));
     this.filters = new ProjectFilters(context.workspaceState);
@@ -143,6 +143,7 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
       ["disconnect", () => this.disconnect()],
       ["showLog", () => this.output.show(true)],
       ["components", () => this.tooling.showComponents()],
+      ["updateTools", () => this.tooling.updateAll()],
       ["checkUpdates", () => this.backendKind() === "legacy" ? this.setup.check(true, "legacy") : this.tooling.check("project")],
       ["checkAnalyzerUpdates", () => this.tooling.check("analyzer")],
       ["checkFormatterUpdates", () => this.tooling.check("formatter")],
@@ -388,7 +389,8 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
     const label = node.label.kind === "name" ? node.label.text
       : node.label.translations[this.treeLanguage];
     const commonModule = isCommonModule(entry);
-    const expanded = this.expanded.get(entry.key) ?? node.expandedByDefault;
+    const expanded = this.expanded.get(entry.key) ?? (node.parent ? node.expandedByDefault
+      : this.tree?.projects.length === 1 && entry.project.info.scope.kind === "standalone");
     const item = new vscode.TreeItem(label, isModuleLeaf(entry) || (node.parent && node.state === "empty" && !isForm(entry)
       && !(isXmlQueryOwner(entry) && this.connection.state.kind === "ready" && this.connection.state.queryEditing)) ? vscode.TreeItemCollapsibleState.None
       : expanded ? vscode.TreeItemCollapsibleState.Expanded : vscode.TreeItemCollapsibleState.Collapsed);
@@ -480,6 +482,8 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
         if (this.tree !== tree) throw new ExplorerError("obsolete");
         await vscode.commands.executeCommand("eska.explorer.projects.focus");
         if (this.tree !== tree) throw new ExplorerError("obsolete");
+        // Support updates can repaint ancestors before native expansion events reach the extension host.
+        for (let parent = tree.parent(entry); parent; parent = tree.parent(parent)) this.expanded.set(parent.key, true);
         await this.view.reveal(entry, { select: true, focus: true });
       } catch (error) { this.showError(error instanceof ExplorerError ? error : new ExplorerError("sourceMissing")); }
     }, () => { this.searchView = undefined; });

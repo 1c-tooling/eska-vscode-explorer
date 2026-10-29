@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { isRecord } from "../protocol.js";
-import { ANALYZER_VERSION, ToolFailure, analyzerAsset, assertCurrent, nativeTarget, stableVersion, type NativeTarget, type ToolKind } from "./contracts.js";
+import { ToolFailure, analyzerAsset, assertCurrent, nativeTarget, stableVersion, type NativeTarget, type ToolKind } from "./contracts.js";
 import { checksum, strictJson } from "./files.js";
 import { MAX_ARCHIVE } from "./archive.js";
 
@@ -49,7 +49,6 @@ export function parseRelease(kind: ToolKind, target: NativeTarget, value: unknow
     || !Array.isArray(value.assets)) throw new ToolFailure("releaseUnavailable", "release");
   const version = stableVersion(value.tag_name.slice(1));
   const result: ToolRelease = { kind, version, target };
-  if (kind === "analyzer" && version !== ANALYZER_VERSION) return { ...result, restriction: `supported-analyzer-${ANALYZER_VERSION}` };
   const name = kind === "analyzer" ? analyzerAsset(target) : `${kind === "project" ? "eska-project" : "eska-fmt"}-${version}-${target}.zip`;
   const candidates = value.assets.filter(asset => isRecord(asset) && asset.name === name);
   if (candidates.length !== 1) return { ...result, restriction: `missing-asset:${name}` };

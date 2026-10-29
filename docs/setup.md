@@ -6,7 +6,7 @@ then set `eska.explorer.executable` to its absolute binary path on the workspace
 host. Default discovery checks `~/.eska/bin` first, then absolute PATH directories. The metadata tree works without the full CLI, Git, a 1C platform
 or an analyzer. [Backend selection](cli-management.md).
 
-Use **Prepare project and language components** for component setup. The current public ESKA release has no project ZIP; configure a local binary or install a local T97 package. Analyzer 0.4.0 can be installed independently. See [component setup](component-setup.md).
+Use **Prepare project and language components** for component setup. The current public ESKA release has no project ZIP; configure a local binary or install a local T97 package. The latest stable Analyzer app release can be installed independently. See [component setup](component-setup.md).
 
 For the documented older `eska ide`, explicitly choose
 `eska.explorer.backend = "legacy"` and your `eska` executable. Its path is kept;

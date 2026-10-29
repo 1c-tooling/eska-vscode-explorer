@@ -122,6 +122,7 @@ export class SupportController implements vscode.FileDecorationProvider {
     const epoch = ++this.epoch;
     this.objectQueue.invalidate(); this.objectSnapshots.clear();
     clearTimeout(this.fileTimer);
+    this.fileTimer = undefined; this.requestedFiles.clear();
     this.requestedEntries.clear();
     this.loading = this.enabled && !!this.tree && this.available && !this.targeted;
     this.failed = false;
@@ -332,7 +333,10 @@ export class SupportController implements vscode.FileDecorationProvider {
         if (isAbsolute(local) || local.split(/[\\/]/).some(part => part === '..')) throw new Error('source outside project');
         this.queueFile(join(nativePath(entry.project.info.sourcePath), local));
       }
-    }).catch(error => this.log(`support_object_failed ${String(error)}`));
+    }).catch(error => {
+      if (epoch === this.epoch) this.requestedEntries.delete(key);
+      this.log(`support_object_failed ${String(error)}`);
+    });
   }
 
   /** Display policy never writes readonly settings or replaces a concurrently checked file snapshot. */

@@ -1,7 +1,7 @@
 # Собственный языковой клиент
 
 Языковой клиент `vscode-languageclient` 11.0.0 подключается к опубликованному
-`bsl-analyzer-app` 0.4.0 командой `lsp --mode stdio`. Явный режим сохраняет
+`bsl-analyzer-app` командой `lsp --mode stdio`. Номер релиза не закреплён. Явный режим сохраняет
 отдельный процесс на языковой контекст; upstream-режим `auto` использует общий
 backend. Backend project использует Metadata API 1.12;
 TypeScript читает его DTO, без собственного разбора `eska.toml` и Designer XML.
