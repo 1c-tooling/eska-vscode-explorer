@@ -26,6 +26,7 @@
   "revealActiveFile": "Reveal Active File in eska Tree",
   "checkUpdates": "Check for ESKA updates",
   "components": "Manage components",
+  "updateTools": "Update all ESKA components and BSL Analyzer",
   "checkForUpdates": "Check for global ESKA updates at most once a day. Installation requires confirmation.",
   "sortObjects": "Enable alphabetical sorting",
   "resetSortOrder": "Disable alphabetical sorting",

@@ -301,3 +301,65 @@ test("one component menu exposes all selected versions and routes every action w
   ui.choices = ["formatter"]; await setup.showComponents();
   assert.equal(ui.commands.length, count, "cancel does not invoke an action");
 });
+
+test("one click updates project, formatter and Analyzer without component choices or install prompts", async t => {
+  const { setup, requests, actions } = await fixture(t), installed = [];
+  ui.settings = { checkForUpdates: false, checkForAnalyzerUpdates: false, checkForFormatterUpdates: false };
+  replace(t, installation, "managedVersion", async () => "0.18.0");
+  replace(t, releases, "latestToolRelease", async kind => {
+    requests.push(kind);
+    return { kind, version: "0.20.0", target: releases.hostTarget(), asset: { name: kind } };
+  });
+  replace(t, releases, "downloadAsset", async asset => { installed.push(asset.name); return Buffer.from("fixture"); });
+  replace(t, installation, "installComponent", async (root, _data, release) => ({ kind: release.kind, path: installation.managedPath(root, release.kind), version: release.version }));
+  replace(t, installation, "installAnalyzer", async root => ({ kind: "analyzer", path: installation.managedPath(root, "analyzer"), version: "0.20.0" }));
+  const first = setup.updateAll(), duplicate = setup.updateAll();
+  assert.equal(first, duplicate);
+  await first;
+  assert.deepEqual(requests, ["project", "formatter", "analyzer"]);
+  assert.deepEqual(installed, requests);
+  assert.deepEqual(ui.picks, []);
+  assert.ok(!ui.messages.some(text => text.includes("?") || text.includes("managed version")));
+  assert.deepEqual(actions, [["restart", "project"], ["restart", "formatter"], ["restart", "analyzer"]]);
+  assert.ok(Object.values(setup.states).every(state => !state.activity));
+});
+
+test("one click updates the complete cargo-dist bundle and Analyzer without separately installing its formatter", async t => {
+  const { setup, actions } = await fixture(t), installed = [];
+  const update = { cli: join(setup.root, "bin/eska"), project: installation.managedPath(setup.root, "project"),
+    version: "0.18.0", available: "0.20.0", identity: "receipt-and-hashes" };
+  setup.states.project.info = { kind: "project", path: update.project, version: update.version };
+  replace(t, installation, "managedVersion", async () => undefined);
+  replace(t, bundle, "inspectBundle", async () => update);
+  replace(t, bundle, "installBundle", async () => { installed.push("bundle"); return { kind: "project", path: update.project, version: update.available }; });
+  replace(t, setup, "ensureFormatter", async () => { installed.push("inspect-formatter"); return undefined; });
+  replace(t, releases, "latestToolRelease", async kind => {
+    assert.equal(kind, "analyzer"); return { kind, version: "0.4.1", target: releases.hostTarget(), asset: { name: kind } };
+  });
+  replace(t, releases, "downloadAsset", async () => Buffer.from("fixture"));
+  replace(t, installation, "installAnalyzer", async root => { installed.push("analyzer"); return { kind: "analyzer", path: installation.managedPath(root, "analyzer"), version: "0.4.1" }; });
+  await setup.updateAll();
+  assert.deepEqual(installed, ["bundle", "inspect-formatter", "analyzer"]);
+  assert.deepEqual(ui.picks, []);
+  assert.deepEqual(actions, [["stop", "project"], ["restart", "project"], ["restart", "analyzer"]]);
+  assert.ok(!ui.messages.some(text => text.includes("?")));
+});
+
+test("an independent Analyzer update still runs after project update failure", async t => {
+  const { setup, requests } = await fixture(t);
+  replace(t, releases, "latestToolRelease", async kind => { requests.push(kind); if (kind === "project") throw new Error("network");
+    return { kind, version: "0.4.0", target: releases.hostTarget() }; });
+  await setup.updateAll();
+  assert.deepEqual(requests, ["project", "formatter", "analyzer"]);
+  assert.deepEqual(ui.picks, []);
+  assert.ok(ui.messages.some(text => text.includes("failed")));
+  assert.ok(!ui.messages.some(text => text.includes("are up to date")));
+});
+
+test("cancelling the shared update stops later components before their probes", async t => {
+  const { setup, requests } = await fixture(t);
+  ui.cancelled = true;
+  await setup.updateAll();
+  assert.deepEqual(requests, []);
+  assert.deepEqual(ui.picks, []);
+});

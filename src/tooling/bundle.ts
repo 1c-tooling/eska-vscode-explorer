@@ -126,6 +126,16 @@ export async function installBundle(root: string, update: BundleUpdate,
     if (!owned || owned.identity !== update.identity || owned.cli !== update.cli) throw new ToolFailure("modified", "cargo-dist");
     await execute(update.cli, ["update", "--target-version", update.available, "--format", "json"]);
     assertCurrent(signal);
+    if (!await ownedBundle(root)) throw new ToolFailure("probe", "bundle-receipt");
+    const receipt = await installerReceipt();
+    if (!isRecord(receipt) || !Array.isArray(receipt.binaries)) throw new ToolFailure("receipt", "cargo-dist");
+    const suffix = process.platform === "win32" ? ".exe" : "";
+    for (const component of COMPONENTS) {
+      const name = `${component}${suffix}`;
+      if (!receipt.binaries.includes(name)) continue;
+      const version = (await runProbe(join(root, "bin", name), ["--version"], homedir(), 10_000, 65536, signal)).stdout.trim();
+      if (version !== `${component} ${update.available}`) throw new ToolFailure("probe", "bundle-version");
+    }
     const info = await inspectProject(update.project, homedir(), log, signal);
     if (info.version !== update.available) throw new ToolFailure("probe", "bundle-version");
     return info;

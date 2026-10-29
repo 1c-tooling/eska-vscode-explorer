@@ -23,13 +23,28 @@ exports.run = async function () {
     await explorer.tooling.ensureFormatter(undefined, false);
     const project = explorer.status;
     assert.equal(project.text, `ESKA v${explorer.connection.state.version}`);
-    assert.equal(project.command, "eska.explorer.components");
+    assert.equal(project.command, "eska.explorer.updateTools");
     assert.equal("analyzerStatus" in explorer.tooling, false);
     assert.equal("formatterStatus" in explorer.tooling, false);
     for (const kind of ["project", "formatter", "analyzer"]) {
       assert.ok(project.tooltip.includes(explorer.tooling.states[kind].info.path));
     }
     workbench = await connectWorkbench(until);
+    const update = explorer.tooling.updateAll;
+    let updated = 0;
+    explorer.tooling.updateAll = async () => { updated++; };
+    try {
+      const button = await workbench.evaluate(`(() => {
+        const node = document.querySelector('.statusbar-item[id$="eska.explorer.connection"]');
+        const rect = node.getBoundingClientRect();
+        return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
+      })()`);
+      await workbench.click(button.x, button.y);
+      await until(() => updated === 1, "native status click starts the complete update");
+    }
+    finally { explorer.tooling.updateAll = update; }
+    assert.equal(updated, 1, "status invokes all components without opening a picker");
+    assert.equal(await workbench.evaluate('[...document.querySelectorAll(".quick-input-widget")].some(node => node.offsetParent !== null)'), false);
     const footer = await workbench.evaluate(`[...document.querySelectorAll(".statusbar-item")].filter(node => /eska\\.explorer\\.(connection|analyzer|formatter)$/.test(node.id)).map(node => ({id:node.id,text:node.textContent.trim()}))`);
     assert.equal(footer.length, 1); assert.ok(footer[0].id.endsWith("eska.explorer.connection"));
     const names = ["eska-project", "eska-fmt", "bsl-analyzer-app"];
@@ -37,7 +52,7 @@ exports.run = async function () {
     explorer.tooling.check = async (kind, manual = true) => { calls.push([kind, manual]); };
     try {
       for (const [index, kind] of ["project", "formatter", "analyzer"].entries()) {
-        const job = vscode.commands.executeCommand(project.command);
+        const job = vscode.commands.executeCommand("eska.explorer.components");
         await until(async () => await workbench.evaluate('document.querySelector(".quick-input-title")?.textContent === "ESKA"'), "component list opened");
         const rows = await workbench.evaluate('[...document.querySelectorAll(".quick-input-widget .quick-input-list .monaco-list-row")].map(node => node.textContent)');
         assert.equal(rows.length, 3);

@@ -26,7 +26,7 @@ async function fixture(t) {
 const fs = require('node:fs'), path = require('node:path');
 const file = path.join(__dirname, '..', 'fixture.json'), config = JSON.parse(fs.readFileSync(file, 'utf8'));
 const args = process.argv.slice(2), name = path.basename(__filename);
-if (args[0] === '--version') { console.log(name + ' ' + (name === 'eska-project' ? config.projectVersion ?? config.version : config.version)); }
+if (args[0] === '--version') { console.log(name + ' ' + (config.componentVersions?.[name] ?? (name === 'eska-project' ? config.projectVersion ?? config.version : config.version))); }
 else if (name === 'eska' && args.includes('--check')) console.log(JSON.stringify({ schemaVersion: 1, status: config.version === config.available ? 'up-to-date' : 'update-available',
   installedVersion: config.version, availableVersion: config.available, executable: { value: __filename, encoding: 'utf-8' }, method: 'installer', ...config.check }));
 else if (name === 'eska' && args[0] === 'update') { config.version = args[2]; fs.writeFileSync(file, JSON.stringify(config)); }
@@ -96,6 +96,14 @@ test("approval cannot overwrite a subsequently modified binary and a failed inst
 test("a successful task cannot claim an unchanged project was updated", { skip: process.platform === "win32" }, async t => {
   const f = await fixture(t), update = await inspectBundle(f.root);
   await assert.rejects(installBundle(f.root, update, async () => {}, () => {}), { code: "probe", detail: "bundle-version" });
+});
+
+test("a successful bundle update verifies every installed ESKA package", { skip: process.platform === "win32" }, async t => {
+  const f = await fixture(t);
+  f.config.componentVersions = { 'eska-check': '0.15.2' }; await f.save();
+  const update = await inspectBundle(f.root);
+  await assert.rejects(installBundle(f.root, update, (cli, args) => runProbe(cli, args, f.root, 10000, 65536), () => {}),
+    { code: 'probe', detail: 'bundle-version' });
 });
 
 /** Old five-command receipts remain recognized; new complete receipts additionally own formatter bytes. */

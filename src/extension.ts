@@ -105,7 +105,7 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
       this.additionalPolicyTrees = trees; this.support.setAdditionalTrees(trees, pending);
     }, () => this.support.invalidate(), text => this.output.info(text));
     this.status.name = "ESKA Explorer";
-    this.status.command = "eska.explorer.components";
+    this.status.command = "eska.explorer.updateTools";
     this.disposables.push(this.status, this.decorations, this.protectedSources);
     this.disposables.push(new ProtectedLanguageFeatures(error => this.output.warn(String(error))));
     this.filters = new ProjectFilters(context.workspaceState);
@@ -143,6 +143,7 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
       ["disconnect", () => this.disconnect()],
       ["showLog", () => this.output.show(true)],
       ["components", () => this.tooling.showComponents()],
+      ["updateTools", () => this.tooling.updateAll()],
       ["checkUpdates", () => this.backendKind() === "legacy" ? this.setup.check(true, "legacy") : this.tooling.check("project")],
       ["checkAnalyzerUpdates", () => this.tooling.check("analyzer")],
       ["checkFormatterUpdates", () => this.tooling.check("formatter")],
