@@ -536,11 +536,11 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
     } catch { /* Deleted selections and broken branches have no surviving native target. */ }
   }
 
-  /** Move a disappearing selection before VS Code discards it during the native tree refresh. */
-  private async repaint(entries?: TreeEntry[]): Promise<void> {
+  /** Restore a disappearing selection after the native refresh has discarded the hidden row. */
+  private async repaint(entries?: TreeEntry[], selected = this.view.selection[0]): Promise<void> {
     if (this.support.loading) return;
     const tree = this.tree;
-    const selected = this.view.selection[0];
+    let hidden: TreeEntry | undefined;
     if (tree && selected && "node" in selected && supportsRootFilter(selected.project)
       && this.hideEmptyGroups(selected.project)) {
       try {
@@ -554,17 +554,21 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
             break;
           }
         }
-        if (this.hiddenAncestor(selected, tree, true)) await this.selectRoot(selected.project, tree, selected);
+        if (this.hiddenAncestor(selected, tree, true)) hidden = selected;
       } catch { /* A broken branch still needs its normal error row rendered. */ }
     }
-    if (this.tree === tree) this.changed.fire(entries);
+    if (this.tree === tree) {
+      this.changed.fire(entries);
+      if (hidden && tree) await this.selectRoot(hidden.project, tree, hidden);
+    }
   }
 
   /** Do not steal focus from an editor when an empty selected section disappears. */
   private async selectRoot(project: ProjectTree, tree: MetadataTree, selected: TreeEntry): Promise<void> {
     try {
       const root = await tree.root(project);
-      if (this.tree === tree && this.view.selection[0] === selected) await this.view.reveal(root, { select: true, focus: false });
+      const current = this.view.selection[0];
+      if (this.tree === tree && (!current || current === selected)) await this.view.reveal(root, { select: true, focus: false });
     } catch (error) {
       this.output.info(`filter_selection_error code=${error instanceof ExplorerError ? error.code : "requestFailed"}`);
     }
@@ -575,9 +579,10 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
     const tree = this.tree;
     if (!tree || !entry || !("node" in entry) || entry.node.parent
       || !tree.projects.includes(entry.project) || !supportsRootFilter(entry.project)) return;
+    const selected = this.view.selection[0];
     try {
       await this.filters.set(entry.project, value);
-      if (this.tree === tree) await this.repaint([entry]);
+      if (this.tree === tree) await this.repaint([entry], selected);
     } catch {
       void vscode.window.showErrorMessage(this.text("filterSaveFailed"));
     }
