@@ -32,6 +32,7 @@ exports.run = async function () {
   assert.equal(process.env.ESKA_TEST_LANGUAGE, "1");
   assert.ok(fixture.languageSource, "prepare the complete source before launching the editor");
   const { file, text } = fixture.languageSource;
+  await vscode.workspace.getConfiguration("eska.explorer").update("executable", process.env.ESKA_TEST_BINARY, vscode.ConfigurationTarget.Workspace);
   const extension = vscode.extensions.all.find(value => value.packageJSON.name === "eska-explorer");
   const explorer = await extension.activate();
   await until(() => explorer.connection.state.kind === "ready", "metadata ready");
@@ -47,7 +48,7 @@ exports.run = async function () {
   const session = explorer.language.session, pid = session.owner.child.pid;
   const capabilities = session.client.initializeResult.capabilities;
   assert.equal(session.client.initializeResult.serverInfo.name, "bsl-analyzer");
-  assert.equal(session.client.initializeResult.serverInfo.version, "0.4.0");
+  assert.equal(session.client.initializeResult.serverInfo.version, explorer.tooling.states.analyzer.info.version);
   const generated = await fs.readFile(path.join(fixture.root, "bsl-analyzer.toml"), "utf8");
   assert.ok(generated.startsWith("# eska-generated "));
   assert.ok(session.lease);

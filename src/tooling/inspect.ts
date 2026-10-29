@@ -5,7 +5,7 @@ import { BASE_API_VERSION, ExplorerError, parseHandshake } from "../protocol.js"
 import { BackendProcess } from "../process.js";
 import { runProbe } from "../installation.js";
 import type { DiagnosticLog } from "../diagnostics.js";
-import { ANALYZER_VERSION, ToolFailure, analyzerContract, assertCurrent, componentContract, type ComponentContract, type ToolKind } from "./contracts.js";
+import { ToolFailure, analyzerContract, assertCurrent, componentContract, type ComponentContract, type ToolKind } from "./contracts.js";
 
 export interface ToolInfo { kind: ToolKind; path: string; version: string }
 
@@ -61,7 +61,7 @@ export async function inspectAnalyzer(path: string, cwd: string, signal?: AbortS
   let value: unknown;
   try { value = JSON.parse(contract.value.stdout); }
   catch { throw new ToolFailure("incompatible", "analyzer-json"); }
-  if (reported !== ANALYZER_VERSION || analyzerContract(value) !== reported) throw new ToolFailure("incompatible", "analyzer-version");
+  if (analyzerContract(value) !== reported) throw new ToolFailure("incompatible", "analyzer-version");
   return { kind: "analyzer", path, version: reported };
 }
 

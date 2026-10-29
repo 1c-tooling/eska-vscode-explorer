@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { compareVersions } from "../installation.js";
 import { isRecord } from "../protocol.js";
 import type { DiagnosticLog } from "../diagnostics.js";
-import { ANALYZER_VERSION, PROJECT_CONFIG, ToolFailure, assertCurrent, exactKeys, stableVersion, TOOL_NAMES, type NativeTarget, type ToolKind, type ComponentName } from "./contracts.js";
+import { PROJECT_CONFIG, ToolFailure, assertCurrent, exactKeys, stableVersion, TOOL_NAMES, type NativeTarget, type ToolKind, type ComponentName } from "./contracts.js";
 import { componentPackage, unpackComponent, type ComponentPackage } from "./archive.js";
 import { checksum, destination, fileHash, installationLock, readMetadata, recoverAbandonedClaim, writeJson } from "./files.js";
 import { inspectAnalyzer, inspectComponentContract, type ToolInfo } from "./inspect.js";
@@ -148,10 +148,15 @@ async function analyzerReceipt(root: string, target: NativeTarget): Promise<Anal
 /** The upstream app remains an independent raw executable; no ESKA package or source rebuild is substituted. */
 export async function installAnalyzer(root: string, data: Buffer, release: ToolRelease, notices: string, signal?: AbortSignal): Promise<ToolInfo> {
   verified(release, data, "analyzer");
-  if (release.version !== ANALYZER_VERSION) throw new ToolFailure("incompatible", "analyzer-version");
   root = toolRoot(root, "analyzer");
   return installationLock(root, signal, async () => {
     const stage = await mkdtemp(join(root, ".eska-component-"));
+    /** Bind both staged and published executables to the downloaded release identity. */
+    const inspect = async (path: string): Promise<ToolInfo> => {
+      const info = await inspectAnalyzer(path, stage, signal);
+      if (info.version !== release.version) throw new ToolFailure("incompatible", "analyzer-release-version");
+      return info;
+    };
     try {
       const space = await statfs(root);
       if (space.bavail * space.bsize < data.length * 2 + 16 * 1024 * 1024) throw new ToolFailure("io", "space");
@@ -168,8 +173,8 @@ export async function installAnalyzer(root: string, data: Buffer, release: ToolR
       await preflight(root, old, next.keys(), previous?.version, release, same);
       const path = join(root, name);
       // Reinstall retains its working directory until both read-only probe processes finish.
-      if (same) return await inspectAnalyzer(path, stage, signal);
-      await inspectAnalyzer(binary, stage, signal); assertCurrent(signal);
+      if (same) return await inspect(path);
+      await inspect(binary); assertCurrent(signal);
       const receiptName = "components/bsl-analyzer-app.json";
       await writeJson(join(stage, "receipt.json"), { schema_version: 1, method: "upstream-binary", version: release.version,
         target: release.target, sha256: release.asset!.sha256, size: data.length, files: Object.fromEntries(next) });
@@ -177,7 +182,7 @@ export async function installAnalyzer(root: string, data: Buffer, release: ToolR
       if (previous) await receiptHash(root, receiptName, old);
       let info: ToolInfo | undefined;
       await publishTransaction(root, stage, "bsl-analyzer-app", release.target, old, incoming, async () => {
-        await verifyFiles(root, next); info = await inspectAnalyzer(path, stage, signal);
+        await verifyFiles(root, next); info = await inspect(path);
       }, signal);
       return info!;
     } finally { await cleanStage(stage); }

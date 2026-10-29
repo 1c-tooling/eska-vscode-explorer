@@ -4,9 +4,9 @@ import { createHash } from "node:crypto";
 import { appendFile, copyFile, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { ANALYZER_VERSION } from "../out/tooling/contracts.js";
 import { downloadAsset, fetchBytes, hostTarget, parseRelease } from "../out/tooling/releases.js";
 import { installAnalyzer, installComponent } from "../out/tooling/install.js";
+import { inspectAnalyzer } from "../out/tooling/inspect.js";
 
 const repository = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const playground = resolve(process.env.ESKA_TEST_ROOT ?? join(repository, "../eska-playground"));
@@ -44,11 +44,12 @@ const project = await installComponent(prefix, projectData, projectRelease, () =
 assert.deepEqual(await installComponent(prefix, projectData, projectRelease, () => {}), project);
 let analyzerRelease, analyzerData;
 if (local && process.env.ESKA_TEST_ANALYZER_BINARY) {
+  const info = await inspectAnalyzer(process.env.ESKA_TEST_ANALYZER_BINARY, root);
   analyzerData = await readFile(process.env.ESKA_TEST_ANALYZER_BINARY);
-  analyzerRelease = { kind: "analyzer", target, version: ANALYZER_VERSION, asset: { name: "local-upstream",
+  analyzerRelease = { kind: "analyzer", target, version: info.version, asset: { name: "local-upstream",
     url: "https://example.invalid/local-upstream", size: analyzerData.length, sha256: createHash("sha256").update(analyzerData).digest("hex") } };
 } else {
-  const metadata = await fetchBytes(`https://api.github.com/repos/itrous/bsl-analyzer/releases/tags/v${ANALYZER_VERSION}`, 4 * 1024 * 1024);
+  const metadata = await fetchBytes("https://api.github.com/repos/itrous/bsl-analyzer/releases/latest", 4 * 1024 * 1024);
   analyzerRelease = parseRelease("analyzer", target, JSON.parse(metadata));
   assert.ok(analyzerRelease.asset, `Analyzer release cannot be installed: ${analyzerRelease.restriction}`);
   analyzerData = await downloadAsset(analyzerRelease.asset);

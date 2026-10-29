@@ -10,6 +10,7 @@ import { fileURLToPath } from "node:url";
 import { strictJson, relativePath, installationLock, fileHash, recoverAbandonedClaim } from "../out/tooling/files.js";
 import { installComponent, installAnalyzer, managedPath, managedVersion } from "../out/tooling/install.js";
 import { hostTarget, parseRelease } from "../out/tooling/releases.js";
+import { analyzerAsset } from "../out/tooling/contracts.js";
 import { runProbe } from "../out/installation.js";
 import { componentPackage, unpackComponent } from "../out/tooling/archive.js";
 import { publishTransaction, cleanStage, restoreTransaction } from "../out/tooling/transaction.js";
@@ -46,7 +47,15 @@ test("strict JSON and portable paths reject ambiguous installation instructions"
 test("release selection never substitutes the monolith or an unverified analyzer version/asset", () => {
   const target = hostTarget(), value = { draft: false, prerelease: false, tag_name: "v0.14.3", assets: [] };
   assert.match(parseRelease("project", target, value).restriction, /^missing-asset:/);
-  assert.equal(parseRelease("analyzer", target, { ...value, tag_name: "v0.4.1" }).restriction, "supported-analyzer-0.4.0");
+  const asset = analyzerAsset(target);
+  for (const version of ["0.4.1", "0.5.0", "1.2.3"]) {
+    const release = parseRelease("analyzer", target, { ...value, tag_name: `v${version}`, assets: [{ name: asset, size: 1,
+      state: "uploaded", digest: "sha256:" + "b".repeat(64),
+      browser_download_url: `https://github.com/itrous/bsl-analyzer/releases/download/v${version}/${asset}` }] });
+    assert.equal(release.version, version);
+    assert.equal(release.asset.sha256, "b".repeat(64));
+    assert.equal(release.restriction, undefined);
+  }
   const name = `eska-project-0.14.3-${target}.zip`;
   value.assets.push({ name, size: 1, state: "uploaded", digest: "sha256:" + "a".repeat(64), browser_download_url: `https://github.com/1c-tooling/eska/releases/download/v0.14.3/${name}` });
   assert.equal(parseRelease("project", target, value).asset.sha256, "a".repeat(64));
@@ -157,13 +166,14 @@ test("real upstream app installs independently and verifies all five notices wit
   skip: !process.env.ESKA_TEST_ANALYZER_BINARY,
 }, async t => {
   const root = await fixture(t), prefix = join(root, "install"), data = await readFile(process.env.ESKA_TEST_ANALYZER_BINARY);
+  const version = (await runProbe(process.env.ESKA_TEST_ANALYZER_BINARY, ["--version"], root, 10000, 65536)).stdout.trim().split(" ").at(-1);
   await mkdir(join(prefix, "bin"), { recursive: true }); await writeFile(join(prefix, "bin/eska-project"), "custom project");
-  const release = { kind: "analyzer", version: "0.4.0", target: hostTarget(), asset: { name: "upstream-fixture", url: "https://example.invalid/analyzer", sha256: createHash("sha256").update(data).digest("hex"), size: data.length } };
+  const release = { kind: "analyzer", version, target: hostTarget(), asset: { name: "upstream-fixture", url: "https://example.invalid/analyzer", sha256: createHash("sha256").update(data).digest("hex"), size: data.length } };
   const info = await installAnalyzer(prefix, data, release, join(repository, "resources/analyzer-notices"));
-  assert.equal(info.path, managedPath(prefix, "analyzer")); assert.equal(info.version, "0.4.0");
+  assert.equal(info.path, managedPath(prefix, "analyzer")); assert.equal(info.version, version);
   assert.equal(await readFile(join(prefix, "bin/eska-project"), "utf8"), "custom project");
-  assert.equal(await managedVersion(prefix, "analyzer"), "0.4.0");
-  assert.equal((await installAnalyzer(prefix, data, release, join(repository, "resources/analyzer-notices"))).version, "0.4.0");
+  assert.equal(await managedVersion(prefix, "analyzer"), version);
+  assert.equal((await installAnalyzer(prefix, data, release, join(repository, "resources/analyzer-notices"))).version, version);
   await writeFile(info.path, "user modification");
   await assert.rejects(installAnalyzer(prefix, data, release, join(repository, "resources/analyzer-notices")), { code: "modified" });
 });
@@ -174,6 +184,7 @@ test("backend preparation installs native tools and exports verified paths for s
   timeout: 30_000,
 }, async t => {
   const root = await fixture(t), binary = process.env.ESKA_TEST_BINARY;
+  const analyzerVersion = (await runProbe(process.env.ESKA_TEST_ANALYZER_BINARY, ["--version"], root, 10000, 65536)).stdout.trim().split(" ").at(-1);
   const contract = JSON.parse((await runProbe(binary, ["__tool-contract"], root, 10_000, 65536)).stdout);
   const packed = await archive(root, binary, contract), githubEnv = join(root, "github-env");
   await writeFile(join(root, "release.json"), JSON.stringify({ version: contract.version, target: contract.target,
@@ -184,13 +195,13 @@ test("backend preparation installs native tools and exports verified paths for s
     cwd: repository, env: { ...process.env, ESKA_TEST_ROOT: root, GITHUB_ENV: githubEnv }, timeout: 30_000,
   });
   const prepared = JSON.parse(stdout), prefix = join(prepared.root, "installation"), environment = prepared.environment;
-  assert.equal(prepared.project, contract.version); assert.equal(prepared.analyzer, "0.4.0");
+  assert.equal(prepared.project, contract.version); assert.equal(prepared.analyzer, analyzerVersion);
   assert.equal(environment.ESKA_TEST_ROOT, root);
   assert.equal(environment.ESKA_TEST_BINARY, managedPath(prefix, "project"));
   assert.equal(environment.ESKA_TEST_ANALYZER_BINARY, managedPath(prefix, "analyzer"));
   assert.equal(environment.ESKA_TEST_LANGUAGE, "1");
   assert.equal(await managedVersion(prefix, "project"), contract.version);
-  assert.equal(await managedVersion(prefix, "analyzer"), "0.4.0");
+  assert.equal(await managedVersion(prefix, "analyzer"), analyzerVersion);
   assert.deepEqual(JSON.parse(await readFile(join(prepared.root, "environment.json"), "utf8")), environment);
   assert.equal(await readFile(githubEnv, "utf8"), Object.entries(environment).map(([name, value]) => `${name}=${value}\n`).join(""));
   for (const name of bootstrap) assert.deepEqual(await readFile(join(environment.ESKA_TEST_PYTHON_TOOLS, name)), await readFile(join(root, name)));

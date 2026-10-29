@@ -2,8 +2,6 @@ import { isRecord } from "../protocol.js";
 
 export type ToolKind = "project" | "analyzer" | "formatter";
 export const TOOL_NAMES = { project: "eska-project", analyzer: "bsl-analyzer-app", formatter: "eska-fmt" } as const;
-export const ANALYZER_VERSION = "0.4.0";
-export const ANALYZER_CONTRACT = "3.5";
 export const PROJECT_CONFIG = "designer-xml-4";
 export const TARGETS = ["aarch64-apple-darwin", "aarch64-unknown-linux-gnu", "aarch64-unknown-linux-musl",
   "x86_64-apple-darwin", "x86_64-unknown-linux-gnu", "x86_64-unknown-linux-musl", "x86_64-pc-windows-msvc"] as const;
@@ -68,8 +66,9 @@ export function projectContract(value: unknown, expectedTarget?: NativeTarget): 
 
 /** A command name alone does not establish support for its required configuration/report flags. */
 export function analyzerContract(value: unknown): string {
-  if (!isRecord(value) || value.build_version !== ANALYZER_VERSION || value.contract_version !== ANALYZER_CONTRACT
+  if (!isRecord(value)
     || !isRecord(value.cli) || !Array.isArray(value.cli.commands)) throw new ToolFailure("incompatible", "analyzer-contract");
+  const version = stableVersion(value.build_version);
   const commands = value.cli.commands.filter(isRecord);
   const check = commands.find(command => command.name === "check-config");
   const analyze = commands.find(command => command.name === "analyze");
@@ -80,7 +79,7 @@ export function analyzerContract(value: unknown): string {
     || !analyze.args.some(arg => isRecord(arg) && arg.name === "format" && arg.takes_value === true && Array.isArray(arg.values) && arg.values.includes("jsonl"))) {
     throw new ToolFailure("incompatible", "analyzer-commands");
   }
-  return ANALYZER_VERSION;
+  return version;
 }
 
 /** Do not install a neighbouring architecture or silently assume a GNU runtime on musl. */
@@ -95,7 +94,7 @@ export function nativeTarget(platform: NodeJS.Platform, architecture: string, gl
   throw new ToolFailure("unsupportedTarget", `${platform}/${architecture}`);
 }
 
-/** Upstream 0.4.0 publishes only these three app assets, independently of ESKA's target list. */
+/** Resolve official app asset names independently of ESKA's component target list. */
 export function analyzerAsset(target: NativeTarget): string {
   switch (target) {
     case "x86_64-unknown-linux-gnu": return "bsl-analyzer-app-linux-amd64";

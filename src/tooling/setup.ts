@@ -326,7 +326,6 @@ export class ToolingSetup implements vscode.Disposable {
   private restriction(release: ToolRelease): string {
     const reason = release.restriction ?? "asset-integrity";
     if (reason.startsWith("missing-asset:")) return this.text("toolMissingAsset", reason.slice("missing-asset:".length));
-    if (reason.startsWith("supported-analyzer-")) return this.text("toolSupportedAnalyzer", reason.slice("supported-analyzer-".length));
     return this.text("toolAssetIntegrity");
   }
 
