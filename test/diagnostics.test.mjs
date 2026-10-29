@@ -40,7 +40,7 @@ test("late stderr survives the live cap and a crash retains its exit code", asyn
 });
 
 test("structured errors retain operation, source path and reason without copying response bodies", async t => {
-  const { peer, events } = recordingPeer(t);
+  const { peer, events } = recordingPeer(t, 10_000);
   await assert.rejects(peer.request('test/error', {}), { code: 'branchInvalid' });
   const failure = events.find(event => event.event === 'request_error');
   assert.equal(failure.kind, 'xml_invalid');

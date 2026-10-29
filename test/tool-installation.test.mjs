@@ -72,7 +72,7 @@ test("release selection never substitutes the monolith or an unverified analyzer
   assert.equal(parseRelease("project", target, value).restriction, "asset-integrity");
 });
 
-test("ZIP validation rejects traversal, links, undeclared members, lengths and corrupt payloads", async t => {
+test("ZIP validation rejects traversal, links, undeclared members, lengths and corrupt payloads", { timeout: 30_000 }, async t => {
   const root = await fixture(t), binary = join(root, "fixture"); await writeFile(binary, "fixture");
   const contract = { schema_version: 2, tool: "eska-project", target: hostTarget(), version: "0.14.3", config_schema: "designer-xml-4", bridge_schema: 1, metadata_api: { major: 1, minor: 12 } };
   const packed = await archive(root, binary, contract);
@@ -88,7 +88,7 @@ test("ZIP validation rejects traversal, links, undeclared members, lengths and c
   assert.throws(() => strictJson(Buffer.from([0x7b, 0x22, 0xff, 0x22, 0x3a, 0x31, 0x7d])));
 });
 
-test("shared claim excludes Python and Node writers and cannot evict a live owner", async t => {
+test("shared claim excludes Python and Node writers and cannot evict a live owner", { timeout: 30_000 }, async t => {
   const root = await fixture(t), prefix = join(root, "install");
   const program = "import sys\nsys.path.insert(0,sys.argv[1])\nfrom pathlib import Path\nfrom component_package import installation_lock\nwith installation_lock(Path(sys.argv[2])):\n print('locked',flush=True)\n input()";
   const child = spawn(python, ["-B", "-c", program, pythonTools, prefix], { stdio: ["pipe", "pipe", "pipe"] });
@@ -176,6 +176,7 @@ test("reinstall keeps the staging working directory alive through both delayed p
 
 test("real upstream app installs independently and verifies all five notices without replacing project", {
   skip: !process.env.ESKA_TEST_ANALYZER_BINARY,
+  timeout: 120_000,
 }, async t => {
   const root = await fixture(t), prefix = join(root, "install"), data = await readFile(process.env.ESKA_TEST_ANALYZER_BINARY);
   const version = (await runProbe(process.env.ESKA_TEST_ANALYZER_BINARY, ["--version"], root, 10000, 65536)).stdout.trim().split(" ").at(-1);
@@ -220,7 +221,9 @@ test("backend preparation installs native tools and exports verified paths for s
 });
 
 /** The real optional formatter archive uses the same producer/receipt boundary as the project component. */
-test("formatter archive installs alone, round-trips Python ownership and preserves its project sibling", { skip: !process.env.ESKA_TEST_FMT_BINARY || !process.env.ESKA_TEST_BINARY }, async t => {
+test("formatter archive installs alone, round-trips Python ownership and preserves its project sibling", {
+  skip: !process.env.ESKA_TEST_FMT_BINARY || !process.env.ESKA_TEST_BINARY, timeout: 120_000,
+}, async t => {
   const root = await fixture(t), prefix = join(root, "selected");
   const formatter = process.env.ESKA_TEST_FMT_BINARY;
   const contract = JSON.parse((await runProbe(formatter, ["__tool-contract"], root, 10_000, 65536)).stdout);
