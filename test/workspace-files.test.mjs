@@ -2,7 +2,7 @@ import { deferCleanup } from "./cleanup.mjs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, mkdir, writeFile, rm, symlink } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { join, relative, resolve } from "node:path";
 import { WorkspaceFiles, fileCategory } from "../out/workspace-files.js";
 
 /** Use the same decoded paths as a real IDE project, without coupling filesystem tests to a subprocess. */
@@ -199,4 +199,25 @@ test("member-only containers disappear and reappear when ordinary files change",
   const [container] = await files.children(restored);
   assert.deepEqual((await files.children(container)).map(entry => entry.path), [join(root, "src/assets")]);
   assert.ok(!watches.has(join(root, "src/assets")), "unrelated empty directories remain lazy and visible");
+});
+
+test("Windows drive spellings exclude source/member duplicates and reveal the same physical file", {
+  skip: process.platform !== "win32",
+}, async t => {
+  const root = await fixture(t);
+  if (!/^[a-z]:/i.test(root)) return t.skip("requires a drive-letter playground");
+  const local = root.replace(/^[a-z]:/i, drive => drive.toLowerCase());
+  const backend = root.replace(/^[a-z]:/i, drive => drive.toUpperCase());
+  const member = project(join(backend, "src/first"), join(local, "src/first/xml"), true);
+  await populate(root, ["eska.toml"]);
+  await populate(member.info.rootPath.value, ["eska.toml", "README.md"]);
+  await mkdir(member.info.sourcePath.value);
+  const { files } = model(t, [member], local);
+  assert.deepEqual((await files.groups()).map(group => group.kind), ["settings"], "member-only container is hidden");
+  assert.deepEqual((await files.groups(member)).map(group => group.kind), ["settings", "documentation"], "source is hidden");
+  const readme = join(local, "src/first/README.md");
+  const entry = await files.reveal(readme);
+  assert.ok(entry, "native editor spelling resolves its backend-owned row");
+  assert.equal(relative(entry.path, readme), "");
+  assert.equal(await files.reveal(join(member.info.sourcePath.value, "Configuration.xml")), undefined);
 });

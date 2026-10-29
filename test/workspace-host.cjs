@@ -60,8 +60,8 @@ exports.run = async function () {
   assert.ok(!otherFiles.some(row => row.path === path.join(fixture.root, "src")), "member-only src is hidden");
   const root = projects[0];
   // Match members by their authoritative physical paths.
-  const firstRoot = projects.find(row => row.project.info.rootPath.value === first.root);
-  assert.ok(firstRoot);
+  const firstRoot = projects.find(row => path.relative(path.toNamespacedPath(row.project.info.rootPath.value), path.toNamespacedPath(first.root)) === "");
+  assert.ok(firstRoot, JSON.stringify({ expected: first.root, roots: projects.map(row => row.project.info.rootPath) }));
   assert.equal(explorer.getParent(firstRoot), undefined);
   const sections = await explorer.getChildren(firstRoot);
   const groups = sections.filter(row => row.fileKind === "group");
@@ -88,7 +88,7 @@ exports.run = async function () {
     await vscode.commands.executeCommand(item.command.command, ...item.command.arguments);
     assert.equal(vscode.window.activeTextEditor.document.uri.fsPath, file);
     await vscode.commands.executeCommand("eska.explorer.revealActiveFile");
-    await until(() => explorer.view.selection[0]?.path === file, `reveal ${file}`);
+    await until(() => explorer.view.selection[0]?.path && path.relative(explorer.view.selection[0].path, file) === "", `reveal ${file}`);
   }
   const tree = explorer.tree;
   const secondRoot = projects.find(row => row !== firstRoot);
