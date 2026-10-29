@@ -1,3 +1,4 @@
+import { deferCleanup } from "./cleanup.mjs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, mkdir, writeFile, rm, symlink } from "node:fs/promises";
@@ -13,7 +14,7 @@ function project(root, source = join(root, "src"), member = false) {
 /** All files belong to this test's unique playground fixture. */
 async function fixture(t) {
   const root = await mkdtemp(join(process.env.ESKA_TEST_ROOT ?? resolve("../eska-playground"), "explorer-files-"));
-  t.after(() => rm(root, { recursive: true, force: true }));
+  deferCleanup(t, () => rm(root, { recursive: true, force: true }));
   return root;
 }
 
@@ -25,7 +26,7 @@ function model(t, projects, root) {
     watches.set(path, changed);
     return { dispose: () => watches.delete(path) };
   }, entry => changes.push(entry));
-  t.after(() => files.dispose());
+  deferCleanup(t, () => files.dispose());
   return { files, watches, changes };
 }
 
@@ -155,11 +156,11 @@ test("watch invalidation reveals new groups and removal; manual refresh recovers
   assert.equal(watches.size, 0);
 });
 
-test("directory links remain navigable but ancestor cycles terminate", { skip: process.platform === "win32" }, async t => {
+test("directory links remain navigable but ancestor cycles terminate", async t => {
   const root = await fixture(t);
   await populate(root, ["eska.toml"]);
   await mkdir(join(root, "assets"));
-  await symlink(root, join(root, "assets/back"));
+  await symlink(root, join(root, "assets/back"), process.platform === "win32" ? "junction" : "dir");
   const p = project(root);
   const { files } = model(t, [p], root);
   const other = (await files.groups()).find(group => group.kind === "other");

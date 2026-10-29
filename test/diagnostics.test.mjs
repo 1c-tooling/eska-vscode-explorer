@@ -67,6 +67,7 @@ test("file event samples and identities have fixed diagnostic bounds", () => {
 
 test("orderly shutdown is not reported as a connection failure", async t => {
   const { peer, events } = recordingPeer(t);
+  await peer.request('initialize', {}, 10_000);
   await peer.stop('disconnect');
   assert.equal(events.find(event => event.event === 'process_closed').exitCode, 0);
   assert.ok(!events.some(event => event.event === 'connection_failure'));

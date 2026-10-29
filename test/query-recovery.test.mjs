@@ -1,3 +1,4 @@
+import { deferCleanup } from "./cleanup.mjs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
@@ -26,7 +27,7 @@ function record() {
 /** Every test owns a unique sibling-playground directory; no project source is modified. */
 async function directory(t) {
   const path = await mkdtemp(join(process.env.ESKA_TEST_ROOT ?? resolve("../eska-playground"), "explorer-query-recovery-"));
-  t.after(() => rm(path, { recursive: true, force: true }));
+  deferCleanup(t, () => rm(path, { recursive: true, force: true }));
   await mkdir(join(path, "private")); await mkdir(join(path, "project"));
   return join(path, "private");
 }
@@ -34,7 +35,7 @@ async function directory(t) {
 /** A failed metadata open retains the initialized API 1.14 endpoint used by production recovery. */
 async function recovery(t, path, damaged = () => assert.fail("valid record"), options = {}) {
   const connection = new Connection("recovery-test", () => {}, () => {});
-  t.after(() => connection.dispose());
+  deferCleanup(t, () => connection.dispose());
   const target = { executable, path: options.cwd ?? join(dirname(path), "project"), name: "recovery", locale: options.locale ?? "en-US" };
   await connection.connect(target);
   assert.equal(connection.state.kind, "error");
@@ -95,7 +96,12 @@ test("damaged and aliased records are reported and preserved, without becoming s
   const path = await directory(t), bad = record(), alias = record();
   await writeFile(join(path, bad.id + ".json"), JSON.stringify({ ...bad, ownerText: "forged" }));
   await writeFile(join(path, "manual.json"), "private copy");
-  await symlink(join(path, "manual.json"), join(path, alias.id + ".json"));
+  if (process.platform === "win32") {
+    // Junctions exercise reparse-point rejection without requiring Windows symlink privileges.
+    const target = join(path, "manual-directory");
+    await mkdir(target);
+    await symlink(target, join(path, alias.id + ".json"), "junction");
+  } else await symlink(join(path, "manual.json"), join(path, alias.id + ".json"));
   const damaged = [];
   const { store } = await recovery(t, path, id => damaged.push(id));
   assert.deepEqual(await store.records(), []);
@@ -152,7 +158,7 @@ test("a failed storage location is an explicit error and never writes into a pro
 });
 
 // Three 8 MiB control-character components cross the real framed pipe in both directions.
-test("full-size unfinished UTF-8 drafts survive recovery without JSON escaping exceeding the file budget", { ...integration, timeout: 30_000 }, async t => {
+test("full-size unfinished UTF-8 drafts survive recovery without JSON escaping exceeding the file budget", { ...integration, timeout: process.platform === "win32" ? 120_000 : 30_000 }, async t => {
   const path = await directory(t), value = record();
   value.ownerText = "\0".repeat(8388608);
   value.ownerSnapshot = querySnapshot(value.ownerText);

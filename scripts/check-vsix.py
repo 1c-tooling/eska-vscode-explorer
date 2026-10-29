@@ -10,7 +10,7 @@ import zipfile
 def check(archive, source=None):
     """Reject missing runtime assets, accidental source/dependency inclusion and mismatched identity."""
     root = (source or Path(__file__).resolve().parents[1]).resolve()
-    manifest = json.loads((root / 'package.json').read_text())
+    manifest = json.loads((root / 'package.json').read_text(encoding='utf-8'))
     with zipfile.ZipFile(archive) as package:
         names = package.namelist()
         assert len(names) == len(set(names)), 'Duplicate ZIP entries'

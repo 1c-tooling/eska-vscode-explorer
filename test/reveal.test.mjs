@@ -1,3 +1,4 @@
+import { deferCleanup } from "./cleanup.mjs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, rm, readFile, writeFile } from "node:fs/promises";
@@ -27,13 +28,13 @@ test("file containment rejects sibling-prefix folders", () => {
 /** Incomplete navigation paths must be removed when their owner disappears from a later complete listing. */
 test("revealed paths are pruned and malformed ancestry cannot corrupt the tree", { skip: !executable }, async t => {
   const root = await mkdtemp(join(process.env.ESKA_TEST_ROOT ?? resolve("../eska-playground"), "explorer-reveal-prune-"));
-  t.after(() => rm(root, { recursive: true, force: true }));
+  deferCleanup(t, () => rm(root, { recursive: true, force: true }));
   const fixture = await createTreeProject(join(root, "project"));
   const connection = new Connection("test", () => {}, () => {});
-  t.after(() => connection.dispose());
+  deferCleanup(t, () => connection.dispose());
   await connection.connect({ executable, path: fixture.root, name: "test", locale: "en-US" });
   const tree = new MetadataTree(connection, connection.state.session, () => {}, () => {});
-  t.after(() => tree.dispose());
+  deferCleanup(t, () => tree.dispose());
   const module = await revealFile(tree, fixture.module);
   const project = module.project, before = [...project.nodes];
   assert.throws(() => tree.acceptAncestry(project, [module.node]), { code: "protocolInvalid" });
@@ -52,9 +53,9 @@ test("revealed paths are pruned and malformed ancestry cannot corrupt the tree",
 
 test("reverse navigation resolves cold branches without a full search index", { skip: !executable }, async t => {
   const root = await mkdtemp(join(process.env.ESKA_TEST_ROOT ?? resolve("../eska-playground"), "explorer-reveal-"));
-  t.after(() => rm(root, { recursive: true, force: true }));
+  deferCleanup(t, () => rm(root, { recursive: true, force: true }));
   const connection = new Connection("0.0.0", () => {}, () => {});
-  t.after(() => connection.dispose());
+  deferCleanup(t, () => connection.dispose());
   for (const type of ["configuration", "extension", "processing", "report"]) {
     const fixture = await createTreeProject(join(root, type), type);
     if (type === "configuration" || type === "extension") await addCommonModules(fixture);

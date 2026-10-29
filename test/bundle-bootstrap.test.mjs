@@ -1,3 +1,4 @@
+import { deferCleanup } from "./cleanup.mjs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
@@ -11,7 +12,7 @@ const names = ["eska", "eska-project", "eska-check", "eska-build", "eska-vcs", "
 /** Exercise the real prefix/receipt checks and executable probes inside an isolated user home. */
 async function fixture(t) {
   const home = await mkdtemp(join(process.env.ESKA_TEST_ROOT ?? resolve("../eska-playground"), "explorer-bootstrap-"));
-  t.after(() => rm(home, { recursive: true, force: true }));
+  deferCleanup(t, () => rm(home, { recursive: true, force: true }));
   const root = join(home, ".eska"), metadata = join(home, "config"), require = createRequire(new URL("../out/tooling/bundle.js", import.meta.url));
   let disposed = 0, downloads = 0;
   const installation = { ...require("../installation.js"), async bootstrapCommand() {

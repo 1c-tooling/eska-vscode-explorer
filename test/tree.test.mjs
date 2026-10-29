@@ -1,6 +1,7 @@
+import { deferCleanup } from "./cleanup.mjs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, writeFile, rm, readFile, symlink } from "node:fs/promises";
+import { mkdir, mkdtemp, writeFile, rm, readFile, symlink } from "node:fs/promises";
 import { resolve, join, isAbsolute } from "node:path";
 import { Connection } from "../out/connection.js";
 import { MetadataTree, nodeKey, parseNode } from "../out/tree.js";
@@ -36,13 +37,13 @@ test("opaque node identities are independent of JSON property order", () => {
 /** A branch that becomes empty has no native expander, so pruning cannot depend on another children request. */
 test("empty groups release removed descendants across repeated external edits", { skip: !executable }, async t => {
   const root = await mkdtemp(join(process.env.ESKA_TEST_ROOT ?? resolve("../eska-playground"), "explorer-prune-"));
-  t.after(() => rm(root, { recursive: true, force: true }));
+  deferCleanup(t, () => rm(root, { recursive: true, force: true }));
   const fixture = await createTreeProject(join(root, "project"));
   const connection = new Connection("test", () => {}, () => {});
-  t.after(() => connection.dispose());
+  deferCleanup(t, () => connection.dispose());
   await connection.connect({ executable, path: fixture.root, name: "test", locale: "en-US" });
   const tree = new MetadataTree(connection, connection.state.session, () => {}, () => {});
-  t.after(() => tree.dispose());
+  deferCleanup(t, () => tree.dispose());
   const [top] = await tree.roots();
   const owner = named(await tree.children(named(await tree.children(top), "Справочники")), "Товары");
   const sizes = [];
@@ -67,9 +68,9 @@ test("real backend lazy trees, source positions and local invalidation for all f
   const playground = process.env.ESKA_TEST_ROOT ?? resolve("../eska-playground");
   assert.ok(isAbsolute(playground) && isAbsolute(executable));
   const root = await mkdtemp(join(playground, "explorer-tree-"));
-  t.after(() => rm(root, { recursive: true, force: true }));
+  deferCleanup(t, () => rm(root, { recursive: true, force: true }));
   const connection = new Connection("0.0.0", () => {}, () => {});
-  t.after(() => connection.dispose());
+  deferCleanup(t, () => connection.dispose());
   for (const type of ["configuration", "extension", "processing", "report"]) {
     const fixture = await createTreeProject(join(root, type), type);
     await connection.connect({ executable, path: fixture.root, name: "test", locale: "ru-RU" });
@@ -137,10 +138,14 @@ test("real backend lazy trees, source positions and local invalidation for all f
       named(await tree.children(object), "Реквизиты");
     }
     await assert.rejects(existingSource(object.project.info.sourcePath, { value: "../eska.toml", encoding: "utf-8" }), { code: "sourceMissing" });
-    const outside = join(fixture.root, "outside.xml");
+    const directory = join(fixture.root, "outside");
+    await mkdir(directory);
+    const outside = join(directory, "outside.xml");
     await writeFile(outside, "outside");
-    await symlink(outside, join(fixture.source, "escape.xml"));
-    await assert.rejects(existingSource(object.project.info.sourcePath, { value: "escape.xml", encoding: "utf-8" }), { code: "sourceMissing" });
+    const escape = process.platform === "win32" ? "escape/outside.xml" : "escape.xml";
+    if (process.platform === "win32") await symlink(directory, join(fixture.source, "escape"), "junction");
+    else await symlink(outside, join(fixture.source, escape));
+    await assert.rejects(existingSource(object.project.info.sourcePath, { value: escape, encoding: "utf-8" }), { code: "sourceMissing" });
     tree.dispose();
   }
 });
@@ -209,15 +214,15 @@ test("an observed generation change retries queued reads without recursively ref
 
 test("common modules open existing BSL directly and retain explicit XML access", { skip: !executable }, async (t) => {
   const root = await mkdtemp(join(process.env.ESKA_TEST_ROOT ?? resolve("../eska-playground"), "explorer-common-"));
-  t.after(() => rm(root, { recursive: true, force: true }));
+  deferCleanup(t, () => rm(root, { recursive: true, force: true }));
   const fixture = await createTreeProject(root);
   await addCommonModules(fixture);
   const connection = new Connection("0.0.0", () => {}, () => {});
-  t.after(() => connection.dispose());
+  deferCleanup(t, () => connection.dispose());
   await connection.connect({ executable, path: root, name: "test", locale: "ru-RU" });
   assert.equal(connection.state.kind, "ready");
   const tree = new MetadataTree(connection, connection.state.session, () => {}, () => {});
-  t.after(() => tree.dispose());
+  deferCleanup(t, () => tree.dispose());
   const [top] = await tree.roots();
   const common = named(await tree.children(top), "Общие");
   const group = named(await tree.children(common), "Общие модули");
@@ -240,15 +245,15 @@ test("common modules open existing BSL directly and retain explicit XML access",
 /** The Modules group keeps activation stable when its BSL files appear or disappear. */
 test("objects with a Modules group open properties regardless of BSL count", { skip: !executable }, async t => {
   const root = await mkdtemp(join(process.env.ESKA_TEST_ROOT ?? resolve("../eska-playground"), "explorer-activation-"));
-  t.after(() => rm(root, { recursive: true, force: true }));
+  deferCleanup(t, () => rm(root, { recursive: true, force: true }));
   const fixture = await createTreeProject(root);
   const manager = join(fixture.source, "Catalogs", "Товары", "Ext", "ManagerModule.bsl");
   await writeFile(manager, "// manager\r\n");
   const connection = new Connection("0.0.0", () => {}, () => {});
-  t.after(() => connection.dispose());
+  deferCleanup(t, () => connection.dispose());
   await connection.connect({ executable, path: root, name: "test", locale: "ru-RU" });
   const tree = new MetadataTree(connection, connection.state.session, () => {}, () => {});
-  t.after(() => tree.dispose());
+  deferCleanup(t, () => tree.dispose());
   const [top] = await tree.roots();
   const catalogs = named(await tree.children(top), "Справочники");
   const objects = await tree.children(catalogs);

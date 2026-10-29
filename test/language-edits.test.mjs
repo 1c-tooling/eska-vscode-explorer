@@ -1,3 +1,4 @@
+import { deferCleanup } from "./cleanup.mjs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, mkdir, readFile, writeFile, symlink, rm } from "node:fs/promises";
@@ -28,7 +29,7 @@ class Uri {
 /** Editor primitives are mocked, but canonical paths, symlinks, file metadata and I/O races use real owned files. */
 async function fixture(t) {
   const root = await mkdtemp(join(process.env.ESKA_TEST_ROOT ?? resolve("../eska-playground"), "explorer-language-edits-")), source = join(root, "src");
-  t.after(() => rm(root, { recursive: true, force: true })); await mkdir(source);
+  deferCleanup(t, () => rm(root, { recursive: true, force: true })); await mkdir(source);
   const files = [join(source, "a.bsl"), join(source, "b.bsl")], text = "Переменная = 1;\n";
   await Promise.all(files.map(file => writeFile(file, text)));
   const docs = new Map(), commands = new Map(), applications = [], warnings = [], policy = new Set(), readonly = new Set();
@@ -68,7 +69,7 @@ async function fixture(t) {
   })(
     name => name === "vscode" ? vscode : name === "../editor-policy.js" ? policyModule.exports : require(name), adapter, adapter.exports);
   const edits = new adapter.exports.LanguageEdits(client, { sources: [{ source }] }, support, () => active, () => {}, () => model);
-  t.after(() => edits.shutdown());
+  deferCleanup(t, () => edits.shutdown());
   const change = (index, version = opened[index].version) => ({ textDocument: { uri: opened[index].uri.toString(), version },
     edits: [{ range: { start: { line: 0, character: 0 }, end: { line: 0, character: 10 } }, newText: "Значение" }] });
   return { root, source, files, opened, edits, middleware: edits.middleware(), applications, warnings, policy, readonly, reply, commands, capabilities, change,

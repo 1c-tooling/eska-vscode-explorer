@@ -1,3 +1,4 @@
+import { deferCleanup } from "./cleanup.mjs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
@@ -39,7 +40,7 @@ function replace(t, object, key, value) {
   if (!saved) {
     saved = [];
     restorations.set(t, saved);
-    t.after(() => { for (const restore of saved.reverse()) restore(); });
+    deferCleanup(t, () => { for (const restore of saved.reverse()) restore(); });
   }
   const prior = object[key];
   saved.push(() => { object[key] = prior; });
@@ -49,14 +50,14 @@ function replace(t, object, key, value) {
 /** No UI test reads or mutates the user's global installation or persistent update timestamps. */
 async function fixture(t) {
   const home = await mkdtemp(join(process.env.ESKA_TEST_ROOT ?? resolve("../eska-playground"), "explorer-tool-ui-"));
-  t.after(() => rm(home, { recursive: true, force: true }));
+  deferCleanup(t, () => rm(home, { recursive: true, force: true }));
   replace(t, os, "homedir", () => home);
   ui.approved = false; ui.cancelled = false; ui.messages = []; ui.settings = {}; ui.bars = []; ui.picks = []; ui.choices = []; ui.commands = [];
   const timestamps = new Map(), requests = [], actions = [], terminalPaths = [];
   const setup = new ToolingSetup({ extensionPath: resolve("."), environmentVariableCollection: { prepend(...args) { terminalPaths.push(args); } }, globalState: {
     get(key, fallback) { return timestamps.get(key) ?? fallback; }, async update(key, value) { timestamps.set(key, value); },
   } }, () => {}, () => {}, async kind => actions.push(["stop", kind]), async kind => actions.push(["restart", kind]));
-  t.after(() => setup.shutdown());
+  deferCleanup(t, () => setup.shutdown());
   replace(t, installation, "managedVersion", async (_root, kind) => kind === "project" ? "0.14.3" : "0.4.0");
   replace(t, releases, "latestToolRelease", async kind => { requests.push(kind); return { kind, version: kind === "project" ? "0.14.3" : "0.4.0", target: releases.hostTarget() }; });
   return { setup, timestamps, requests, actions, terminalPaths };

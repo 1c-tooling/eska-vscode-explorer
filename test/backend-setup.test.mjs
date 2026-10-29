@@ -1,3 +1,4 @@
+import { deferCleanup } from "./cleanup.mjs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
@@ -46,19 +47,19 @@ const { BackendSetup } = adapter.exports;
 function replace(t, target, name, value) {
   const previous = target[name];
   target[name] = value;
-  t.after(() => { target[name] = previous; });
+  deferCleanup(t, () => { target[name] = previous; });
 }
 
 /** Every simulated installation writes only into an isolated playground home. */
 async function fixture(t) {
   const root = await mkdtemp(join(process.env.ESKA_TEST_ROOT ?? resolve("../eska-playground"), "explorer-setup-"));
-  t.after(() => rm(root, { recursive: true, force: true }));
+  deferCleanup(t, () => rm(root, { recursive: true, force: true }));
   replace(t, os, "homedir", () => root);
   ui.errors = []; ui.tasks = []; ui.paths = []; ui.approved = false; ui.exitCode = 0;
   const events = [];
   const context = { environmentVariableCollection: { prepend(...args) { ui.paths.push(args); } } };
   const setup = new BackendSetup(context, () => {}, async () => { events.push("disconnect"); }, async () => { events.push("reconnect"); });
-  t.after(() => setup.dispose());
+  deferCleanup(t, () => setup.dispose());
   return { root, setup, events };
 }
 
