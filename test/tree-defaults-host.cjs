@@ -16,6 +16,7 @@ async function until(predicate) {
 exports.run = async function () {
   const fixture = JSON.parse(process.env.ESKA_HOST_FIXTURE);
   const { createTreeProject } = await import("./fixture.mjs");
+  await vscode.workspace.getConfiguration("eska.explorer").update("executable", process.env.ESKA_TEST_BINARY, vscode.ConfigurationTarget.Workspace);
   const explorer = await vscode.extensions.all.find(value => value.packageJSON.name === "eska-explorer").activate();
   const manifest = path.join(fixture.root, "eska.toml");
   for (const type of ["configuration", "extension", "report", "processing"]) {
@@ -30,6 +31,13 @@ exports.run = async function () {
     assert.ok(root, type);
     assert.equal(root.project.info.scope.kind, "standalone");
     assert.equal(explorer.getTreeItem(root).collapsibleState, vscode.TreeItemCollapsibleState.Expanded, type);
+    if (type === "report" || type === "processing") {
+      const children = await explorer.getChildren(root);
+      assert.equal(children[0].node.id.kind, "module");
+      assert.equal(children[0].node.id.role, "object");
+      assert.equal(explorer.getParent(children[0]), root);
+      assert.ok(!children.some(row => row.node?.id.collection?.kind === "modules"));
+    }
   }
   await vscode.commands.executeCommand("eska.explorer.projects.focus");
   const root = (await explorer.getChildren()).find(row => row.node);
