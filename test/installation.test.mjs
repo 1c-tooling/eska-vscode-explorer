@@ -14,14 +14,15 @@ async function fixture(t) {
 
 test("stable release selection rejects preview versions, foreign installers and malformed numeric versions", () => {
   const release = { tag_name: "v0.11.1", draft: false, prerelease: false, assets: [
-    { name: "eska-installer.sh", browser_download_url: "https://github.com/1c-tooling/eska/releases/download/v0.11.1/eska-installer.sh" },
-    { name: "eska-installer.ps1", browser_download_url: "https://github.com/1c-tooling/eska/releases/download/v0.11.1/eska-installer.ps1" },
+    { name: "eska-installer.sh", browser_download_url: "https://github.com/odineska/eska/releases/download/v0.11.1/eska-installer.sh" },
+    { name: "eska-installer.ps1", browser_download_url: "https://github.com/odineska/eska/releases/download/v0.11.1/eska-installer.ps1" },
   ] };
   assert.equal(parseRelease(release, "linux").version, "0.11.1");
   assert.ok(parseRelease(release, "win32").installer.endsWith(".ps1"));
   assert.equal(compareVersions("0.11.10", "0.11.2"), 1);
   for (const version of ["0.11.1-rc.1", "0.11.1;echo", "0.11.01", "0.11.9007199254740992"]) assert.throws(() => compareVersions(version, "0.11.0"));
   for (const bad of [{ ...release, draft: true }, { ...release, prerelease: true }, { ...release, assets: [] },
+    { ...release, assets: [{ name: "eska-installer.sh", browser_download_url: release.assets[0].browser_download_url.replace("/odineska/", "/1c-tooling/") }] },
     { ...release, assets: [{ name: "eska-installer.sh", browser_download_url: "https://example.com/install.sh" }] }]) {
     assert.throws(() => parseRelease(bad, "linux"));
   }

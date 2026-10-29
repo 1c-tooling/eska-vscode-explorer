@@ -14,7 +14,7 @@ import zipfile
 from urllib.error import HTTPError
 from urllib.request import urlopen
 
-REPOSITORY = "1c-tooling/eska-vscode-explorer"
+REPOSITORY = "odineska/eska-vscode-explorer"
 
 
 def run(*args):

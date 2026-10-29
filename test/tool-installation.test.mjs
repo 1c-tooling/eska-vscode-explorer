@@ -57,8 +57,14 @@ test("release selection never substitutes the monolith or an unverified analyzer
     assert.equal(release.restriction, undefined);
   }
   const name = `eska-project-0.14.3-${target}.zip`;
-  value.assets.push({ name, size: 1, state: "uploaded", digest: "sha256:" + "a".repeat(64), browser_download_url: `https://github.com/1c-tooling/eska/releases/download/v0.14.3/${name}` });
+  value.assets.push({ name, size: 1, state: "uploaded", digest: "sha256:" + "a".repeat(64), browser_download_url: `https://github.com/odineska/eska/releases/download/v0.14.3/${name}` });
   assert.equal(parseRelease("project", target, value).asset.sha256, "a".repeat(64));
+  const officialUrl = value.assets[0].browser_download_url;
+  for (const owner of ["1c-tooling", "unrelated-owner"]) {
+    value.assets[0].browser_download_url = officialUrl.replace("/odineska/", `/${owner}/`);
+    assert.equal(parseRelease("project", target, value).restriction, "asset-integrity");
+  }
+  value.assets[0].browser_download_url = officialUrl;
   value.assets[0].digest = null;
   assert.equal(parseRelease("project", target, value).restriction, "asset-integrity");
 });
@@ -235,6 +241,6 @@ test("formatter release selects only the exact independent asset", () => {
   const target=hostTarget(),name=`eska-fmt-0.18.0-${target}.zip`;
   const release={draft:false,prerelease:false,tag_name:"v0.18.0",assets:[]};
   assert.equal(parseRelease("formatter",target,release).restriction,`missing-asset:${name}`);
-  release.assets.push({name,size:100,state:"uploaded",digest:"sha256:"+"a".repeat(64),browser_download_url:`https://github.com/1c-tooling/eska/releases/download/v0.18.0/${name}`});
+  release.assets.push({name,size:100,state:"uploaded",digest:"sha256:"+"a".repeat(64),browser_download_url:`https://github.com/odineska/eska/releases/download/v0.18.0/${name}`});
   assert.equal(parseRelease("formatter",target,release).asset.name,name);
 });

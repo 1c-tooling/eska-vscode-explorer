@@ -24,7 +24,7 @@ async function fixture(t) {
     process: { platform: process.platform, env: { AXOUPDATER_CONFIG_PATH: metadata } },
   })(name => name === "node:os" ? { homedir: () => home } : name === "../installation.js" ? installation
     : name === "./inspect.js" ? { async inspectProject(path) { return { kind: "project", path, version: "0.19.0" }; } } : require(name), module, module.exports);
-  const release = { version: "0.19.0", installer: "https://github.com/1c-tooling/eska/releases/download/v0.19.0/eska-installer.sh" };
+  const release = { version: "0.19.0", installer: "https://github.com/odineska/eska/releases/download/v0.19.0/eska-installer.sh" };
   const execute = async command => {
     assert.equal(command.env.ESKA_INSTALL_DIR, join(root, "bin"));
     await mkdir(join(root, "bin"), { recursive: true }); await mkdir(metadata);
