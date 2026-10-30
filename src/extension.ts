@@ -465,6 +465,13 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
       if (this.tree !== tree || this.disposed) return;
       if (!entry) { void vscode.window.showInformationMessage(this.text("fileNotInTree")); return; }
       await vscode.commands.executeCommand("eska.explorer.projects.focus");
+      // A cold Windows view can still be loading its expanded root when descendant reveal arrives.
+      const owner = "node" in entry ? entry : "owner" in entry ? entry.owner : undefined;
+      if (owner) {
+        const root = await tree.root(owner.project);
+        if (this.tree !== tree || this.disposed) return;
+        await this.view.reveal(root, { expand: true, select: false, focus: false });
+      }
       if (this.tree === tree && !this.disposed) await this.view.reveal(entry, { select: true, focus: true });
     } catch (error) {
       if (this.tree === tree && !this.disposed) this.showError(error instanceof ExplorerError ? error : new ExplorerError("sourceMissing"));

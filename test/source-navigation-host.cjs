@@ -29,19 +29,36 @@ exports.run = async function () {
   assert.equal(await editor.edit(edit => edit.insert(new vscode.Position(0, 0), "// unsaved navigation\n")), true);
   const dirty = document.getText(), version = document.version;
   const methods = [];
+  const events = [];
+  const visibility = explorer.view.onDidChangeVisibility(event => events.push({ visible: event.visible, time: performance.now() }));
+  const refreshes = explorer.changed.event(entry => events.push({ refresh: entry?.key ?? "roots", time: performance.now() }));
+  const selections = explorer.view.onDidChangeSelection(event => events.push({ selection: event.selection.map(row => row.key), time: performance.now() }));
   const errors = [];
   const showError = explorer.showError.bind(explorer);
   explorer.showError = error => { errors.push({code:error.code,domain:error.domain,details:error.details}); showError(error); };
   const request = explorer.connection.request.bind(explorer.connection);
-  explorer.connection.request = (session, method, ...args) => { methods.push(method); return request(session, method, ...args); };
+  explorer.connection.request = (session, method, ...args) => {
+    methods.push(method);
+    const time = performance.now(), pending = request(session, method, ...args);
+    void pending.then(() => events.push({ method, elapsed: performance.now() - time }), error => events.push({ method, error: String(error) }));
+    return pending;
+  };
   const started = performance.now();
   await vscode.commands.executeCommand("eska.explorer.revealActiveFile");
   try { await until(() => explorer.view.selection[0]?.node?.id.kind === "module", "native tree selected the module"); }
   catch (error) {
-    await fs.writeFile(path.join(fixture.root, "host-result.json"), JSON.stringify({passed:false,error:String(error.stack??error),methods,errors,
-      connection:explorer.connection.state.kind,selection:explorer.view.selection.map(row=>({key:row.key,node:row.node?.id})),
-      active:vscode.window.activeTextEditor?.document.uri.toString()}));
+    await fs.writeFile(path.join(fixture.root, "host-result.json"), JSON.stringify({ passed: false,
+      error: String(error.stack ?? error), methods, errors, events, visible: explorer.view.visible,
+      roots: explorer.tree.projects.map(project => ({ dirty: project.rootDirty, nodes: project.nodes.size,
+        children: project.root?.children?.map(row => row.node.id) })),
+      connection: explorer.connection.state.kind,
+      selection: explorer.view.selection.map(row => ({ key: row.key, node: row.node?.id })),
+      active: vscode.window.activeTextEditor?.document.uri.toString() }));
     throw error;
+  } finally {
+    visibility.dispose();
+    refreshes.dispose();
+    selections.dispose();
   }
   const elapsedMs = performance.now() - started;
   assert.equal(explorer.view.selection[0].node.id.role, "object");
