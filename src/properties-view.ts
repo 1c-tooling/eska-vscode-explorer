@@ -473,7 +473,8 @@ class PropertyTab implements vscode.Disposable {
     const linked = direction ? (direction === "undo" ? schema.undoLinked : schema.redoLinked) : field?.linked;
     if (linked && this.dirtyProject()) { this.editorNotice("propertyLinkedDirty"); return; }
     const path = resolve(nativePath(this.entry.project.info.sourcePath), nativePath(schema.source));
-    if (vscode.workspace.textDocuments.some(document => document.isDirty && resolve(document.uri.fsPath) === path)) {
+    if (vscode.workspace.textDocuments.some(document => document.isDirty && document.uri.scheme === "file"
+      && relative(path, resolve(document.uri.fsPath)) === "")) {
       this.editorNotice("propertyDirtyXml"); return;
     }
     this.editor.busy = true;

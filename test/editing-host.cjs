@@ -58,6 +58,34 @@ exports.run = async function () {
     const index = tab.state.editing.schema.fields.findIndex(field => field.path[0].key.name === 'Comment');
     const selector = `document.getElementById('edit-${index}')`;
     await until(() => dom.evaluate(`Boolean(${selector})`), 'edit controls');
+    const document = await vscode.workspace.openTextDocument(vscode.Uri.file(file));
+    const cleanBuffer = document.getText();
+    const unsavedBuffer = cleanBuffer + (document.eol === vscode.EndOfLine.CRLF ? '\r\n' : '\n') + '<!-- unsaved XML editor -->';
+    async function replaceBuffer(text) {
+      const edit = new vscode.WorkspaceEdit();
+      edit.replace(document.uri, new vscode.Range(document.positionAt(0), document.positionAt(document.getText().length)), text);
+      assert.equal(await vscode.workspace.applyEdit(edit), true);
+    }
+    await replaceBuffer(unsavedBuffer);
+    assert.equal(document.isDirty, true);
+    await tab.checkExternalChange();
+    await dom.rendered();
+    const beforeDirtyCommit = editEvents.length;
+    await dom.evaluate(`(()=>{const input=${selector};input.value='Must not overwrite unsaved XML';input.dispatchEvent(new Event('input'));input.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}));})()`);
+    await until(() => editEvents.slice(beforeDirtyCommit).some(event => event.stage === 'end' && event.type === 'commit'), 'dirty XML proposal completed');
+    assert.equal(writes.at(-1).checkingExternal, false, 'the dirty editor guard is exercised outside a background check');
+    assert.equal(await fs.readFile(file, 'utf8'), original, 'property autosave preserves the file while its XML editor is dirty');
+    assert.equal(document.getText(), unsavedBuffer, 'property autosave preserves unsaved XML edits');
+    assert.equal(document.isDirty, true);
+    await dom.rendered();
+    await dom.evaluate(`(()=>{const input=${selector};input.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));})()`);
+    await until(() => Object.keys(tab.state.editing.drafts).length === 0, 'dirty XML proposal cancelled');
+    await replaceBuffer(cleanBuffer);
+    assert.equal(await document.save(), true);
+    assert.equal(document.isDirty, false);
+    assert.equal(await fs.readFile(file, 'utf8'), original);
+    await tab.checkExternalChange();
+    await dom.rendered();
     await dom.evaluate(`(()=>{const input=${selector}; input.focus();input.value='Changed <field>';input.dispatchEvent(new Event('input'));input.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}));})()`);
     await until(async () => !tab.state.editing.busy && (await fs.readFile(file, 'utf8')).includes('Changed &lt;field&gt;'), 'text autosave');
     assert.equal(await fs.readFile(file, 'utf8'), original.replace('😀 Кириллица', 'Changed &lt;field&gt;'));
