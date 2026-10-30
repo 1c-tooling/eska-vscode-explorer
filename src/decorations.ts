@@ -177,6 +177,7 @@ export class GitDecorations implements vscode.FileDecorationProvider, vscode.Dis
 
   /** Use server-provided source paths for exact files and descriptor-owned directories. */
   private async resolve(tree: MetadataTree, entry: Entry, epoch: number): Promise<vscode.FileDecoration | undefined> {
+    await tree.synchronizeInputs();
     if (epoch !== this.epoch) return undefined;
     const owner = "owner" in entry ? entry.owner : entry;
     const snapshot = this.snapshot(owner.project);
@@ -192,6 +193,14 @@ export class GitDecorations implements vscode.FileDecorationProvider, vscode.Dis
     }
     const nameOwner = owner.node.id.kind === "module" ? tree.parent(tree.parent(owner) ?? owner) : owner;
     if (nameOwner?.node.parent && nameOwner.node.label.kind === "name" && !snapshot.names.has(comparable(nameOwner.node.label.text))) return undefined;
+    // A file event can invalidate backend nodes before the native tree repaints its still-visible rows.
+    // Reuse cached parents, expanding only invalidated ancestry before requesting the selected source.
+    const parents: TreeEntry[] = [];
+    for (let parent = tree.parent(owner); parent; parent = tree.parent(parent)) parents.push(parent);
+    for (const parent of parents.reverse()) {
+      await tree.children(parent);
+      if (epoch !== this.epoch) return undefined;
+    }
     const result = await tree.request(owner.project, "metadata/source", { node: owner.node.id });
     if (!Array.isArray(result.sources)) return undefined;
     const exact: GitStatus[] = [];
