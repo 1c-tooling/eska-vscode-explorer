@@ -40,9 +40,15 @@ async function frame(tab) {
   await until(async () => {
     const all = await send('Target.getTargets');
     for (const target of all.targetInfos.filter(item => item.type === 'iframe' && !attached.has(item.targetId))) {
-      const { sessionId } = await send('Target.attachToTarget', { targetId: target.targetId, flatten: true });
-      attached.add(target.targetId);
-      await send('Runtime.enable', {}, sessionId);
+      try {
+        const { sessionId } = await send('Target.attachToTarget', { targetId: target.targetId, flatten: true });
+        attached.add(target.targetId);
+        await send('Runtime.enable', {}, sessionId);
+      } catch (error) {
+        // A newly shown Windows webview can replace its iframe between enumeration and attachment.
+        attached.delete(target.targetId);
+        if (!([-32000, -32001].includes(error?.code) && /(?:Session with given id not found|No target with given id found|No session with given id)/i.test(error.message))) throw error;
+      }
     }
     for (const candidate of contexts) {
       try {

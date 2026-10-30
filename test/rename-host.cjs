@@ -87,5 +87,10 @@ exports.run = async function () {
     await dom.evaluate("document.getElementById('redo').click()");
     await history(async () => !tab.state.editing.busy && (await fs.readFile(renamedFile, 'utf8').catch(() => '')) === original.replace('<Name>Товары</Name>', '<Name>Материалы</Name>'), 'rename redo');
     await fs.writeFile(path.join(fixture.root, 'host-result.json'), JSON.stringify({ passed: true, suite: 'metadata-rename', vscode: vscode.version }));
+  } catch (error) {
+    await fs.writeFile(path.join(fixture.root, 'host-result.json'), JSON.stringify({ passed: false,
+      error: String(error.stack ?? error), details: error, actions, revision: tab.revision,
+      editing: tab.state.editing, notice: tab.state.notice }));
+    throw error;
   } finally { dom.close(); }
 };
