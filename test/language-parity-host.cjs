@@ -4,6 +4,7 @@ const path = require("node:path");
 const { execFile } = require("node:child_process");
 const { createHash } = require("node:crypto");
 const vscode = require("vscode");
+const { nativePath } = require("../out/source.js");
 let stage = "bootstrap";
 
 /** Wait for exact diagnostics rather than treating an empty editor collection as completion. */
@@ -61,7 +62,8 @@ async function run() {
     // The editor may cache an early cancelled symbol request. Await the actual selected client before comparing pushes.
     await until(async () => {
       try {
-        const symbols = await explorer.language.session.client.sendRequest("textDocument/documentSymbol", { textDocument: { uri: document.uri.toString() } });
+        const client = explorer.language.session.client;
+        const symbols = await client.sendRequest("textDocument/documentSymbol", { textDocument: client.code2ProtocolConverter.asTextDocumentIdentifier(document) });
         return symbols?.some(value => value.name === `ESKAParity${index}`);
       } catch (error) {
         if (error.name !== "Canceled" && error.code !== -32800 && error.code !== -32801) throw error;
@@ -79,14 +81,15 @@ async function run() {
   assert.equal(russian.exit, english.exit);
   const report = JSON.parse(russian.stdout);
   assert.equal(report.complete, true); assert.equal(report.scope, "full");
-  assert.equal(report.analyzer.version, "0.4.0");
-  assert.equal(report.context.root.value, explorer.language.session.context.root);
+  assert.equal(report.analyzer.version, explorer.tooling.states.analyzer.info.version);
+  assert.equal(path.relative(nativePath(report.context.root), explorer.language.session.context.root), "");
   assert.equal(report.context.application, explorer.language.session.context.name);
-  assert.deepEqual(report.files.map(file => file.path.value).sort(), [...files].sort(), "the whole selected BSL set is analyzed");
+  assert.deepEqual(report.files.map(file => path.relative(fixture.root, nativePath(file.path))).sort(),
+    files.map(file => path.relative(fixture.root, file)).sort(), "the whole selected BSL set is analyzed");
   stage = "native-diagnostic-parity";
   const compared = [];
   for (const [index, file] of files.entries()) {
-    const expected = report.files.find(value => value.path.value === file).diagnostics.map(value => ({ code: value.code,
+    const expected = report.files.find(value => path.relative(nativePath(value.path), file) === "").diagnostics.map(value => ({ code: value.code,
       message: value.message, severity: value.severity, start_line: value.start_line, start_column: value.start_column,
       end_line: value.end_line, end_column: value.end_column })).sort(compare);
     assert.ok(expected.some(value => value.message.includes(`ESKAParitySentinel${index}`)));
