@@ -347,8 +347,10 @@ defaultFormatter для BSL/SDBL. Настройки отступов редак
 
 ## Ограничения и диагностика
 
-Основная приёмка — **Linux/VSCodium**. Windows, macOS, Microsoft VS Code
-и Remote ещё не прошли полную пользовательскую приёмку. На SSH/WSL/контейнере
+Основная приёмка — **Linux/VSCodium**. Дополнительно выполнена
+[проверка Windows 11 / Microsoft VS Code](docs/windows-validation.md)
+с установленным VSIX в ru/en. macOS и Remote требуют отдельной приёмки.
+На SSH/WSL/контейнере
 backend должен находиться на машине проекта. Браузерная IDE и виртуальные
 workspace не поддерживаются.
 
