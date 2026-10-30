@@ -36,8 +36,19 @@ exports.run = async function () {
   await until(() => explorer.searchView.picker.items.some(item => item.hit?.name === 'ЭлементДанных') && !explorer.searchView.picker.busy, 'predefined description search');
   const result = explorer.searchView.picker.items.find(item => item.hit?.name === 'ЭлементДанных');
   assert.match(result.description, /^Предопределённый элемент/);
+  explorer.searchView.picker.activeItems = [result];
+  explorer.searchView.picker.show();
   await vscode.commands.executeCommand('workbench.action.acceptSelectedQuickOpenItem');
-  await until(() => !explorer.searchView && explorer.view.selection[0]?.node.label.text === 'ЭлементДанных', 'reveal unopened predefined item');
+  try { await until(() => !explorer.searchView && explorer.view.selection[0]?.node.label.text === 'ЭлементДанных', 'reveal unopened predefined item'); }
+  catch (error) {
+    const search = explorer.searchView;
+    await fs.writeFile(path.join(fixture.root,'host-result.json'),JSON.stringify({passed:false,error:String(error.stack??error),
+      search:search&&{accepting:search.accepting,disposed:search.disposed,failure:search.failure?.code,
+        active:search.picker.activeItems.map(item=>item.label),selected:search.picker.selectedItems.map(item=>item.label),
+        items:search.picker.items.map(item=>({label:item.label,hit:item.hit?.name}))},
+      selection:explorer.view.selection.map(row=>({key:row.key,node:row.node?.id,label:row.node?.label}))}));
+    throw error;
+  }
   const item = explorer.view.selection[0];
   const folder = explorer.getParent(item);
   const group = explorer.getParent(folder);
@@ -51,7 +62,8 @@ exports.run = async function () {
   const properties = [...explorer.propertiesTabs.tabs.values()].find(tab => tab.entry.node.id.objectId === item.node.id.objectId);
   await until(() => properties?.panel.visible && properties.state.status === 'ready', 'predefined item properties');
   await vscode.commands.executeCommand('eska.explorer.openXml', item);
-  assert.equal(vscode.window.activeTextEditor.document.uri.fsPath, file);
+  await until(() => vscode.window.activeTextEditor?.document.uri.fsPath === file
+    && vscode.window.activeTextEditor.document.getText(vscode.window.activeTextEditor.selection) === '<Name>ЭлементДанных</Name>', 'predefined XML selection');
   assert.equal(vscode.window.activeTextEditor.document.getText(vscode.window.activeTextEditor.selection), '<Name>ЭлементДанных</Name>');
   assert.match(explorer.getTreeItem(item).iconPath.path, /\/predefined-item\.svg$/);
   await settings.update('treeLanguage', 'en-US', vscode.ConfigurationTarget.Workspace);

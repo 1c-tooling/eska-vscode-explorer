@@ -41,5 +41,16 @@ exports.run=async function(){
     await vscode.commands.executeCommand('workbench.action.files.resetActiveEditorReadonlyInSession');
     accepted.push('native_readonly_override_survives_modal_roundtrip');
     await fs.writeFile(path.join(fixture.root,'host-result.json'),JSON.stringify({passed:true,suite:'query-modal-normal',locale:vscode.env.language,accepted}));
-  }catch(error){await fs.writeFile(path.join(fixture.root,'host-result.json'),JSON.stringify({passed:false,suite:'query-modal-normal',error:String(error.stack??error),accepted}));throw error;}
+  }catch(error){
+    const logs=[];
+    try{
+      const root=path.join(path.dirname(fixture.root),'profile','logs');
+      for(const file of (await fs.readdir(root,{recursive:true})).filter(file=>file.endsWith('ESKA Explorer.log'))){
+        logs.push((await fs.readFile(path.join(root,file),'utf8')).slice(-7000));
+      }
+    }catch{}
+    const editor=vscode.window.activeTextEditor;
+    await fs.writeFile(path.join(fixture.root,'host-result.json'),JSON.stringify({passed:false,suite:'query-modal-normal',error:String(error.stack??error),accepted,
+      active:editor&&{uri:editor.document.uri.toString(),dirty:editor.document.isDirty,version:editor.document.version,text:editor.document.getText().slice(0,500)},logs}));throw error;
+  }
 };

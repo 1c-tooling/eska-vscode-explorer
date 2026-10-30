@@ -29,11 +29,20 @@ exports.run = async function () {
   assert.equal(await editor.edit(edit => edit.insert(new vscode.Position(0, 0), "// unsaved navigation\n")), true);
   const dirty = document.getText(), version = document.version;
   const methods = [];
+  const errors = [];
+  const showError = explorer.showError.bind(explorer);
+  explorer.showError = error => { errors.push({code:error.code,domain:error.domain,details:error.details}); showError(error); };
   const request = explorer.connection.request.bind(explorer.connection);
   explorer.connection.request = (session, method, ...args) => { methods.push(method); return request(session, method, ...args); };
   const started = performance.now();
   await vscode.commands.executeCommand("eska.explorer.revealActiveFile");
-  await until(() => explorer.view.selection[0]?.node?.id.kind === "module", "native tree selected the module");
+  try { await until(() => explorer.view.selection[0]?.node?.id.kind === "module", "native tree selected the module"); }
+  catch (error) {
+    await fs.writeFile(path.join(fixture.root, "host-result.json"), JSON.stringify({passed:false,error:String(error.stack??error),methods,errors,
+      connection:explorer.connection.state.kind,selection:explorer.view.selection.map(row=>({key:row.key,node:row.node?.id})),
+      active:vscode.window.activeTextEditor?.document.uri.toString()}));
+    throw error;
+  }
   const elapsedMs = performance.now() - started;
   assert.equal(explorer.view.selection[0].node.id.role, "object");
   assert.equal(methods.filter(method => method === "metadata/revealSource").length, 1);

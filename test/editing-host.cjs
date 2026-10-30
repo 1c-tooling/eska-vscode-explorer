@@ -41,19 +41,24 @@ exports.run = async function () {
   try {
     await dom.evaluate("document.getElementById('read-only').click()");
     await until(() => tab.state.editing.unlocked, 'unlock');
+    await dom.rendered();
     const index = tab.state.editing.schema.fields.findIndex(field => field.path[0].key.name === 'Comment');
     const selector = `document.getElementById('edit-${index}')`;
     await until(() => dom.evaluate(`Boolean(${selector})`), 'edit controls');
     await dom.evaluate(`(()=>{const input=${selector}; input.focus();input.value='Changed <field>';input.dispatchEvent(new Event('input'));input.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}));})()`);
     await until(async () => !tab.state.editing.busy && (await fs.readFile(file, 'utf8')).includes('Changed &lt;field&gt;'), 'text autosave');
     assert.equal(await fs.readFile(file, 'utf8'), original.replace('😀 Кириллица', 'Changed &lt;field&gt;'));
+    await dom.rendered();
     await dom.evaluate("window.dispatchEvent(new KeyboardEvent('keydown',{key:'z',ctrlKey:true,bubbles:true}))");
     await until(async () => !tab.state.editing.busy && await fs.readFile(file, 'utf8') === original, 'saved undo');
+    await dom.rendered();
     await dom.evaluate("window.dispatchEvent(new KeyboardEvent('keydown',{key:'Z',ctrlKey:true,shiftKey:true,bubbles:true}))");
     await until(async () => !tab.state.editing.busy && (await fs.readFile(file, 'utf8')).includes('Changed &lt;field&gt;'), 'saved redo');
     const saved = await fs.readFile(file, 'utf8');
+    await dom.rendered();
     await dom.evaluate(`(()=>{const input=${selector};input.value='cancel';input.dispatchEvent(new Event('input'));input.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));input.dispatchEvent(new Event('blur'));})()`);
     await until(() => Object.keys(tab.state.editing.drafts).length === 0, 'Esc clears draft');
+    await dom.rendered();
     assert.equal(await fs.readFile(file, 'utf8'), saved);
     const booleanIndex = tab.state.editing.schema.fields.findIndex(field => field.path[0].key.name === 'IncludeHelpInContents');
     const booleanSelector = `document.getElementById('edit-${booleanIndex}')`;
@@ -61,28 +66,38 @@ exports.run = async function () {
     assert.equal(hit, true, 'the checkbox square itself receives pointer input');
     await dom.evaluate(`${booleanSelector}.click()`);
     await until(async () => !tab.state.editing.busy && (await fs.readFile(file, 'utf8')).includes('<IncludeHelpInContents>true'), 'checkbox autosave');
+    await dom.rendered();
     await dom.evaluate("window.dispatchEvent(new KeyboardEvent('keydown',{key:'z',ctrlKey:true,bubbles:true}))");
     await until(async () => !tab.state.editing.busy && (await fs.readFile(file, 'utf8')) === saved, 'checkbox undo');
+    await dom.rendered();
     await dom.evaluate(`document.querySelector('label[for="edit-${booleanIndex}"]').click()`);
     await until(async () => !tab.state.editing.busy && (await fs.readFile(file, 'utf8')).includes('<IncludeHelpInContents>true'), 'checkbox label autosave');
+    await dom.rendered();
     await dom.evaluate("window.dispatchEvent(new KeyboardEvent('keydown',{key:'z',ctrlKey:true,bubbles:true}))");
     await until(async () => !tab.state.editing.busy && (await fs.readFile(file, 'utf8')) === saved, 'checkbox label undo');
+    await dom.rendered();
     const referenceIndex = tab.state.editing.schema.fields.findIndex(field => field.path[0].key.name === 'DefaultReportForm');
     await dom.evaluate(`document.getElementById('edit-${referenceIndex}').click()`);
     await until(() => dom.workbench("Boolean(document.querySelector('.quick-input-widget:not([style*=\"display: none\"]) input'))"), 'native reference picker');
     await dom.workbench("(()=>{const input=document.querySelector('.quick-input-widget input[type=text]');input.focus();input.value='ReportSelectorProbe';input.dispatchEvent(new Event('input',{bubbles:true}));})()");
     await until(() => dom.workbench("(()=>{const rows=[...document.querySelectorAll('.quick-input-list .monaco-list-row')];return rows.length===1 && rows[0].textContent.includes('ReportSelectorProbe');})()"), 'filtered reference option')
       .catch(async error => { throw new Error(`${error.message}: ${JSON.stringify(await dom.workbench("document.querySelector('.quick-input-widget')?.textContent"))}`); });
-    await vscode.commands.executeCommand('workbench.action.acceptSelectedQuickOpenItem');
+    await dom.clickWorkbench('.quick-input-list .monaco-list-row');
+    if (await dom.workbench("Boolean(document.querySelector('.quick-input-widget:not([style*=\"display: none\"]) input'))")) {
+      await vscode.commands.executeCommand('workbench.action.acceptSelectedQuickOpenItem');
+    }
     await until(async () => !tab.state.editing.busy && (await fs.readFile(file, 'utf8')).includes('<DefaultReportForm>CommonForm.ReportSelectorProbe</DefaultReportForm>'), 'reference autosave');
     assert.equal(await fs.readFile(file, 'utf8'), saved.replace('<DefaultReportForm/>', '<DefaultReportForm>CommonForm.ReportSelectorProbe</DefaultReportForm>'));
+    await dom.rendered();
     await dom.evaluate("window.dispatchEvent(new KeyboardEvent('keydown',{key:'z',ctrlKey:true,bubbles:true}))");
     await until(async () => !tab.state.editing.busy && (await fs.readFile(file, 'utf8')) === saved, 'reference undo');
+    await dom.rendered();
     await dom.screenshot('editing.png');
     await dom.evaluate(`(()=>{const input=${selector};input.value='Keep my draft';input.dispatchEvent(new Event('input'));})()`);
     await until(() => Object.keys(tab.state.editing.drafts).length === 1, 'host retains draft');
     await fs.writeFile(file, saved.replace('Changed &lt;field&gt;', 'External'));
     await tab.checkExternalChange();
+    await until(() => !tab.state.editing.busy && tab.state.editing.blocked, 'external conflict acknowledged');
     assert.equal(tab.state.editing.blocked, true);
     assert.equal(Object.values(tab.state.editing.drafts)[0].value, 'Keep my draft');
     await dom.evaluate("document.getElementById('refresh').click()");
@@ -97,6 +112,11 @@ exports.run = async function () {
     await valueEditor(explorer, root, fixture, false);
     await valueEditor(explorer, root, fixture, true);
     await fs.writeFile(path.join(fixture.root, 'host-result.json'), JSON.stringify({ passed: true, suite: 'property-editing', vscode: vscode.version }));
+  } catch (error) {
+    await fs.writeFile(path.join(fixture.root,'host-result.json'),JSON.stringify({passed:false,error:String(error.stack??error),
+      editing:tab.state.editing,notice:tab.state.notice,revision:tab.revision,refreshing:tab.refreshing,checkingExternal:tab.checkingExternal,
+      quickInput:await dom.workbench("document.querySelector('.quick-input-widget')?.textContent").catch(()=>undefined)}));
+    throw error;
   } finally { dom.close(); }
 };
 

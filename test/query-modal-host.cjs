@@ -21,7 +21,8 @@ async function replace(document, before, after) {
 /** Include protected aliases and split views of the same source. */
 function parentTabs(uri) {
   return vscode.window.tabGroups.all.flatMap(group => group.tabs).filter(tab => tab.input instanceof vscode.TabInputText
-    && ['file', 'eska-protected'].includes(tab.input.uri.scheme) && tab.input.uri.path === uri.path);
+    && ['file', 'eska-protected'].includes(tab.input.uri.scheme)
+    && tab.input.uri.with({scheme:'file'}).toString() === uri.with({scheme:'file'}).toString());
 }
 
 /** Public contextual editing must leave exactly one child and no parent views. */
@@ -30,15 +31,14 @@ async function openQuery(uri) {
   const at = owner.positionAt(owner.getText().indexOf('SELECT ') + 3); editor.selection = new vscode.Selection(at, at);
   await vscode.commands.executeCommand('eska.explorer.editBslQuery');
   const draft = await until(() => vscode.window.activeTextEditor?.document.uri.scheme === 'eska-query'
-    && vscode.window.activeTextEditor.document, 'child focus');
-  assert.equal(parentTabs(uri).length, 0); return draft;
+    && parentTabs(uri).length === 0 && vscode.window.activeTextEditor.document, 'child focus and parent tabs closed');
+  return draft;
 }
 
 /** The original resource must be restored after every operation that completes the child. */
 async function returned(uri) {
-  await until(() => vscode.window.activeTextEditor?.document.uri.toString() === uri.toString(), 'returned to original parent');
-  assert.equal(parentTabs(uri).length, 1);
-  return vscode.window.activeTextEditor.document;
+  return until(() => vscode.window.activeTextEditor?.document.uri.toString() === uri.toString()
+    && parentTabs(uri).length === 1 && vscode.window.activeTextEditor.document, 'returned to original parent and restored tab');
 }
 
 /** Query rows are resolved through the production tree, including the common metadata branch. */

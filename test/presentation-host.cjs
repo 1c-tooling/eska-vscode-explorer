@@ -101,7 +101,9 @@ exports.run = async function () {
     await openProperties(form);
     const rows = await explorer.getChildren(form);
     assert.deepEqual(rows.map(row => explorer.getTreeItem(row).label), ["Форма", "Модуль"]);
-    assert.equal(await explorer.getChildren(form), rows, "source rows reuse the loaded branch");
+    const repeated = await explorer.getChildren(form);
+    assert.equal(repeated.length, rows.length);
+    assert.ok(repeated.every((row, index) => row === rows[index]), "source rows reuse the loaded branch");
     for (let index = 0; index < rows.length; index++) {
       assert.equal(explorer.getParent(rows[index]), form);
       const action = explorer.getTreeItem(rows[index]);
