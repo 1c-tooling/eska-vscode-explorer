@@ -489,6 +489,11 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
         if (this.tree !== tree) throw new ExplorerError("obsolete");
         await vscode.commands.executeCommand("eska.explorer.projects.focus");
         if (this.tree !== tree) throw new ExplorerError("obsolete");
+        // Focusing a cold Windows view does not await its initial root expansion.
+        const root = await tree.root(entry.project);
+        if (this.tree !== tree || this.disposed) throw new ExplorerError("obsolete");
+        await this.view.reveal(root, { expand: true, select: false, focus: false });
+        if (this.tree !== tree || this.disposed) throw new ExplorerError("obsolete");
         // Support updates can repaint ancestors before native expansion events reach the extension host.
         for (let parent = tree.parent(entry); parent; parent = tree.parent(parent)) this.expanded.set(parent.key, true);
         await this.view.reveal(entry, { select: true, focus: true });
