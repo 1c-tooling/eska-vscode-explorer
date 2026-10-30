@@ -36,6 +36,19 @@ exports.run = async function () {
   const [root] = (await explorer.getChildren()).filter(entry => entry.node);
   await vscode.commands.executeCommand('eska.explorer.properties', root);
   const [tab] = explorer.propertiesTabs.tabs.values();
+  const writes = [], writeEdit = tab.writeEdit.bind(tab);
+  tab.writeEdit = async (...args) => {
+    writes.push({field:args[0],change:args[1],direction:args[2],checkingExternal:tab.checkingExternal,
+      refreshing:tab.refreshing,busy:tab.editor.busy,blocked:tab.editor.blocked,unlocked:tab.editor.unlocked,
+      writable:tab.editor.schema?.writable,trusted:vscode.workspace.isTrusted,revision:tab.revision});
+    return writeEdit(...args);
+  };
+  const editEvents = [], edit = tab.edit.bind(tab), clicks = [];
+  tab.edit = async input => {
+    editEvents.push({stage:'begin',type:input.type,revision:input.revision,current:tab.revision});
+    await edit(input);
+    editEvents.push({stage:'end',type:input.type,current:tab.revision});
+  };
   assert.equal(tab.state.editing.unlocked, false);
   const dom = await frame(tab);
   try {
@@ -82,10 +95,16 @@ exports.run = async function () {
     await dom.workbench("(()=>{const input=document.querySelector('.quick-input-widget input[type=text]');input.focus();input.value='ReportSelectorProbe';input.dispatchEvent(new Event('input',{bubbles:true}));})()");
     await until(() => dom.workbench("(()=>{const rows=[...document.querySelectorAll('.quick-input-list .monaco-list-row')];return rows.length===1 && rows[0].textContent.includes('ReportSelectorProbe');})()"), 'filtered reference option')
       .catch(async error => { throw new Error(`${error.message}: ${JSON.stringify(await dom.workbench("document.querySelector('.quick-input-widget')?.textContent"))}`); });
+    assert.equal(await dom.evaluate('document.hasFocus()'), false, 'native picker owns focus');
+    await tab.checkExternalChange();
+    await dom.rendered();
+    assert.equal(await dom.workbench("Boolean(document.activeElement?.closest('.quick-input-widget'))"), true,
+      'background property publication preserves native picker focus');
+    clicks.push(await dom.workbench(`(()=>{const row=document.querySelector('.quick-input-list .monaco-list-row');
+      const r=row.getBoundingClientRect(),hit=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2);
+      return {text:row.textContent,rect:{x:r.x,y:r.y,width:r.width,height:r.height},hit:hit?.outerHTML.slice(0,350),active:document.activeElement?.outerHTML.slice(0,250)};})()`));
     await dom.clickWorkbench('.quick-input-list .monaco-list-row');
-    if (await dom.workbench("Boolean(document.querySelector('.quick-input-widget:not([style*=\"display: none\"]) input'))")) {
-      await vscode.commands.executeCommand('workbench.action.acceptSelectedQuickOpenItem');
-    }
+    await until(() => dom.workbench("[...document.querySelectorAll('.quick-input-widget')].every(node=>!node.offsetWidth||!node.offsetHeight)"), 'native reference accepted');
     await until(async () => !tab.state.editing.busy && (await fs.readFile(file, 'utf8')).includes('<DefaultReportForm>CommonForm.ReportSelectorProbe</DefaultReportForm>'), 'reference autosave');
     assert.equal(await fs.readFile(file, 'utf8'), saved.replace('<DefaultReportForm/>', '<DefaultReportForm>CommonForm.ReportSelectorProbe</DefaultReportForm>'));
     await dom.rendered();
@@ -113,9 +132,11 @@ exports.run = async function () {
     await valueEditor(explorer, root, fixture, true);
     await fs.writeFile(path.join(fixture.root, 'host-result.json'), JSON.stringify({ passed: true, suite: 'property-editing', vscode: vscode.version }));
   } catch (error) {
-    await fs.writeFile(path.join(fixture.root,'host-result.json'),JSON.stringify({passed:false,error:String(error.stack??error),
-      editing:tab.state.editing,notice:tab.state.notice,revision:tab.revision,refreshing:tab.refreshing,checkingExternal:tab.checkingExternal,
-      quickInput:await dom.workbench("document.querySelector('.quick-input-widget')?.textContent").catch(()=>undefined)}));
+    await fs.writeFile(path.join(fixture.root,'host-result.json'),JSON.stringify({passed:false,error:String(error.stack??error),failure:error,
+      editing:tab.state.editing,notice:tab.state.notice,revision:tab.revision,refreshing:tab.refreshing,checkingExternal:tab.checkingExternal,writes,editEvents,clicks,
+      quickInput:await dom.workbench(`({active:document.activeElement?.outerHTML.slice(0,250),
+        widgets:[...document.querySelectorAll('.quick-input-widget')].map(node=>({style:node.getAttribute('style'),rect:{width:node.offsetWidth,height:node.offsetHeight},
+          title:node.querySelector('.quick-input-title')?.textContent,rows:[...node.querySelectorAll('.monaco-list-row')].map(row=>({text:row.textContent,cls:row.className,width:row.offsetWidth,height:row.offsetHeight}))}))})`).catch(()=>undefined)}));
     throw error;
   } finally { dom.close(); }
 };

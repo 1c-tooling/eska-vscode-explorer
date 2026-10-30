@@ -109,8 +109,15 @@ async function frame(tab) {
     },
     /** Monaco list selection listens to pointer input rather than an HTMLElement.click shortcut. */
     async clickWorkbench(selector) {
-      const result = await send('Runtime.evaluate', {expression:`(()=>{const element=document.querySelector(${JSON.stringify(selector)});if(!element)return;
-        const rect=element.getBoundingClientRect();return {x:rect.x+rect.width/2,y:rect.y+rect.height/2};})()`,returnByValue:true});
+      const result = await send('Runtime.evaluate', {expression:`(async()=>{
+        const widget=[...document.querySelectorAll('.quick-input-widget')].find(node=>node.offsetWidth&&node.offsetHeight);
+        if(widget)await Promise.allSettled(document.getAnimations().filter(animation=>animation.effect?.target instanceof Element
+          &&(animation.effect.target===widget||widget.contains(animation.effect.target))).map(animation=>animation.finished));
+        for(const element of document.querySelectorAll(${JSON.stringify(selector)})){
+          const rect=element.getBoundingClientRect();if(!rect.width||!rect.height)continue;
+          const point={x:rect.x+rect.width/2,y:rect.y+rect.height/2},hit=document.elementFromPoint(point.x,point.y);
+          if(hit&&(hit===element||element.contains(hit)))return point;
+        }})()`,returnByValue:true,awaitPromise:true});
       const point = result.result?.value;
       if (!point) throw new Error(`missing native control: ${selector}`);
       await send('Input.dispatchMouseEvent', {type:'mousePressed',...point,button:'left',clickCount:1});

@@ -137,7 +137,10 @@ try {
     const { createHash } = await import("node:crypto");
     const installedBundle = await readFile(join(extensionPath,"out/extension.js"));
     if (!installedBundle.equals(await readFile(join(repository,"out/extension.js")))) throw new Error("Installed VSIX bundle differs from the packaged checkout.");
-    console.log(JSON.stringify({installedVsix:process.env.ESKA_TEST_VSIX,installedBundle:join(extensionPath,"out/extension.js"),bundleSha256:createHash("sha256").update(installedBundle).digest("hex")}));
+    const installedRenderer = await readFile(join(extensionPath,"resources/properties/view.js"));
+    if (!installedRenderer.equals(await readFile(join(repository,"resources/properties/view.js")))) throw new Error("Installed VSIX property renderer differs from the checkout.");
+    console.log(JSON.stringify({installedVsix:process.env.ESKA_TEST_VSIX,installedBundle:join(extensionPath,"out/extension.js"),bundleSha256:createHash("sha256").update(installedBundle).digest("hex"),
+      propertyRendererSha256:createHash("sha256").update(installedRenderer).digest("hex")}));
     // Test mode exposes the provider only for acceptance. All runtime files come from the installed VSIX.
   }
   let workspace = fixture.root;

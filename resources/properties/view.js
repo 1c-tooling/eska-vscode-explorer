@@ -42,7 +42,7 @@ window.addEventListener("message", event => {
   snapshot = event.data;
   pictureView.render(snapshot);
   render();
-  if (focus) {
+  if (focus && document.hasFocus()) {
     const control = [...document.querySelectorAll("[data-edit-id]")].find(node => node.dataset.editId === focus.id);
     if (control && !control.disabled) {
       control.focus({ preventScroll: true });
