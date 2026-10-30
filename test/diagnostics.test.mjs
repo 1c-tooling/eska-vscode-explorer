@@ -40,7 +40,7 @@ test("late stderr survives the live cap and a crash retains its exit code", asyn
 });
 
 test("structured errors retain operation, source path and reason without copying response bodies", async t => {
-  const { peer, events } = recordingPeer(t);
+  const { peer, events } = recordingPeer(t, 10_000);
   await assert.rejects(peer.request('test/error', {}), { code: 'branchInvalid' });
   const failure = events.find(event => event.event === 'request_error');
   assert.equal(failure.kind, 'xml_invalid');
@@ -67,6 +67,7 @@ test("file event samples and identities have fixed diagnostic bounds", () => {
 
 test("orderly shutdown is not reported as a connection failure", async t => {
   const { peer, events } = recordingPeer(t);
+  await peer.request('initialize', {}, 10_000);
   await peer.stop('disconnect');
   assert.equal(events.find(event => event.event === 'process_closed').exitCode, 0);
   assert.ok(!events.some(event => event.event === 'connection_failure'));

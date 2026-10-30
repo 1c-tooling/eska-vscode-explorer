@@ -1,3 +1,4 @@
+import { deferCleanup } from "./cleanup.mjs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, mkdir, readFile, writeFile, rm } from "node:fs/promises";
@@ -15,7 +16,7 @@ async function fixture(t) {
   const playground = process.env.ESKA_TEST_ROOT ?? resolve("../eska-playground");
   assert.ok(isAbsolute(playground)); assert.ok(isAbsolute(executable));
   const root = await mkdtemp(join(playground, "explorer-query-"));
-  t.after(() => rm(root, { recursive: true, force: true }));
+  deferCleanup(t, () => rm(root, { recursive: true, force: true }));
   const value = await createTreeProject(root);
   const rootXml = join(value.source, "Configuration.xml");
   await writeFile(rootXml, (await readFile(rootXml, "utf8")).replace("<ChildObjects>",
@@ -57,19 +58,19 @@ async function owner(tree, project, kind) {
 for (const locale of ["ru-RU", "en-US"]) test(`query client with real API 1.13: dirty XML, map, plan and conflicts (${locale})`, { skip: !executable }, async t => {
   const files = await fixture(t);
   const connection = new Connection("query-test", () => {}, () => {});
-  t.after(() => connection.dispose());
+  deferCleanup(t, () => connection.dispose());
   await connection.connect({ executable, path: files.root, name: "queries", locale });
   const state = connection.state;
   assert.equal(state.kind, "ready", JSON.stringify(state)); assert.ok(state.queryEditing);
   const tree = new MetadataTree(connection, state.session, () => {}, () => {});
-  t.after(() => tree.dispose());
+  deferCleanup(t, () => tree.dispose());
   const project = tree.projects[0];
   const client = new QueryClient(connection, state.session.sessionId, project, { ...state.queryEditing, maxListItems: 1 });
   const schemaOwner = await owner(tree, project, "common-template");
   const dirty = files.schema.replace("<!--keep-->", "<!--unsaved-->");
   const document = await client.open({ node: schemaOwner.node.id,
     source: { value: files.schemaPath, encoding: "utf-8" }, version: "7", text: dirty });
-  t.after(() => document.close());
+  deferCleanup(t, () => document.close());
   assert.equal(document.binding.snapshot, querySnapshot(dirty));
   assert.equal(document.diskSnapshot, querySnapshot(files.schema)); assert.equal(document.writable, true);
   const headers = await document.list();
@@ -93,7 +94,7 @@ for (const locale of ["ru-RU", "en-US"]) test(`query client with real API 1.13: 
   await assert.rejects(document.read({ query: query.identity }), { code: "obsolete" });
   const formOwner = await owner(tree, project, "common-form");
   const lists = await client.open({ node: formOwner.node.id, source: { value: files.formPath, encoding: "utf-8" }, version: "2", text: files.form });
-  t.after(() => lists.close());
+  deferCleanup(t, () => lists.close());
   const listHeaders = await lists.list();
   assert.deepEqual(listHeaders.map(row => row.identity.name), ["Список", "Второй"]);
   const list = await lists.read({ query: listHeaders[0].identity });

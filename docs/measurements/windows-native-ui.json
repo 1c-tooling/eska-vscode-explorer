@@ -1,0 +1,1777 @@
+{
+  "schema_version": 1,
+  "date": "2026-10-31",
+  "completed_at": "2026-10-31T00:39:56+03:00",
+  "os": "Windows 11 x64 build 26100",
+  "vscode": "1.144.0",
+  "extension_version": "0.1.5",
+  "bundle_sha256": "7aaba6b8f1759648d8046f02480705ad312c3c9d29a02edef2f3adb4cbd91a88",
+  "property_renderer_sha256": "dc27b77415411db7b702823304d8ab00fbe0b6336a949851077e1ca1ae1d9ab4",
+  "backend_sha256": "ad09587d169ee8c5f1e0acb0715873bde6913f9f86622885af32fdf94dbbc184",
+  "backend_source_commit": "cf3b22f3",
+  "extension_source_commit": "32f6069",
+  "analyzer": "Official bsl-analyzer-app 0.4.1, contract 3.5",
+  "passed": 70,
+  "failed": 0,
+  "installed_vsix_cases": 68,
+  "sdk_cases": 2,
+  "cases": [
+    {
+      "group": "core",
+      "suite": "extension-host",
+      "locale": "en",
+      "passed": true,
+      "installed_vsix": true,
+      "seconds": 33.57,
+      "fingerprint": "c1cdc159b83ed7c07774afa4c514b6ba98dabdf8b3aa6ffc7a167a62826d3f4d",
+      "result": {
+        "passed": true,
+        "vscode": "1.144.0",
+        "node": "24.22.1",
+        "locale": "en"
+      }
+    },
+    {
+      "group": "core",
+      "suite": "extension-host",
+      "locale": "ru",
+      "passed": true,
+      "installed_vsix": true,
+      "seconds": 62.41,
+      "fingerprint": "c1cdc159b83ed7c07774afa4c514b6ba98dabdf8b3aa6ffc7a167a62826d3f4d",
+      "result": {
+        "passed": true,
+        "vscode": "1.144.0",
+        "node": "24.22.1",
+        "locale": "ru"
+      }
+    },
+    {
+      "group": "core",
+      "suite": "search-click-host",
+      "locale": "en",
+      "passed": true,
+      "installed_vsix": true,
+      "seconds": 24.75,
+      "fingerprint": "c69e6ee69e96277be625d0f31b86c0b4b54051a7ef210bb8668c95a710496d26",
+      "result": {
+        "passed": true,
+        "suite": "search-click",
+        "vscode": "1.144.0",
+        "locale": "en"
+      }
+    },
+    {
+      "group": "core",
+      "suite": "search-click-host",
+      "locale": "ru",
+      "passed": true,
+      "installed_vsix": true,
+      "seconds": 49.37,
+      "fingerprint": "c69e6ee69e96277be625d0f31b86c0b4b54051a7ef210bb8668c95a710496d26",
+      "result": {
+        "passed": true,
+        "suite": "search-click",
+        "vscode": "1.144.0",
+        "locale": "ru"
+      }
+    },
+    {
+      "group": "core",
+      "suite": "properties-host",
+      "locale": "en",
+      "passed": true,
+      "installed_vsix": true,
+      "seconds": 23.91,
+      "fingerprint": "cbe4c8853203539c1d8e7e03ea7c31f4a3016786ee3b643f36c1fb64fe24f119",
+      "result": {
+        "passed": true,
+        "suite": "properties",
+        "vscode": "1.144.0",
+        "locale": "en"
+      }
+    },
+    {
+      "group": "core",
+      "suite": "properties-host",
+      "locale": "ru",
+      "passed": true,
+      "installed_vsix": true,
+      "seconds": 48.24,
+      "fingerprint": "cbe4c8853203539c1d8e7e03ea7c31f4a3016786ee3b643f36c1fb64fe24f119",
+      "result": {
+        "passed": true,
+        "suite": "properties",
+        "vscode": "1.144.0",
+        "locale": "ru"
+      }
+    },
+    {
+      "group": "core",
+      "suite": "properties-layout-host",
+      "locale": "en",
+      "passed": true,
+      "installed_vsix": true,
+      "seconds": 23.2,
+      "fingerprint": "9ccd7424a26b6d198d49b14cd068ebdfa8e523331ebf858fe43660f2008cc9c5",
+      "result": {
+        "passed": true,
+        "suite": "properties-layout",
+        "vscode": "1.144.0",
+        "locale": "en"
+      }
+    },
+    {
+      "group": "core",
+      "suite": "properties-layout-host",
+      "locale": "ru",
+      "passed": true,
+      "installed_vsix": true,
+      "seconds": 48.17,
+      "fingerprint": "9ccd7424a26b6d198d49b14cd068ebdfa8e523331ebf858fe43660f2008cc9c5",
+      "result": {
+        "passed": true,
+        "suite": "properties-layout",
+        "vscode": "1.144.0",
+        "locale": "ru"
+      }
+    },
+    {
+      "group": "core",
+      "suite": "rename-host",
+      "locale": "en",
+      "passed": true,
+      "installed_vsix": true,
+      "seconds": 25.59,
+      "fingerprint": "a01ab21ff274b71aafa097fabfecc1f20a20867bfbdcaf3fedd22875d8f406b7",
+      "result": {
+        "passed": true,
+        "suite": "metadata-rename",
+        "vscode": "1.144.0",
+        "locale": "en"
+      }
+    },
+    {
+      "group": "core",
+      "suite": "rename-host",
+      "locale": "ru",
+      "passed": true,
+      "installed_vsix": true,
+      "seconds": 50.87,
+      "fingerprint": "a01ab21ff274b71aafa097fabfecc1f20a20867bfbdcaf3fedd22875d8f406b7",
+      "result": {
+        "passed": true,
+        "suite": "metadata-rename",
+        "vscode": "1.144.0",
+        "locale": "ru"
+      }
+    },
+    {
+      "group": "core",
+      "suite": "support-host",
+      "locale": "en",
+      "passed": true,
+      "installed_vsix": true,
+      "seconds": 32.68,
+      "fingerprint": "5929926d5ea5dc2bf0e8e490d8cc6fafdfb626c8fe220211c3d10e8b78aaf060",
+      "result": {
+        "passed": true,
+        "vscode": "1.144.0",
+        "mixedXml": true,
+        "unopenedTree": true,
+        "independentModule": true,
+        "dirtyPreserved": true,
+        "sessionOverride": true,
+        "userRulesRetained": true,
+        "branchSwitch": true,
+        "corruptedSupport": true,
+        "locale": "en"
+      }
+    },
+    {
+      "group": "core",
+      "suite": "support-host",
+      "locale": "ru",
+      "passed": true,
+      "installed_vsix": true,
+      "seconds": 54.23,
+      "fingerprint": "5929926d5ea5dc2bf0e8e490d8cc6fafdfb626c8fe220211c3d10e8b78aaf060",
+      "result": {
+        "passed": true,
+        "vscode": "1.144.0",
+        "mixedXml": true,
+        "unopenedTree": true,
+        "independentModule": true,
+        "dirtyPreserved": true,
+        "sessionOverride": true,
+        "userRulesRetained": true,
+        "branchSwitch": true,
+        "corruptedSupport": true,
+        "locale": "ru"
+      }
+    },
+    {
+      "group": "core",
+      "suite": "query-eol-host",
+      "locale": "en",
+      "passed": true,
+      "installed_vsix": false,
+      "seconds": 14.52,
+      "fingerprint": "51cb929d3808b48269d8d7579cf57938d3f1cb849b561bd54671cc158c10a9de",
+      "result": {
+        "passed": true,
+        "suite": "T101-real-query-plan-editor-EOL",
+        "vscode": "1.144.0",
+        "node": "v24.22.1",
+        "results": [
+          {
+            "name": "EolLF",
+            "eol": "lf",
+            "snapshotMatched": true,
+            "projectedMapMatched": true,
+            "bomRetained": true
+          },
+          {
+            "name": "EolCRLF",
+            "eol": "crlf",
+            "snapshotMatched": true,
+            "projectedMapMatched": true,
+            "bomRetained": true
+          },
+          {
+            "name": "EolFirstLine",
+            "eol": "crlf",
+            "snapshotMatched": true,
+            "projectedMapMatched": true,
+            "bomRetained": true
+          }
+        ],
+        "locale": "en"
+      }
+    },
+    {
+      "group": "core",
+      "suite": "query-eol-host",
+      "locale": "ru",
+      "passed": true,
+      "installed_vsix": false,
+      "seconds": 38.97,
+      "fingerprint": "51cb929d3808b48269d8d7579cf57938d3f1cb849b561bd54671cc158c10a9de",
+      "result": {
+        "passed": true,
+        "suite": "T101-real-query-plan-editor-EOL",
+        "vscode": "1.144.0",
+        "node": "v24.22.1",
+        "results": [
+          {
+            "name": "EolLF",
+            "eol": "lf",
+            "snapshotMatched": true,
+            "projectedMapMatched": true,
+            "bomRetained": true
+          },
+          {
+            "name": "EolCRLF",
+            "eol": "crlf",
+            "snapshotMatched": true,
+            "projectedMapMatched": true,
+            "bomRetained": true
+          },
+          {
+            "name": "EolFirstLine",
+            "eol": "crlf",
+            "snapshotMatched": true,
+            "projectedMapMatched": true,
+            "bomRetained": true
+          }
+        ],
+        "locale": "ru"
+      }
+    },
+    {
+      "group": "core",
+      "suite": "query-constructor-host",
+      "locale": "en",
+      "passed": true,
+      "installed_vsix": true,
+      "seconds": 35.38,
+      "fingerprint": "91f21f5b2794f74b4197fb12397ea7a07929ced599aff31c71ecae5c3220fa1b",
+      "result": {
+        "passed": true,
+        "suite": "query-constructor",
+        "accepted": [
+          "all_editable_splits_replaced_by_constructor_and_core_draft_lock",
+          "late_webview_actions_previews_and_apply_reject_the_displayed_old_revision",
+          "comments_follow_nodes_explicit_keep_and_same_draft_single_undo_redo",
+          "constructor_result_uses_existing_explicit_bsl_apply_without_disk_save",
+          "opening_and_applying_without_operations_preserves_exact_draft_and_owner",
+          "cancel_discards_only_unaccepted_constructor_operations_and_releases_its_lock",
+          "six_clause_operations_preserve_opaque_package_and_readonly_constructor_cannot_grant_write_access",
+          "installed_webview_dom_eight_tabs_translated_labels_text_only_rendering_expression_submission_and_cancel",
+          "backend_crash_retains_checkpoint_discards_unaccepted_model_and_requires_explicit_resume",
+          "xml_constructor_keeps_private_dirty_draft_then_explicit_xml_save_places_source_comments_and_native_undo"
+        ],
+        "errors": [],
+        "locale": "en"
+      }
+    },
+    {
+      "group": "core",
+      "suite": "query-constructor-host",
+      "locale": "ru",
+      "passed": true,
+      "installed_vsix": true,
+      "seconds": 59.76,
+      "fingerprint": "91f21f5b2794f74b4197fb12397ea7a07929ced599aff31c71ecae5c3220fa1b",
+      "result": {
+        "passed": true,
+        "suite": "query-constructor",
+        "accepted": [
+          "all_editable_splits_replaced_by_constructor_and_core_draft_lock",
+          "late_webview_actions_previews_and_apply_reject_the_displayed_old_revision",
+          "comments_follow_nodes_explicit_keep_and_same_draft_single_undo_redo",
+          "constructor_result_uses_existing_explicit_bsl_apply_without_disk_save",
+          "opening_and_applying_without_operations_preserves_exact_draft_and_owner",
+          "cancel_discards_only_unaccepted_constructor_operations_and_releases_its_lock",
+          "six_clause_operations_preserve_opaque_package_and_readonly_constructor_cannot_grant_write_access",
+          "installed_webview_dom_eight_tabs_translated_labels_text_only_rendering_expression_submission_and_cancel",
+          "backend_crash_retains_checkpoint_discards_unaccepted_model_and_requires_explicit_resume",
+          "xml_constructor_keeps_private_dirty_draft_then_explicit_xml_save_places_source_comments_and_native_undo"
+        ],
+        "errors": [],
+        "locale": "ru"
+      }
+    },
+    {
+      "group": "core",
+      "suite": "query-modal-host",
+      "locale": "en",
+      "passed": true,
+      "installed_vsix": true,
+      "seconds": 32.85,
+      "fingerprint": "a1bc692ea10ff9514ca7a9d249093bdb5abd972a286ddba40602d5a674d71539",
+      "result": {
+        "passed": true,
+        "suite": "query-modal",
+        "locale": "en",
+        "accepted": [
+          "one_query_replaces_file_protected_and_split_parents",
+          "parent_cannot_receive_interactive_typing",
+          "nested_constructor_blocks_query_parent_and_returns_same_draft",
+          "readonly_comparison_blocks_query_parent_and_preserves_external_owner_change",
+          "apply_returns_unsaved_parent_with_single_undo",
+          "explicit_cancel_returns_unchanged_parent",
+          "unchanged_tab_close_returns_parent",
+          "keep_discard_and_cancelled_close_restore_correct_parent_or_child",
+          "scd_and_dynamic_list_save_return_xml_parent_and_preserve_other_query"
+        ]
+      }
+    },
+    {
+      "group": "core",
+      "suite": "query-modal-host",
+      "locale": "ru",
+      "passed": true,
+      "installed_vsix": true,
+      "seconds": 57.25,
+      "fingerprint": "a1bc692ea10ff9514ca7a9d249093bdb5abd972a286ddba40602d5a674d71539",
+      "result": {
+        "passed": true,
+        "suite": "query-modal",
+        "locale": "ru",
+        "accepted": [
+          "one_query_replaces_file_protected_and_split_parents",
+          "parent_cannot_receive_interactive_typing",
+          "nested_constructor_blocks_query_parent_and_returns_same_draft",
+          "readonly_comparison_blocks_query_parent_and_preserves_external_owner_change",
+          "apply_returns_unsaved_parent_with_single_undo",
+          "explicit_cancel_returns_unchanged_parent",
+          "unchanged_tab_close_returns_parent",
+          "keep_discard_and_cancelled_close_restore_correct_parent_or_child",
+          "scd_and_dynamic_list_save_return_xml_parent_and_preserve_other_query"
+        ]
+      }
+    },
+    {
+      "group": "core",
+      "suite": "query-modal-normal-host",
+      "locale": "en",
+      "passed": true,
+      "installed_vsix": true,
+      "seconds": 28.34,
+      "fingerprint": "1ef35363b31b45243002f4de261a5ee3bf29cb092670dcd5c76abe8ae1fb2283",
+      "result": {
+        "passed": true,
+        "suite": "query-modal-normal",
+        "locale": "en",
+        "accepted": [
+          "native_cancel_preserves_dirty_parent_without_opening_child",
+          "explicit_native_save_precedes_source_capture_and_return",
+          "only_explicit_native_discard_can_revert_unsaved_parent",
+          "native_readonly_override_survives_modal_roundtrip"
+        ]
+      }
+    },
+    {
+      "group": "core",
+      "suite": "query-modal-normal-host",
+      "locale": "ru",
+      "passed": true,
+      "installed_vsix": true,
+      "seconds": 53.55,
+      "fingerprint": "1ef35363b31b45243002f4de261a5ee3bf29cb092670dcd5c76abe8ae1fb2283",
+      "result": {
+        "passed": true,
+        "suite": "query-modal-normal",
+        "locale": "ru",
+        "accepted": [
+          "native_cancel_preserves_dirty_parent_without_opening_child",
+          "explicit_native_save_precedes_source_capture_and_return",
+          "only_explicit_native_discard_can_revert_unsaved_parent",
+          "native_readonly_override_survives_modal_roundtrip"
+        ]
+      }
+    },
+    {
+      "group": "core",
+      "suite": "query-modal-restore-host",
+      "locale": "en",
+      "passed": true,
+      "installed_vsix": true,
+      "seconds": 37.84,
+      "fingerprint": "151c0710d64274e57bafe3c72da6842d8f7b6a6260115c1a359e315474a86f06",
+      "result": {
+        "passed": true,
+        "suite": "query-modal-native-recovery",
+        "run": "1",
+        "locale": "en",
+        "installedNormalProcesses": true
+      }
+    },
+    {
+      "group": "core",
+      "suite": "query-modal-restore-host",
+      "locale": "ru",
+      "passed": true,
+      "installed_vsix": true,
+      "seconds": 65.26,
+      "fingerprint": "151c0710d64274e57bafe3c72da6842d8f7b6a6260115c1a359e315474a86f06",
+      "result": {
+        "passed": true,
+        "suite": "query-modal-native-recovery",
+        "run": "1",
+        "locale": "ru",
+        "installedNormalProcesses": true
+      }
+    },
+    {
+      "group": "core",
+      "suite": "formatting-host",
+      "locale": "en",
+      "passed": true,
+      "installed_vsix": true,
+      "seconds": 31.27,
+      "fingerprint": "54f920c10babf0e8b5542db9aafd6b7b17c1851ae54b600ff68a3332939cfc3f",
+      "result": {
+        "passed": true,
+        "suite": "formatting",
+        "locale": "en",
+        "accepted": [
+          "document_format_native_undo_redo_and_dirty_buffer_without_disk_write",
+          "selection_formats_only_expanded_syntax_unit",
+          "trailing_whitespace_selection_preserves_unselected_bsl_and_returns_valid_coordinates",
+          "incompatible_formatter_identity_rejected_before_edits_without_analyzer_fallback",
+          "native_edit_cancels_obsolete_formatter_reply",
+          "query_format_acknowledged_draft_and_native_undo_redo_without_owner_write",
+          "active_query_rejects_parent_format_from_another_process",
+          "query_crlf_snapshot_matches_acknowledged_lf_checkpoint",
+          "query_format_on_save_only_checkpoints_private_bsl_draft",
+          "controlled_method_remains_byte_identical_while_ordinary_code_formats",
+          "supported_file_rejects_whole_document_and_expansion_but_accepts_exact_selection_with_native_undo",
+          "locked_supplier_file_rejects_selection_without_source_changes",
+          "opt_in_save_formats_and_preserves_bom_crlf",
+          "eska_save_opt_in_respects_language_specific_native_format_on_save",
+          "restarted_formatter_is_idempotent_and_ignores_native_indent_preferences"
+        ],
+        "timings": [
+          {
+            "attempt": "cold",
+            "milliseconds": 742.6866000000009
+          },
+          {
+            "attempt": "repeat",
+            "milliseconds": 300.9984999999997
+          }
+        ]
+      }
+    },
+    {
+      "group": "core",
+      "suite": "formatting-host",
+      "locale": "ru",
+      "passed": true,
+      "installed_vsix": true,
+      "seconds": 55.99,
+      "fingerprint": "54f920c10babf0e8b5542db9aafd6b7b17c1851ae54b600ff68a3332939cfc3f",
+      "result": {
+        "passed": true,
+        "suite": "formatting",
+        "locale": "ru",
+        "accepted": [
+          "document_format_native_undo_redo_and_dirty_buffer_without_disk_write",
+          "selection_formats_only_expanded_syntax_unit",
+          "trailing_whitespace_selection_preserves_unselected_bsl_and_returns_valid_coordinates",
+          "incompatible_formatter_identity_rejected_before_edits_without_analyzer_fallback",
+          "native_edit_cancels_obsolete_formatter_reply",
+          "query_format_acknowledged_draft_and_native_undo_redo_without_owner_write",
+          "active_query_rejects_parent_format_from_another_process",
+          "query_crlf_snapshot_matches_acknowledged_lf_checkpoint",
+          "query_format_on_save_only_checkpoints_private_bsl_draft",
+          "controlled_method_remains_byte_identical_while_ordinary_code_formats",
+          "supported_file_rejects_whole_document_and_expansion_but_accepts_exact_selection_with_native_undo",
+          "locked_supplier_file_rejects_selection_without_source_changes",
+          "opt_in_save_formats_and_preserves_bom_crlf",
+          "eska_save_opt_in_respects_language_specific_native_format_on_save",
+          "restarted_formatter_is_idempotent_and_ignores_native_indent_preferences"
+        ],
+        "timings": [
+          {
+            "attempt": "cold",
+            "milliseconds": 751.474400000001
+          },
+          {
+            "attempt": "repeat",
+            "milliseconds": 358.9319999999989
+          }
+        ]
+      }
+    },
+    {
+      "group": "core",
+      "suite": "language-host",
+      "locale": "en",
+      "passed": true,
+      "installed_vsix": true,
+      "seconds": 23.71,
+      "fingerprint": "15eb36d00eec9b71b28aa5f8cb20c52153f41fd4ef498b1e327fb8fe5294b2e2",
+      "result": {
+        "passed": true,
+        "suite": "own-language",
+        "vscode": "1.144.0",
+        "node": "24.22.1",
+        "capabilities": {
+          "callHierarchyProvider": true,
+          "codeActionProvider": {
+            "codeActionKinds": [
+              "quickfix",
+              "source.fixAll.bsl-analyzer",
+              "refactor.rewrite"
+            ]
+          },
+          "completionProvider": {
+            "triggerCharacters": [
+              "."
+            ]
+          },
+          "definitionProvider": true,
+          "documentFormattingProvider": true,
+          "documentHighlightProvider": true,
+          "documentOnTypeFormattingProvider": {
+            "firstTriggerCharacter": ";",
+            "moreTriggerCharacter": [
+              "\n"
+            ]
+          },
+          "documentRangeFormattingProvider": true,
+          "documentSymbolProvider": true,
+          "foldingRangeProvider": true,
+          "hoverProvider": true,
+          "inlayHintProvider": true,
+          "positionEncoding": "utf-16",
+          "referencesProvider": true,
+          "renameProvider": {
+            "prepareProvider": true
+          },
+          "selectionRangeProvider": true,
+          "semanticTokensProvider": {
+            "full": true,
+            "legend": {
+              "tokenModifiers": [
+                "defaultLibrary",
+                "deprecated",
+                "async",
+                "declaration",
+                "definition",
+                "documentation"
+              ],
+              "tokenTypes": [
+                "keyword",
+                "function",
+                "parameter",
+                "variable",
+                "string",
+                "number",
+                "comment",
+                "macro",
+                "decorator",
+                "property",
+                "operator",
+                "unresolvedReference",
+                "type",
+                "enumMember",
+                "namespace",
+                "class",
+                "modifier"
+              ]
+            }
+          },
+          "signatureHelpProvider": {
+            "retriggerCharacters": [
+              ","
+            ],
+            "triggerCharacters": [
+              "(",
+              ","
+            ]
+          },
+          "textDocumentSync": 2,
+          "typeDefinitionProvider": true,
+          "workspaceSymbolProvider": true
+        },
+        "hover": 1,
+        "definitions": 1,
+        "symbols": 1,
+        "completions": 26,
+        "semantic_integers": 60,
+        "broken_syntax_errors": 2,
+        "repaired_syntax_errors": 0,
+        "disk_unchanged": true,
+        "live_on_host_shutdown": true,
+        "shutdownPids": [
+          6240,
+          14440,
+          6208,
+          16148
+        ],
+        "locale": "en"
+      }
+    },
+    {
+      "group": "core",
+      "suite": "language-host",
+      "locale": "ru",
+      "passed": true,
+      "installed_vsix": true,
+      "seconds": 47.95,
+      "fingerprint": "15eb36d00eec9b71b28aa5f8cb20c52153f41fd4ef498b1e327fb8fe5294b2e2",
+      "result": {
+        "passed": true,
+        "suite": "own-language",
+        "vscode": "1.144.0",
+        "node": "24.22.1",
+        "capabilities": {
+          "callHierarchyProvider": true,
+          "codeActionProvider": {
+            "codeActionKinds": [
+              "quickfix",
+              "source.fixAll.bsl-analyzer",
+              "refactor.rewrite"
+            ]
+          },
+          "completionProvider": {
+            "triggerCharacters": [
+              "."
+            ]
+          },
+          "definitionProvider": true,
+          "documentFormattingProvider": true,
+          "documentHighlightProvider": true,
+          "documentOnTypeFormattingProvider": {
+            "firstTriggerCharacter": ";",
+            "moreTriggerCharacter": [
+              "\n"
+            ]
+          },
+          "documentRangeFormattingProvider": true,
+          "documentSymbolProvider": true,
+          "foldingRangeProvider": true,
+          "hoverProvider": true,
+          "inlayHintProvider": true,
+          "positionEncoding": "utf-16",
+          "referencesProvider": true,
+          "renameProvider": {
+            "prepareProvider": true
+          },
+          "selectionRangeProvider": true,
+          "semanticTokensProvider": {
+            "full": true,
+            "legend": {
+              "tokenModifiers": [
+                "defaultLibrary",
+                "deprecated",
+                "async",
+                "declaration",
+                "definition",
+                "documentation"
+              ],
+              "tokenTypes": [
+                "keyword",
+                "function",
+                "parameter",
+                "variable",
+                "string",
+                "number",
+                "comment",
+                "macro",
+                "decorator",
+                "property",
+                "operator",
+                "unresolvedReference",
+                "type",
+                "enumMember",
+                "namespace",
+                "class",
+                "modifier"
+              ]
+            }
+          },
+          "signatureHelpProvider": {
+            "retriggerCharacters": [
+              ","
+            ],
+            "triggerCharacters": [
+              "(",
+              ","
+            ]
+          },
+          "textDocumentSync": 2,
+          "typeDefinitionProvider": true,
+          "workspaceSymbolProvider": true
+        },
+        "hover": 1,
+        "definitions": 1,
+        "symbols": 1,
+        "completions": 26,
+        "semantic_integers": 60,
+        "broken_syntax_errors": 2,
+        "repaired_syntax_errors": 0,
+        "disk_unchanged": true,
+        "live_on_host_shutdown": true,
+        "shutdownPids": [
+          4364,
+          7820,
+          16096,
+          8128
+        ],
+        "locale": "ru"
+      }
+    },
+    {
+      "group": "metadata_and_queries",
+      "suite": "workspace-host",
+      "locale": "en",
+      "passed": true,
+      "installed_vsix": true,
+      "seconds": 33.5,
+      "fingerprint": "b1d34d0c65e6780421ab03d443412b7eb5ca18ce4bdabf3b9ddbed59a089caec",
+      "result": {
+        "passed": true,
+        "vscode": "1.144.0",
+        "suite": "workspace",
+        "locale": "en"
+      }
+    },
+    {
+      "group": "metadata_and_queries",
+      "suite": "source-navigation-host",
+      "locale": "en",
+      "passed": true,
+      "installed_vsix": true,
+      "seconds": 28.15,
+      "fingerprint": "3873b8fb0603c8094ae27168aa28cb559f3c78817c030ad17d92390cc7dff941",
+      "result": {
+        "passed": true,
+        "suite": "source-navigation",
+        "projectType": "configuration",
+        "vscode": "1.144.0",
+        "locale": "en",
+        "elapsedMs": 423.6733999999997,
+        "coldTreeMissRecovered": true,
+        "permanentMissBounded": true,
+        "unrelatedErrorNotRetried": true,
+        "nativeColdRootMisses": 0,
+        "methods": [
+          "metadata/revealSource",
+          "metadata/children",
+          "metadata/children",
+          "metadata/children",
+          "metadata/children",
+          "metadata/index",
+          "metadata/revealSource",
+          "metadata/revealSource",
+          "metadata/revealSource"
+        ]
+      }
+    },
+    {
+      "group": "metadata_and_queries",
+      "suite": "presentation-host",
+      "locale": "en",
+      "passed": true,
+      "installed_vsix": true,
+      "seconds": 29.87,
+      "fingerprint": "6c6bd246f3429af4acb278d03d0f67491526e3672612f3c0b1d959ae9b3692ab",
+      "result": {
+        "passed": true,
+        "directModules": 7,
+        "moduleOwners": 2,
+        "nestedChildren": 6,
+        "propertyForms": 2,
+        "formSources": 2,
+        "locale": "en"
+      }
+    },
+    {
+      "group": "metadata_and_queries",
+      "suite": "predefined-host",
+      "locale": "en",
+      "passed": true,
+      "installed_vsix": true,
+      "seconds": 24.89,
+      "fingerprint": "7ca91dbb93ed212bd34f6c7452dfe7d9a4982da9c9b723c2d0140632a2c54e42",
+      "result": {
+        "passed": true,
+        "searchReveal": true,
+        "xmlSelection": true,
+        "languages": 2,
+        "watcher": true,
+        "nativeRootMisses": 1,
+        "locale": "en"
+      }
+    },
+    {
+      "group": "metadata_and_queries",
+      "suite": "editing-host",
+      "locale": "en",
+      "passed": true,
+      "installed_vsix": true,
+      "seconds": 28.85,
+      "fingerprint": "b3e53ee7e9e2c39da758f4e9b439e79fa3b7c71fabc057d4128af09b31d79ecc",
+      "result": {
+        "passed": true,
+        "suite": "property-editing",
+        "vscode": "1.144.0",
+        "locale": "en"
+      }
+    },
+    {
+      "group": "metadata_and_queries",
+      "suite": "type-links-host",
+      "locale": "en",
+      "passed": true,
+      "installed_vsix": true,
+      "seconds": 23.34,
+      "fingerprint": "dbd864ea64fd29f4490f29428b36120a378ae392805878c808be7c54694b5add",
+      "result": {
+        "passed": true,
+        "suite": "property-type-links",
+        "vscode": "1.144.0",
+        "locale": "en"
+      }
+    },
+    {
+      "group": "metadata_and_queries",
+      "suite": "choice-links-host",
+      "locale": "en",
+      "passed": true,
+      "installed_vsix": true,
+      "seconds": 23.78,
+      "fingerprint": "e0d43ae35c14d21b9638af4c5687b1aaa44b6a17dc920de930e661a1fa9d1a99",
+      "result": {
+        "passed": true,
+        "suite": "property-choice-links",
+        "vscode": "1.144.0",
+        "locale": "en"
+      }
+    },
+    {
+      "group": "metadata_and_queries",
+      "suite": "choice-parameters-host",
+      "locale": "en",
+      "passed": true,
+      "installed_vsix": true,
+      "seconds": 24.35,
+      "fingerprint": "99847dc1be5549525cb6e67e1cac4ce7de99837e18469f804f41ee6e2664defc",
+      "result": {
+        "passed": true,
+        "suite": "property-choice-parameters",
+        "vscode": "1.144.0",
+        "locale": "en"
+      }
+    },
+    {
+      "group": "metadata_and_queries",
+      "suite": "subaccounts-host",
+      "locale": "en",
+      "passed": true,
+      "installed_vsix": true,
+      "seconds": 23.19,
+      "fingerprint": "20ae430cc86a235fea86133443a2b2b9b26dd9e8e9a2ab04f0bf638eaf1ed8b7",
+      "result": {
+        "passed": true,
+        "suite": "property-subaccounts",
+        "vscode": "1.144.0",
+        "locale": "en"
+      }
+    },
+    {
+      "group": "metadata_and_queries",
+      "suite": "numbering-host",
+      "locale": "en",
+      "passed": true,
+      "installed_vsix": true,
+      "seconds": 24.07,
+      "fingerprint": "a0427e48f7544a0253d7a0783186d9b5583263e42ef907b8fa80fbddc369b16e",
+      "result": {
+        "passed": true,
+        "suite": "property-numbering",
+        "vscode": "1.144.0",
+        "locale": "en"
+      }
+    },
+    {
+      "group": "metadata_and_queries",
+      "suite": "picture-host",
+      "locale": "en",
+      "passed": true,
+      "installed_vsix": true,
+      "seconds": 22.95,
+      "fingerprint": "9daa5d5959ac7adc55f15f050246df0f1edba3d1594318ba64d791692cacdccd",
+      "result": {
+        "passed": true,
+        "suite": "picture",
+        "vscode": "1.144.0",
+        "locale": "en"
+      }
+    },
+    {
+      "group": "metadata_and_queries",
+      "suite": "integers-host",
+      "locale": "en",
+      "passed": true,
+      "installed_vsix": true,
+      "seconds": 22.36,
+      "fingerprint": "959c0ed0d868e8bc174a0023ebd3d3b24ccca0d616b8bb5980a474f7ae00385e",
+      "result": {
+        "passed": true,
+        "suite": "property-integers",
+        "vscode": "1.144.0",
+        "locale": "en"
+      }
+    },
+    {
+      "group": "metadata_and_queries",
+      "suite": "semantic-properties-host",
+      "locale": "en",
+      "passed": true,
+      "installed_vsix": true,
+      "seconds": 23.44,
+      "fingerprint": "d728e95e38e7303640bda521785444a0caa4e7f58a2e7a53457874bbcfa4b0c9",
+      "result": {
+        "passed": true,
+        "suite": "presentation",
+        "vscode": "1.144.0",
+        "locale": "en"
+      }
+    },
+    {
+      "group": "metadata_and_queries",
+      "suite": "hierarchy-host",
+      "locale": "en",
+      "passed": true,
+      "installed_vsix": true,
+      "seconds": 23.57,
+      "fingerprint": "00b36077821d1c9dcfa8be427cf7fab6393cf73263e1eeacbe17846e228907ca",
+      "result": {
+        "passed": true,
+        "suite": "property-hierarchy",
+        "vscode": "1.144.0",
+        "locale": "en"
+      }
+    },
+    {
+      "group": "metadata_and_queries",
+      "suite": "filter-host",
+      "locale": "en",
+      "passed": true,
+      "installed_vsix": true,
+      "seconds": 27.6,
+      "fingerprint": "32c14a4ae518988a6468a987673ef94defa5197a9448c59f41f077579d436430",
+      "result": {
+        "passed": true,
+        "suite": "filter",
+        "vscode": "1.144.0",
+        "node": "24.22.1",
+        "locale": "en"
+      }
+    },
+    {
+      "group": "metadata_and_queries",
+      "suite": "icons-host",
+      "locale": "en",
+      "passed": true,
+      "installed_vsix": true,
+      "seconds": 25.22,
+      "fingerprint": "19d50e2132e176d94243b118aad53bbea815cab2dc271a7a33229c1452c94a9c",
+      "result": {
+        "passed": true,
+        "suite": "icons",
+        "vscode": "1.144.0",
+        "node": "24.22.1",
+        "locale": "en"
+      }
+    },
+    {
+      "group": "metadata_and_queries",
+      "suite": "event-handler-host",
+      "locale": "en",
+      "passed": true,
+      "installed_vsix": true,
+      "seconds": 24.12,
+      "fingerprint": "bd289839ca2713bb6f4bec0c89351ddffaa8c9e2964f5e165644d8c0af2fb80c",
+      "result": {
+        "passed": true,
+        "suite": "event-handler",
+        "projects": 2,
+        "vscode": "1.144.0",
+        "locale": "en"
+      }
+    },
+    {
+      "group": "metadata_and_queries",
+      "suite": "formatting-readonly-host",
+      "locale": "en",
+      "passed": true,
+      "installed_vsix": true,
+      "seconds": 23.88,
+      "fingerprint": "e1e81f3741129e29a588f3ce40c2261c7c1bd95c27072c37af3fe585b9a0c0d4",
+      "result": {
+        "passed": true,
+        "suite": "formatting-readonly",
+        "locale": "en",
+        "accepted": [
+          "editor_enforces_readonly_default_before_user_override",
+          "global_readonly_default_with_native_writable_override_supports_document_range_and_undo",
+          "filesystem_readonly_cannot_be_bypassed_by_native_writable_override"
+        ]
+      }
+    },
+    {
+      "group": "metadata_and_queries",
+      "suite": "query-package-host",
+      "locale": "en",
+      "passed": true,
+      "installed_vsix": true,
+      "seconds": 24.25,
+      "fingerprint": "77039badb43ebd759f2a5e1dcc859562f52dd246070c8f46b4ac9a8ddc2b5873",
+      "result": {
+        "passed": true,
+        "suite": "query-package",
+        "locale": "en",
+        "accepted": [
+          "package_cancel_keeps_same_draft",
+          "temporary_catalog_projection_and_atomic_rename_preserve_explicit_alias",
+          "package_apply_native_undo_redo_and_parent_single_undo_preserve_disk"
+        ]
+      }
+    },
+    {
+      "group": "metadata_and_queries",
+      "suite": "query-dcs-host",
+      "locale": "en",
+      "passed": true,
+      "installed_vsix": true,
+      "seconds": 23.75,
+      "fingerprint": "fbfa98ea16046d8512380092468a0a9610f95158bd841eb9fd65bace5849e074",
+      "result": {
+        "passed": true,
+        "suite": "query-dcs",
+        "locale": "en",
+        "accepted": [
+          "typed_dcs_lists_cancel_apply_undo_redo_and_unchanged_owner_bytes"
+        ]
+      }
+    },
+    {
+      "group": "metadata_and_queries",
+      "suite": "query-having-host",
+      "locale": "en",
+      "passed": true,
+      "installed_vsix": true,
+      "seconds": 24.29,
+      "fingerprint": "167b38967df274280a7ad66734685b895a248b71e293c3380a7566b8cd6830fc",
+      "result": {
+        "passed": true,
+        "suite": "query-having",
+        "locale": "en",
+        "accepted": [
+          "separate_typed_where_having_cancel_apply_undo_redo_and_unchanged_owner_bytes"
+        ]
+      }
+    },
+    {
+      "group": "metadata_and_queries",
+      "suite": "query-total-sections-host",
+      "locale": "en",
+      "passed": true,
+      "installed_vsix": true,
+      "seconds": 24.14,
+      "fingerprint": "9d25e8fe10bb3523e52509ba4df5203fed640c858ff96cb919dd8c3a8b9de9a8",
+      "result": {
+        "passed": true,
+        "suite": "query-total-sections",
+        "locale": "en",
+        "accepted": [
+          "single_native_total_section_group_levels_second_section_guard_cancel_apply_and_undo_redo"
+        ]
+      }
+    },
+    {
+      "group": "metadata_and_queries",
+      "suite": "query-items-host",
+      "locale": "en",
+      "passed": true,
+      "installed_vsix": true,
+      "seconds": 22.61,
+      "fingerprint": "796aaa5d54b065265ef92c0669de1030153802d3eb2f7e33b212c234e0d49977",
+      "result": {
+        "passed": true,
+        "suite": "query-items",
+        "locale": "en",
+        "accepted": [
+          "select-copy-core-alias",
+          "move-core-focus",
+          "inline-cell",
+          "select-all-atomic-refusal",
+          "apply-native-undo-redo",
+          "owner-unchanged"
+        ]
+      }
+    },
+    {
+      "group": "metadata_and_queries",
+      "suite": "query-modifiers-host",
+      "locale": "en",
+      "passed": true,
+      "installed_vsix": true,
+      "seconds": 22.02,
+      "fingerprint": "f50abb0bcb76c1e4ff0c10aded9647188e4b7fb07d5957b44ea5ecf8cfd95917",
+      "result": {
+        "passed": true,
+        "suite": "query-modifiers",
+        "locale": "en",
+        "accepted": [
+          "typed-settings",
+          "preview-does-not-mutate",
+          "cancel-keeps-input",
+          "explicit-accept",
+          "native-undo-redo",
+          "source-unchanged"
+        ]
+      }
+    },
+    {
+      "group": "metadata_and_queries",
+      "suite": "query-text-host",
+      "locale": "en",
+      "passed": true,
+      "installed_vsix": true,
+      "seconds": 22.84,
+      "fingerprint": "da88734736dd95d5f80ceba89ea812d324aa546acbf7b158ac858c44998b03b6",
+      "result": {
+        "passed": true,
+        "suite": "query-text",
+        "locale": "en",
+        "accepted": [
+          "core-item-comment-and-unicode-ranges",
+          "invalid-buffer-kept-preview-cancel-parent-inert-accept-stale-button",
+          "opening-diff-private-cancel-native-undo-redo-owner-unchanged"
+        ]
+      }
+    },
+    {
+      "group": "metadata_and_queries",
+      "suite": "query-predicates-host",
+      "locale": "en",
+      "passed": true,
+      "installed_vsix": true,
+      "seconds": 21.64,
+      "fingerprint": "ef569541222fca3ee97dcced2d452b6501d902122fb2bff66914eb7239d1dda1",
+      "result": {
+        "passed": true,
+        "suite": "query-predicates",
+        "locale": "en",
+        "accepted": [
+          "group-kind-and-between-input",
+          "explicit-where-having-move",
+          "single-undo-redo",
+          "source-unchanged"
+        ]
+      }
+    },
+    {
+      "group": "metadata_and_queries",
+      "suite": "query-union-matrix-host",
+      "locale": "en",
+      "passed": true,
+      "installed_vsix": true,
+      "seconds": 22.74,
+      "fingerprint": "ee764d302641f66f86aa210fab040eb170122dcdc1d10b151790fcb506a08d6e",
+      "result": {
+        "passed": true,
+        "suite": "query-union-matrix",
+        "locale": "en",
+        "accepted": [
+          "matrix-read-noop",
+          "alignment-preview-cancel",
+          "alignment-explicit-accept",
+          "parent-inert",
+          "shared-output-alias",
+          "column-move-preview",
+          "native-undo",
+          "owner-unchanged"
+        ]
+      }
+    },
+    {
+      "group": "metadata_and_queries",
+      "suite": "query-package-tree-host",
+      "locale": "en",
+      "passed": true,
+      "installed_vsix": true,
+      "seconds": 22.67,
+      "fingerprint": "3eb09ae18d59e8e9e199d837f1cf88dde3fe5e5c4d1ddbf2756e9449bd5568fc",
+      "result": {
+        "passed": true,
+        "suite": "query-package-tree",
+        "locale": "en",
+        "accepted": [
+          "copy-preview-fresh-destination",
+          "copy-focus",
+          "nested-package-tree",
+          "lifetime-bound-definition-link",
+          "scope-breadcrumb-and-return",
+          "original-consumer-unchanged",
+          "native-undo",
+          "source-unchanged"
+        ]
+      }
+    },
+    {
+      "group": "metadata_and_queries",
+      "suite": "query-language-host",
+      "locale": "en",
+      "passed": true,
+      "installed_vsix": true,
+      "seconds": 27.11,
+      "fingerprint": "e87fc87eb28831c62509a95abd11a896a39a68863c87936dc44305b786a21534",
+      "result": {
+        "passed": true,
+        "suite": "query-language",
+        "accepted": [
+          "metadata_completion_in_unsaved_projection_without_native_or_disk_changes",
+          "completion_edit_translated_by_core_and_updated_in_one_lsp_process",
+          "version_guarded_pull_diagnostics_change_and_clear_on_latest_draft",
+          "delayed_real_completion_is_discarded_after_draft_revision_changes",
+          "temporary_table_fields_and_aliases_use_current_whole_package",
+          "ordinary_bsl_in_same_application_keeps_working",
+          "language_restart_preserves_draft_and_rebinds_shared_uri",
+          "native_owner_edit_pauses_query_and_restores_actual_native_text",
+          "cancel_preserves_unrelated_native_edit_and_disk",
+          "native_rename_after_query_cancel_preserves_wire_version_guards_and_undo"
+        ],
+        "errors": [
+          "query_language_paused ExplorerError: requestFailed"
+        ],
+        "pid": 2524,
+        "locale": "en"
+      }
+    },
+    {
+      "group": "metadata_and_queries",
+      "suite": "query-language-context-host",
+      "locale": "en",
+      "passed": true,
+      "installed_vsix": true,
+      "seconds": 24.99,
+      "fingerprint": "408012490a958b859b00d802f6eea7fa2e137b65449b04aa1b6146dff19ea90f",
+      "result": {
+        "passed": true,
+        "suite": "query-language-context",
+        "accepted": [
+          "first_application_query_resolves_only_its_own_metadata",
+          "switching_application_pauses_earlier_query_without_lending_other_context",
+          "second_application_query_resolves_only_its_own_metadata"
+        ],
+        "locale": "en"
+      }
+    },
+    {
+      "group": "metadata_and_queries",
+      "suite": "keyboard-host",
+      "locale": "en",
+      "passed": true,
+      "installed_vsix": true,
+      "seconds": 25.06,
+      "fingerprint": "ad939480479553b453e545fb40d51ee20f986bd0c9642ee3242a328d4dc6aa29",
+      "result": {
+        "passed": true,
+        "vscode": "1.144.0",
+        "navigation": 5,
+        "locale": "en"
+      }
+    },
+    {
+      "group": "metadata_and_queries",
+      "suite": "sorting-host",
+      "locale": "en",
+      "passed": true,
+      "installed_vsix": true,
+      "seconds": 24.25,
+      "fingerprint": "f1072b2ba7e0ec26749efd7ad4211d51cc08e8ae7ecb109a35e87bfa52a04792",
+      "result": {
+        "passed": true,
+        "suite": "sorting",
+        "projects": 4,
+        "vscode": "1.144.0",
+        "locale": "en"
+      }
+    },
+    {
+      "group": "metadata_and_queries",
+      "suite": "tree-defaults-host",
+      "locale": "en",
+      "passed": true,
+      "installed_vsix": true,
+      "seconds": 24.85,
+      "fingerprint": "fd1708bf8c7d2281046ffb12094ce49a70aa2d14b4e167f8571c7c248476b8c0",
+      "result": {
+        "passed": true,
+        "suite": "tree-defaults",
+        "vscode": "1.144.0",
+        "locale": "en"
+      }
+    },
+    {
+      "group": "metadata_and_queries",
+      "suite": "readonly-host",
+      "locale": "en",
+      "passed": true,
+      "installed_vsix": true,
+      "seconds": 24.36,
+      "fingerprint": "a8c23e47e29f665629c053c10fe0a0daa0fbea02157f8f9d398ea67b6f667826",
+      "result": {
+        "passed": true,
+        "vscode": "1.144.0",
+        "normalFileReadonly": true,
+        "sessionOverrideWins": true,
+        "dirtyTextPreserved": true,
+        "locale": "en"
+      }
+    },
+    {
+      "group": "metadata_and_queries",
+      "suite": "decorations-host",
+      "locale": "en",
+      "passed": true,
+      "installed_vsix": true,
+      "seconds": 30.25,
+      "fingerprint": "e0bd87c8d4c1b95a01e4534f270f6d4d88b8e27e3dc42de4da13e34f06bb74fa",
+      "result": {
+        "passed": true,
+        "vscode": "1.144.0",
+        "gitDecorations": true,
+        "fullIndexStarted": false,
+        "locale": "en"
+      }
+    },
+    {
+      "group": "metadata_and_queries",
+      "suite": "tool-status-host",
+      "locale": "en",
+      "passed": true,
+      "installed_vsix": true,
+      "seconds": 19.62,
+      "fingerprint": "d92dbb0489a50756093f6e9fe249c0ecffb999494e783e46dd722042793beae4",
+      "result": {
+        "passed": true,
+        "suite": "tool-status",
+        "locale": "en",
+        "vscode": "1.144.0",
+        "footer": [
+          {
+            "id": "1c-tooling.eska-explorer.eska.explorer.connection",
+            "text": "ESKA v0.21.1"
+          }
+        ],
+        "menuComponents": [
+          "eska-project",
+          "eska-fmt",
+          "bsl-analyzer-app"
+        ],
+        "commands": [
+          [
+            "project",
+            true
+          ],
+          [
+            "formatter",
+            true
+          ],
+          [
+            "analyzer",
+            true
+          ]
+        ]
+      }
+    },
+    {
+      "group": "additional_language",
+      "suite": "language-edits-host",
+      "locale": "en",
+      "passed": true,
+      "installed_vsix": true,
+      "seconds": 31.3,
+      "fingerprint": "79b279e97f3ba28ff4142867e0a01381a1ee2c2edfe882e29caec9d98e8562a8",
+      "result": {
+        "passed": true,
+        "suite": "language-edits",
+        "vscode": "1.144.0",
+        "locale": "en",
+        "real_backend_policy": true,
+        "mixed_xml_atomic_rejection": true,
+        "protected_uri_rejected": true,
+        "stale_version_rejected": true,
+        "unversioned_server_edit_rejected": true,
+        "resource_edit_rejected": true,
+        "versioned_server_text_edit_applied": true,
+        "server_apply_payloads": "injected through public middleware; native editor transaction",
+        "rename": true,
+        "formatter_edits": 1,
+        "controlled_full_format_rejected": true,
+        "selected_body_formatted": true,
+        "code_action": true,
+        "late_code_action_rejected": true,
+        "user_readonly_preserved": true,
+        "disk_unchanged": true,
+        "shutdownPids": [
+          10752,
+          12620
+        ]
+      }
+    },
+    {
+      "group": "additional_language",
+      "suite": "language-reference-host",
+      "locale": "en",
+      "passed": true,
+      "installed_vsix": true,
+      "seconds": 23.09,
+      "fingerprint": "920109f19ef3260bd51cf12856bdc3bfb73e57b90452c05738e7d467aa567076",
+      "result": {
+        "passed": true,
+        "suite": "language-reference",
+        "vscode": "1.144.0",
+        "external_definition": true,
+        "policy_regenerated": true,
+        "line_length_preserved": true,
+        "shutdownPids": [
+          13676,
+          15012,
+          5500,
+          11740
+        ],
+        "locale": "en"
+      }
+    },
+    {
+      "group": "additional_language",
+      "suite": "language-refresh-host",
+      "locale": "en",
+      "passed": true,
+      "installed_vsix": true,
+      "seconds": 40.74,
+      "fingerprint": "7501f8f10cfddc0c630504612485634e5948fef550c3e9742864f18aa9bae78e",
+      "result": {
+        "passed": true,
+        "suite": "language-refresh",
+        "vscode": "1.144.0",
+        "xml_global_resolution": true,
+        "incremental_xml_pid_preserved": true,
+        "branch_roundtrip": true,
+        "rapid_buffer_edits": 30,
+        "repaired_diagnostics": 0,
+        "root_fingerprint_reprepared": true,
+        "root_metadata_pid_preserved": true,
+        "same_config_bytes_no_restart": true,
+        "same_config_diagnostics_preserved": true,
+        "manifest_reconnect": true,
+        "managed_conflict_preserved": true,
+        "shutdownPids": [
+          12356,
+          1484,
+          13412,
+          14748,
+          12308
+        ],
+        "locale": "en"
+      }
+    },
+    {
+      "group": "additional_language",
+      "suite": "protected-language-host",
+      "locale": "en",
+      "passed": true,
+      "installed_vsix": true,
+      "seconds": 26.86,
+      "fingerprint": "19f8582530228809693b79e5e130474a6f3b6ca35ccb0f86bccc08152cc52541",
+      "result": {
+        "passed": true,
+        "suite": "protected-language",
+        "vscode": "1.144.0",
+        "locale": "en",
+        "analyzer": "0.4.1",
+        "semanticTokens": 13,
+        "unrelated_editor_actions": [
+          {
+            "title": "Fix",
+            "command": "inlineChat.start"
+          },
+          {
+            "title": "Explain",
+            "command": "workbench.action.chat.open"
+          },
+          {
+            "title": "Modify",
+            "command": "inlineChat.start"
+          }
+        ],
+        "outline": true,
+        "hover": true,
+        "definitions": true,
+        "references": true,
+        "folding": true,
+        "diagnostics": true,
+        "readonly": true,
+        "own_lsp": true,
+        "late_real_hover_rejected": true,
+        "own_restart": true,
+        "native_alias_rename_denied": true,
+        "shutdownPids": [
+          3948,
+          14972,
+          8820
+        ]
+      }
+    },
+    {
+      "group": "additional_language",
+      "suite": "language-metadata-mutation-host",
+      "locale": "en",
+      "passed": true,
+      "installed_vsix": true,
+      "seconds": 21.85,
+      "fingerprint": "f06a52cec499c7660ec61985d9dd99020e0250bb05fe01e4580db9cf02dfffb3",
+      "result": {
+        "passed": true,
+        "suite": "language-metadata-mutation",
+        "vscode": "1.144.0",
+        "real_backend_property_write": true,
+        "isolated_metadata_notification": true,
+        "support_policy_enabled": true,
+        "global_resolution_updated": true,
+        "source_xml_byte_roundtrip": true,
+        "bsl_disk_unchanged": true,
+        "lsp_pid_preserved": true,
+        "shutdownPids": [
+          13620,
+          8352
+        ],
+        "locale": "en"
+      }
+    },
+    {
+      "group": "additional_language",
+      "suite": "language-parity-host",
+      "locale": "en",
+      "passed": true,
+      "installed_vsix": true,
+      "seconds": 28.89,
+      "fingerprint": "3838151ad2c7fe93f200a62ccdc80ef3d44ee486bb37ac9aec132b6aec6ba0da",
+      "result": {
+        "passed": true,
+        "suite": "language-parity",
+        "vscode": "1.144.0",
+        "real_cli_and_lsp": true,
+        "policy_enabled": true,
+        "full_context_files": 2,
+        "equal_diagnostic_codes_severities_ranges": true,
+        "equal_semantic_messages": true,
+        "message_normalization": "Only the upstream LSP suffix (Стандарт N: https://v8std.ru/std/N/) is removed; raw messages are retained",
+        "cli_locales_identical": true,
+        "cli_exit": 0,
+        "config_unchanged": true,
+        "config_sha256": "a8312c243aa73c5e1a6f966ed993b61b9bcf85b94257dd9250d19385d874da5a",
+        "compared": [
+          {
+            "file": "c:\\Users\\User\\Documents\\ChatGPT\\eska-playground\\explorer-host-dVI9q0\\project\\src\\CommonModules\\Обмен\\Ext\\Module.bsl",
+            "diagnostics": [
+              {
+                "code": "CodeOutOfRegion",
+                "message": "Функция находится вне области (#Область/#Region). Весь код модуля должен быть организован в области для лучшей структуры.",
+                "severity": "Hint",
+                "start_line": 1,
+                "start_column": 8,
+                "end_line": 1,
+                "end_column": 16
+              },
+              {
+                "code": "CommonModuleMissingAPI",
+                "message": "Общий модуль должен содержать экспортные методы и области API",
+                "severity": "Information",
+                "start_line": 0,
+                "start_column": 0,
+                "end_line": 0,
+                "end_column": 0
+              },
+              {
+                "code": "MissingParameterDescription",
+                "message": "Необходимо добавить описание всех параметров метода",
+                "severity": "Warning",
+                "start_line": 1,
+                "start_column": 8,
+                "end_line": 1,
+                "end_column": 16
+              },
+              {
+                "code": "MissingReturnedValueDescription",
+                "message": "Добавьте описание возвращаемого значения функции",
+                "severity": "Warning",
+                "start_line": 1,
+                "start_column": 8,
+                "end_line": 1,
+                "end_column": 16
+              },
+              {
+                "code": "UnusedLocalVariable",
+                "message": "Удалите неиспользуемую переменную ESKAParitySentinel0",
+                "severity": "Warning",
+                "start_line": 8,
+                "start_column": 4,
+                "end_line": 8,
+                "end_column": 23
+              },
+              {
+                "code": "UnusedLocalVariable",
+                "message": "Удалите неиспользуемую переменную Результат",
+                "severity": "Warning",
+                "start_line": 5,
+                "start_column": 0,
+                "end_line": 5,
+                "end_column": 9
+              }
+            ]
+          },
+          {
+            "file": "c:\\Users\\User\\Documents\\ChatGPT\\eska-playground\\explorer-host-dVI9q0\\project\\src\\Catalogs\\Товары\\Ext\\ObjectModule.bsl",
+            "diagnostics": [
+              {
+                "code": "CodeOutOfRegion",
+                "message": "Процедура находится вне области (#Область/#Region). Весь код модуля должен быть организован в области для лучшей структуры.",
+                "severity": "Hint",
+                "start_line": 2,
+                "start_column": 10,
+                "end_line": 2,
+                "end_column": 21
+              },
+              {
+                "code": "UnusedLocalVariable",
+                "message": "Удалите неиспользуемую переменную ESKAParitySentinel1",
+                "severity": "Warning",
+                "start_line": 3,
+                "start_column": 4,
+                "end_line": 3,
+                "end_column": 23
+              }
+            ]
+          }
+        ],
+        "shutdownPids": [
+          10696,
+          15684
+        ],
+        "locale": "en"
+      }
+    },
+    {
+      "group": "additional_language",
+      "suite": "grammar-host",
+      "locale": "en",
+      "passed": true,
+      "installed_vsix": true,
+      "seconds": 19.25,
+      "fingerprint": "bd4d36c0fa2190cf289d5fb16aa128f0725467697d171c16c9cc084815ee5a76",
+      "result": {
+        "passed": true,
+        "suite": "grammar",
+        "vscode": "1.144.0",
+        "textmate": "9.3.2",
+        "oniguruma": "1.7.0",
+        "scopes_checked": 9,
+        "locale": "en"
+      }
+    },
+    {
+      "group": "additional_language",
+      "suite": "formatting-host",
+      "locale": "en",
+      "passed": true,
+      "installed_vsix": true,
+      "seconds": 31.95,
+      "fingerprint": "54f920c10babf0e8b5542db9aafd6b7b17c1851ae54b600ff68a3332939cfc3f",
+      "result": {
+        "passed": true,
+        "suite": "formatting",
+        "locale": "en",
+        "accepted": [
+          "full_set_keeps_independent_analyzer_hover_and_single_eska_formatter",
+          "document_format_native_undo_redo_and_dirty_buffer_without_disk_write",
+          "selection_formats_only_expanded_syntax_unit",
+          "trailing_whitespace_selection_preserves_unselected_bsl_and_returns_valid_coordinates",
+          "incompatible_formatter_identity_rejected_before_edits_without_analyzer_fallback",
+          "native_edit_cancels_obsolete_formatter_reply",
+          "query_format_acknowledged_draft_and_native_undo_redo_without_owner_write",
+          "active_query_rejects_parent_format_from_another_process",
+          "query_crlf_snapshot_matches_acknowledged_lf_checkpoint",
+          "query_format_on_save_only_checkpoints_private_bsl_draft",
+          "controlled_method_remains_byte_identical_while_ordinary_code_formats",
+          "supported_file_rejects_whole_document_and_expansion_but_accepts_exact_selection_with_native_undo",
+          "locked_supplier_file_rejects_selection_without_source_changes",
+          "opt_in_save_formats_and_preserves_bom_crlf",
+          "eska_save_opt_in_respects_language_specific_native_format_on_save",
+          "restarted_formatter_is_idempotent_and_ignores_native_indent_preferences"
+        ],
+        "timings": [
+          {
+            "attempt": "cold",
+            "milliseconds": 990.3633999999993
+          },
+          {
+            "attempt": "repeat",
+            "milliseconds": 282.040500000001
+          }
+        ]
+      }
+    }
+  ]
+}

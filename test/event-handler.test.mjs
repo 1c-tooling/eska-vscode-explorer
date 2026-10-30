@@ -1,3 +1,4 @@
+import { deferCleanup } from "./cleanup.mjs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, mkdir, readFile, writeFile, rm } from "node:fs/promises";
@@ -25,9 +26,9 @@ test("event subscriptions navigate within each project and retain explicit XML n
   skip: !process.env.ESKA_TEST_BINARY,
 }, async t => {
   const root = await mkdtemp(join(process.env.ESKA_TEST_ROOT ?? resolve("../eska-playground"), "explorer-handler-"));
-  t.after(() => rm(root, { recursive: true, force: true }));
+  deferCleanup(t, () => rm(root, { recursive: true, force: true }));
   const connection = new Connection("test", () => {}, () => {});
-  t.after(() => connection.dispose());
+  deferCleanup(t, () => connection.dispose());
   for (const type of ["configuration", "extension"]) {
     const fixture = await createTreeProject(join(root, type), type);
     await addCommonModules(fixture);

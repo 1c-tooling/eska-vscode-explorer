@@ -3,6 +3,7 @@ import type { LanguageClient, Diagnostic as LspDiagnostic, Hover as LspHover } f
 import { isRecord } from "../protocol.js";
 import { message, type MessageKey } from "../messages.js";
 import { LanguageDocuments } from "../language/documents.js";
+import { languageUri } from "../language/uri.js";
 import { QUERY_SCHEME, type QueryTabs } from "./tabs.js";
 import { isPosition, type QueryPosition } from "./protocol.js";
 import type { QueryLanguageProjection, ProjectedEdit } from "./projections.js";
@@ -194,7 +195,7 @@ export class QueryLanguage implements vscode.Disposable {
 
   /** A restored native owner uses guarded pull diagnostics because delayed push traffic has no trustworthy version. */
   private async nativeDiagnostics(binding: QueryLanguageBinding, document: vscode.TextDocument): Promise<void> {
-    const version = document.version, epoch = binding.epoch(), uri = document.uri.toString();
+    const version = document.version, epoch = binding.epoch(), uri = languageUri(document.uri.toString());
     if (this.disposed || this.binding !== binding || !binding.valid() || document.isClosed || binding.documents.projected(uri) || binding.indexing()) return;
     try {
       await binding.documents.settled(uri);
@@ -212,7 +213,7 @@ export class QueryLanguage implements vscode.Disposable {
     if (!this.fresh(view, token)) return undefined;
     const cancellation = new vscode.CancellationTokenSource(), a = view.cancellation.token.onCancellationRequested(() => cancellation.cancel()),
       b = token?.onCancellationRequested(() => cancellation.cancel());
-    const params = { textDocument: { uri: view.owner.uri.toString() }, ...extra }; this.internal.add(params);
+    const params = { textDocument: { uri: languageUri(view.owner.uri.toString()) }, ...extra }; this.internal.add(params);
     try {
       await view.binding.documents.settled(view.owner.uri.toString());
       if (!this.fresh(view, token)) return undefined;
@@ -306,7 +307,7 @@ export class QueryLanguage implements vscode.Disposable {
     if (!isRecord(value)) return value;
     const uri = typeof value.uri === "string" ? value.uri : value.targetUri;
     if (typeof uri !== "string" || !this.binding?.documents.projected(uri)) return value;
-    const view = [...this.views.values()].find(candidate => candidate.owner.uri.toString() === uri && this.fresh(candidate));
+    const view = [...this.views.values()].find(candidate => languageUri(candidate.owner.uri.toString()) === languageUri(uri) && this.fresh(candidate));
     if (!view) return undefined;
     const link = typeof value.targetUri === "string", range = wireRange(link ? value.targetRange : value.range);
     if (!range) return undefined;

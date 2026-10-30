@@ -30,14 +30,41 @@ exports.run = async function () {
   const extension = vscode.extensions.all.find(value => value.packageJSON.name === 'eska-explorer');
   const explorer = await extension.activate();
   await vscode.commands.executeCommand('eska.explorer.connect');
+  const events = [], errors = [];
+  const selections = explorer.view.onDidChangeSelection(event => events.push({selection:event.selection.map(row=>row.key)}));
+  const visibility = explorer.view.onDidChangeVisibility(event => events.push({visible:event.visible}));
+  const refreshes = explorer.changed.event(entry => events.push({refresh:entry?.key??'roots'}));
+  const showError = explorer.showError.bind(explorer);
+  explorer.showError = error => { errors.push({code:error.code,details:error.details}); showError(error); };
   await vscode.commands.executeCommand('eska.explorer.search');
   explorer.searchView.picker.ignoreFocusOut = true;
   explorer.searchView.picker.value = 'Нужное описание';
   await until(() => explorer.searchView.picker.items.some(item => item.hit?.name === 'ЭлементДанных') && !explorer.searchView.picker.busy, 'predefined description search');
   const result = explorer.searchView.picker.items.find(item => item.hit?.name === 'ЭлементДанных');
   assert.match(result.description, /^Предопределённый элемент/);
+  explorer.searchView.picker.activeItems = [result];
+  explorer.searchView.picker.show();
+  const search = explorer.searchView;
+  const reveal = explorer.view.reveal.bind(explorer.view);
+  explorer.view.reveal = async (entry, options) => {
+    events.push({reveal:entry.key,options});
+    try { await reveal(entry,options); events.push({revealed:entry.key}); }
+    catch(error) { events.push({revealError:String(error)}); throw error; }
+  };
   await vscode.commands.executeCommand('workbench.action.acceptSelectedQuickOpenItem');
-  await until(() => !explorer.searchView && explorer.view.selection[0]?.node.label.text === 'ЭлементДанных', 'reveal unopened predefined item');
+  try { await until(() => !explorer.searchView && explorer.view.selection[0]?.node.label.text === 'ЭлементДанных', 'reveal unopened predefined item'); }
+  catch (error) {
+    await fs.writeFile(path.join(fixture.root,'host-result.json'),JSON.stringify({passed:false,error:String(error.stack??error),
+      search:search&&{accepting:search.accepting,disposed:search.disposed,failure:search.failure?.code,
+        active:search.picker.activeItems.map(item=>item.label),selected:search.picker.selectedItems.map(item=>item.label),
+        items:search.picker.items.map(item=>({label:item.label,hit:item.hit?.name}))},
+      selection:explorer.view.selection.map(row=>({key:row.key,node:row.node?.id,label:row.node?.label})),
+      events,errors,visible:explorer.view.visible,
+      roots:explorer.tree.projects.map(project=>({dirty:project.rootDirty,children:project.root?.children?.map(row=>row.key)}))}));
+    throw error;
+  } finally {
+    selections.dispose(); visibility.dispose(); refreshes.dispose(); explorer.showError = showError; explorer.view.reveal = reveal;
+  }
   const item = explorer.view.selection[0];
   const folder = explorer.getParent(item);
   const group = explorer.getParent(folder);
@@ -51,7 +78,8 @@ exports.run = async function () {
   const properties = [...explorer.propertiesTabs.tabs.values()].find(tab => tab.entry.node.id.objectId === item.node.id.objectId);
   await until(() => properties?.panel.visible && properties.state.status === 'ready', 'predefined item properties');
   await vscode.commands.executeCommand('eska.explorer.openXml', item);
-  assert.equal(vscode.window.activeTextEditor.document.uri.fsPath, file);
+  await until(() => vscode.window.activeTextEditor?.document.uri.fsPath === file
+    && vscode.window.activeTextEditor.document.getText(vscode.window.activeTextEditor.selection) === '<Name>ЭлементДанных</Name>', 'predefined XML selection');
   assert.equal(vscode.window.activeTextEditor.document.getText(vscode.window.activeTextEditor.selection), '<Name>ЭлементДанных</Name>');
   assert.match(explorer.getTreeItem(item).iconPath.path, /\/predefined-item\.svg$/);
   await settings.update('treeLanguage', 'en-US', vscode.ConfigurationTarget.Workspace);
@@ -68,5 +96,6 @@ exports.run = async function () {
     const updatedGroup = named(await explorer.getChildren(owner), 'Предопределённые данные');
     return (await explorer.getChildren(updatedGroup)).length === 0;
   }, 'predefined watcher deletion');
-  await fs.writeFile(path.join(fixture.root, 'host-result.json'), JSON.stringify({passed: true, searchReveal: true, xmlSelection: true, languages: 2, watcher: true}));
+  await fs.writeFile(path.join(fixture.root, 'host-result.json'), JSON.stringify({passed: true, searchReveal: true,
+    xmlSelection: true, languages: 2, watcher: true, nativeRootMisses: events.filter(event=>event.revealError).length}));
 };

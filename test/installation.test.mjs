@@ -1,3 +1,4 @@
+import { deferCleanup } from "./cleanup.mjs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, writeFile, chmod, rm, realpath, readFile } from "node:fs/promises";
@@ -8,7 +9,7 @@ import { parseHandshake, API_VERSION, MAX_HEADER, MAX_REQUEST, MAX_RESPONSE } fr
 /** Installation checks use only their own disposable prefix under the shared playground. */
 async function fixture(t) {
   const root = await mkdtemp(join(process.env.ESKA_TEST_ROOT ?? resolve("../eska-playground"), "explorer-install-"));
-  t.after(() => rm(root, { recursive: true, force: true }));
+  deferCleanup(t, () => rm(root, { recursive: true, force: true }));
   return root;
 }
 
@@ -68,7 +69,7 @@ test("read-only probes reap SIGTERM-resistant processes on timeout and cancellat
 /** Oversized and interrupted downloads cannot reach an installer or leave the reader open. */
 test("downloads reject HTTP failures, oversized bodies and cancellation", async t => {
   const original = globalThis.fetch;
-  t.after(() => { globalThis.fetch = original; });
+  deferCleanup(t, () => { globalThis.fetch = original; });
   let cancelled = false;
   globalThis.fetch = async () => new Response(new ReadableStream({ cancel() { cancelled = true; } }), { status: 503 });
   await assert.rejects(fetchText("https://example.invalid", 10), { code: "updateFailed" });

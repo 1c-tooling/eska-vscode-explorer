@@ -1,11 +1,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { LanguageDocuments } from "../out/language/documents.js";
+import { resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 
 /** Track actual wire notifications without involving a second editor or language server. */
 function fixture() {
   const sent = [], uri = "file:///project/Module.bsl";
-  const document = { version: 41, isClosed: false, text: "native", getText() { return this.text; } };
+  const document = { uri: { toString: () => uri }, version: 41, isClosed: false, text: "native", getText() { return this.text; } };
   const documents = new LanguageDocuments(async (method, params) => sent.push({ method, ...params }), value => value === uri && !document.isClosed ? document : undefined);
   const native = (method, value = {}) => documents.notification(`textDocument/${method}`, { textDocument: { uri, version: document.version }, ...value }, async () => assert.fail("native synchronization must share the URI stream"));
   return { sent, uri, document, documents, native };
@@ -28,6 +30,37 @@ test("projection owns one URI, suppresses native traffic and restores the newest
   await native("didChange"); assert.equal(sent[3].textDocument.version, 4);
   assert.equal(documents.projected(uri), false); assert.equal(documents.poisoned(uri), true);
   document.isClosed = true; await native("didClose"); assert.equal(documents.poisoned(uri), false);
+});
+
+test("wire versions identify only the current synchronized native document after projection", async () => {
+  const { uri, document, documents, native } = fixture(), owner = {};
+  assert.equal(documents.wireVersion(document), undefined);
+  await native("didOpen"); assert.equal(documents.wireVersion(document), 1);
+  await documents.project(uri, "projected", owner); assert.equal(documents.wireVersion(document), undefined);
+  document.version++; document.text = "latest native";
+  await native("didChange"); assert.equal(documents.wireVersion(document), undefined);
+  await documents.release(uri, owner); assert.equal(documents.wireVersion(document), 3);
+  document.version++; assert.equal(documents.wireVersion(document), undefined, "an unsent native body cannot authorize an edit");
+  await native("didChange"); assert.equal(documents.wireVersion(document), 4);
+  assert.equal(documents.wireVersion({ ...document }), undefined, "a different document lifetime has no mapping");
+  document.isClosed = true; assert.equal(documents.wireVersion(document), undefined);
+});
+
+test("Windows native and upstream URI spellings own one stream across projection and restoration", { skip: process.platform !== "win32" }, async () => {
+  const standard = pathToFileURL(resolve(process.env.ESKA_TEST_ROOT ?? "../eska-playground", "URI Тест #.bsl")
+    .replace(/^[a-z]:/i, drive => drive.toUpperCase())).href;
+  const native = standard.replace(/^file:\/\/\/([a-z]):/i, (_value, drive) => `file:///${drive.toLowerCase()}%3A`);
+  const sent = [], owner = {}, document = { version: 41, isClosed: false, getText: () => "native" };
+  const documents = new LanguageDocuments(async (method, params) => sent.push({ method, ...params }),
+    uri => uri === standard ? document : undefined);
+  await documents.notification("textDocument/didOpen", { textDocument: { uri: native } }, () => assert.fail("one owned stream"));
+  await documents.project(native, "projected", owner);
+  assert.equal(documents.projected(standard), true);
+  await documents.release(standard, owner);
+  assert.equal(documents.projected(native), false);
+  assert.deepEqual(sent.map(value => value.textDocument.uri), [standard, standard, standard]);
+  assert.deepEqual(sent.map(value => value.textDocument.version), [1, 2, 3]);
+  assert.equal(sent.at(-1).contentChanges[0].text, "native");
 });
 
 test("queued notifications captured under projection cannot leak after release; replacement owners keep independent leases", async () => {

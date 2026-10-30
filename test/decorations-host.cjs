@@ -54,7 +54,15 @@ exports.run = async function () {
   assert.equal(await decoration(module), undefined);
   await fs.appendFile(fixture.module, "// changed\n");
   await repository.status();
-  await until(async () => (await decoration(module))?.badge === "M", "modified module");
+  try { await until(async () => (await decoration(module))?.badge === "M", "modified module"); }
+  catch (error) {
+    const source = await explorer.tree.request(module.project, "metadata/source", {node:module.node.id}).catch(value=>({error:String(value),code:value.code,domain:value.domain,details:value.details}));
+    await fs.writeFile(path.join(fixture.root,"host-result.json"),JSON.stringify({passed:false,error:String(error.stack??error),
+      node:module.node.id,source,snapshot:explorer.decorations.snapshots.get(module.project),
+      exists:await fs.stat(fixture.module).then(stat=>stat.isFile()).catch(()=>false),
+      working:repository.state.workingTreeChanges.map(change=>({status:change.status,path:change.uri.fsPath}))}));
+    throw error;
+  }
   assert.equal((await decoration(module)).color.id, "gitDecoration.modifiedResourceForeground");
   assert.ok(await decoration(owner));
   assert.equal((await decoration(catalogs)).badge, "•");
@@ -96,7 +104,10 @@ exports.run = async function () {
   assert.equal(await decoration(owner), undefined);
   await vscode.workspace.getConfiguration("git").update("decorations.enabled", true, vscode.ConfigurationTarget.Workspace);
   await until(async () => !!await decoration(owner), "decorations reenabled");
+  const progress = await explorer.tree.request(root.project, "metadata/index", {action:"status"});
+  assert.equal(progress.progress.state, "not_started", "Git badges do not start the full metadata index");
   await vscode.commands.executeCommand("eska.explorer.disconnect");
   assert.equal(await decoration(owner), undefined);
-  await fs.writeFile(path.join(fixture.root, "host-result.json"), JSON.stringify({ passed: true, vscode: vscode.version, gitDecorations: true }));
+  await fs.writeFile(path.join(fixture.root, "host-result.json"), JSON.stringify({ passed: true, vscode: vscode.version,
+    gitDecorations: true, fullIndexStarted: false }));
 };

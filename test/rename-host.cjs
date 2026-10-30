@@ -18,28 +18,49 @@ exports.run = async function () {
   const extension = vscode.extensions.all.find(item => item.packageJSON.name === 'eska-explorer');
   const explorer = await extension.activate();
   await vscode.commands.executeCommand('eska.explorer.connect');
-  const [root] = (await explorer.getChildren()).filter(entry => entry.node);
-  await until(() => !explorer.support.loading, 'support ready');
-  const catalogs = (await explorer.getChildren(root)).find(entry => entry.node?.id.collection?.metadataKind === 'catalog');
-  const object = (await explorer.getChildren(catalogs)).find(entry => entry.node.label.text === 'Товары');
+  let object;
+  try { await until(async () => {
+    if (explorer.support.loading) return false;
+    const root = (await explorer.getChildren()).find(entry => entry.node);
+    if (!root) return false;
+    const catalogs = (await explorer.getChildren(root)).find(entry => entry.node?.id.collection?.metadataKind === 'catalog');
+    return catalogs && (object = (await explorer.getChildren(catalogs)).find(entry => entry.node?.label.text === 'Товары'));
+  }, 'catalog objects'); }
+  catch (error) { throw new Error(`${error.message}: ${JSON.stringify({ connection: explorer.connection.state,
+    roots: (await explorer.getChildren()).map(entry => ({ label: entry.label, node: entry.node?.id })), loading: explorer.support.loading })}`); }
   await vscode.commands.executeCommand('eska.explorer.properties', object);
   const [tab] = explorer.propertiesTabs.tabs.values();
+  const actions = [], receive = tab.receive.bind(tab);
+  tab.receive = async input => {
+    actions.push({type:input?.type,revision:input?.revision,current:tab.revision,checkingExternal:tab.checkingExternal,refreshing:tab.refreshing,busy:tab.editor.busy});
+    return receive(input);
+  };
+  async function history(predicate, label) {
+    try { await until(predicate, label); }
+    catch (error) {
+      await fs.writeFile(path.join(fixture.root, 'host-result.json'), JSON.stringify({passed:false,error:String(error.stack??error),actions,
+        editing:tab.state.editing,notice:tab.state.notice,revision:tab.revision,refreshing:tab.refreshing,checkingExternal:tab.checkingExternal,
+        dirty:vscode.workspace.textDocuments.filter(document=>document.isDirty).map(document=>({uri:document.uri.toString(),version:document.version}))}));
+      throw error;
+    }
+  }
   let dom = await frame(tab);
   try {
     await dom.evaluate("document.getElementById('read-only').click()");
     await until(() => tab.state.editing.unlocked && tab.state.editing.schema.renameAvailable, 'rename unlock');
-    await dom.evaluate("[...document.querySelectorAll('button')].find(button=>button.textContent==='Rename').click()");
-    await until(() => dom.workbench("document.querySelector('.quick-input-title')?.textContent==='Rename'"), 'rename input');
+    await until(() => dom.evaluate("[...document.querySelectorAll('button')].some(button=>/^(Rename|Переименовать)$/.test(button.textContent) && !button.disabled)"), 'rename button rendered');
+    await dom.evaluate("[...document.querySelectorAll('button')].find(button=>/^(Rename|Переименовать)$/.test(button.textContent)).click()");
+    await until(() => dom.workbench("/^(Rename|Переименовать)$/.test(document.querySelector('.quick-input-title')?.textContent)"), 'rename input');
     await dom.workbench("(()=>{const input=document.querySelector('.quick-input-widget input[type=text]');input.value='Материалы';input.dispatchEvent(new Event('input',{bubbles:true}));})()");
     await vscode.commands.executeCommand('workbench.action.acceptSelectedQuickOpenItem');
     const preview = await frame({ state: { title: 'Товары → Материалы' } });
     try {
       assert.equal(await preview.evaluate("document.getElementById('apply').disabled"), true);
-      assert.match(await preview.evaluate("document.getElementById('summary').textContent"), /Confirmed replacements: 3.*Moves: 2.*review: 1/);
+      assert.match(await preview.evaluate("document.getElementById('summary').textContent"), /(?:Confirmed replacements|Подтверждённых замен): 3.*(?:Moves|Перемещений): 2.*(?:review|проверки): 1/);
       assert.equal(await preview.evaluate("document.documentElement.scrollWidth > innerWidth"), false);
       await preview.evaluate("document.querySelector('.uncertain').parentElement.querySelector('button').click()");
-      await until(() => vscode.window.activeTextEditor?.document.uri.fsPath === codePath, 'uncertain source navigation');
-      assert.ok(vscode.window.activeTextEditor.document.getText(vscode.window.activeTextEditor.selection).includes('Товары'));
+      await until(() => vscode.window.activeTextEditor?.document.uri.fsPath === codePath
+        && vscode.window.activeTextEditor.document.getText(vscode.window.activeTextEditor.selection).includes('Товары'), 'uncertain source navigation and selection');
       await preview.screenshot('rename-review.png');
       await preview.evaluate("document.getElementById('reviewed').click();document.getElementById('apply').click()");
     } finally { preview.close(); }
@@ -54,13 +75,22 @@ exports.run = async function () {
     assert.equal(explorer.propertiesTabs.tabs.size, 1);
     dom.close(); dom = await frame(tab);
     await dom.screenshot('renamed-properties.png');
+    await dom.rendered();
+    await until(() => dom.evaluate("!document.getElementById('undo').disabled"), 'rename undo rendered');
     await dom.evaluate("document.getElementById('undo').click()");
-    await until(async () => !tab.state.editing.busy && (await fs.readFile(fixture.descriptor, 'utf8').catch(() => '')) === original, 'rename undo');
+    await history(async () => !tab.state.editing.busy && (await fs.readFile(fixture.descriptor, 'utf8').catch(() => '')) === original, 'rename undo');
     assert.equal(tab.entry.node.id.objectId, 'catalog:Товары');
     assert.equal(await fs.readFile(codePath, 'utf8'), code);
     await until(() => !tab.state.editing.busy, 'undo reread');
+    await dom.rendered();
+    await until(() => dom.evaluate("!document.getElementById('redo').disabled"), 'rename redo rendered');
     await dom.evaluate("document.getElementById('redo').click()");
-    await until(async () => !tab.state.editing.busy && (await fs.readFile(renamedFile, 'utf8').catch(() => '')) === original.replace('<Name>Товары</Name>', '<Name>Материалы</Name>'), 'rename redo');
+    await history(async () => !tab.state.editing.busy && (await fs.readFile(renamedFile, 'utf8').catch(() => '')) === original.replace('<Name>Товары</Name>', '<Name>Материалы</Name>'), 'rename redo');
     await fs.writeFile(path.join(fixture.root, 'host-result.json'), JSON.stringify({ passed: true, suite: 'metadata-rename', vscode: vscode.version }));
+  } catch (error) {
+    await fs.writeFile(path.join(fixture.root, 'host-result.json'), JSON.stringify({ passed: false,
+      error: String(error.stack ?? error), details: error, actions, revision: tab.revision,
+      editing: tab.state.editing, notice: tab.state.notice }));
+    throw error;
   } finally { dom.close(); }
 };

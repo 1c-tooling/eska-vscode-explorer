@@ -10,7 +10,7 @@ function node(kind) {
     label: { kind: "name", text: "Unrelated" }, state: "empty", expandedByDefault: false, rootSection: false };
 }
 
-test("all backend metadata kinds have local artwork in every supported theme", async () => {
+test("all backend metadata kinds have local artwork in every supported theme", { timeout: 30_000 }, async () => {
   const vocabulary = await readFile(new URL("../src/kind-labels.ts", import.meta.url), "utf8");
   const kinds = [...vocabulary.matchAll(/^  "([a-z-]+)":/gm)].map(match => match[1]);
   assert.equal(kinds.length, 68);
@@ -79,7 +79,7 @@ test("tabular attributes inherit the table color without recoloring other fields
   }
 });
 
-test("support composites preserve themed metadata and bundle only the three orange symbols", async () => {
+test("support composites preserve themed metadata and bundle only the three orange symbols", { timeout: 30_000 }, async () => {
   const symbols = ['lock', 'lock_open_right', 'no_encryption'];
   for (const theme of ['light', 'dark', 'contrast', 'contrast-light']) {
     const base = new URL(`../resources/icons/${theme}/`, import.meta.url);

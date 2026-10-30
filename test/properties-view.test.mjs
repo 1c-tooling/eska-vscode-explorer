@@ -304,6 +304,56 @@ test("edits keep drafts through external conflicts and never write while blocked
   assert.equal(Object.values(tab.state.editing.drafts)[0].value, "mine");
 });
 
+test("accepted edits wait for the latest external check and coalesce without duplicate writes", async t => {
+  const f = fixture(t), tab = await openEditable(f);
+  f.change([f.object]);
+  const latest = tab.checkExternalChange();
+  for (const value of ["first", "latest"]) {
+    await tab.receive({ type: "commit", revision: tab.state.revision, field: 0, change: { kind: "text", value } });
+  }
+  assert.equal(f.requests.length, 4, "no write precedes validation");
+  f.requests[2].resolve(editable()); await settle();
+  assert.equal(f.requests.length, 4, "a superseded check cannot release pending edits");
+  f.requests[3].resolve(editable()); await settle();
+  assert.equal(f.requests[4].method, "metadata/updateProperty");
+  assert.equal(f.requests[4].params.change.value, "latest");
+  assert.equal(f.requests[4].params.snapshot, "a".repeat(64));
+  f.requests[4].resolve({ ...response(), editing: editable("latest", "b".repeat(64)) }); await latest;
+  assert.equal(f.requests.length, 5, "one accepted field produces one write");
+  assert.equal(Object.keys(tab.state.editing.drafts).length, 0);
+});
+
+test("queued edits cannot bypass a conflict, cancellation, lock or replaced connection", async t => {
+  for (const outcome of ["conflict", "read-only", "failure", "cancel", "lock", "disconnect", "dispose"]) {
+    await t.test(outcome, async t => {
+      const f = fixture(t), tab = await openEditable(f);
+      const checking = tab.checkExternalChange();
+      await tab.receive({ type: "commit", revision: tab.state.revision, field: 0, change: { kind: "text", value: "mine" } });
+      if (outcome === "cancel") await tab.receive({ type: "cancelDraft", revision: tab.state.revision, field: 0 });
+      if (outcome === "lock") await tab.receive({ type: "toggleLock", revision: tab.state.revision });
+      if (outcome === "disconnect") f.replaceTree({});
+      if (outcome === "dispose") tab.dispose();
+      if (outcome === "failure") f.requests[2].reject(new Error("disconnected"));
+      else f.requests[2].resolve(outcome === "conflict" ? editable("external", "b".repeat(64))
+        : { ...editable(), writable: outcome !== "read-only" });
+      await checking;
+      assert.equal(f.requests.length, 3, "validation never writes an unsafe or cancelled proposal");
+      if (["conflict", "read-only", "failure"].includes(outcome)) {
+        assert.equal(tab.state.editing.blocked, true);
+        assert.equal(Object.values(tab.state.editing.drafts)[0].value, "mine");
+      }
+      if (outcome === "lock") {
+        const unlocking = tab.receive({ type: "toggleLock", revision: tab.state.revision });
+        f.requests[3].resolve(editable()); await unlocking;
+        const rechecking = tab.checkExternalChange();
+        f.requests[4].resolve(editable()); await rechecking;
+        assert.equal(f.requests.length, 5, "unlocking cannot resurrect a cancelled save");
+        assert.equal(Object.values(tab.state.editing.drafts)[0].value, "mine");
+      }
+    });
+  }
+});
+
 /** A failed picker selection remains visible and can only be retried from the host's retained draft. */
 test("reference drafts keep captions across conflicts and require an explicit save after rereading", async t => {
   const f = fixture(t), schema = editable("");
@@ -340,10 +390,13 @@ test("successful autosave survives its own invalidation and keeps newer draft in
   assert.equal(f.requests[2].params.snapshot, "a".repeat(64));
   f.change([f.object]);
   assert.equal(f.requests.length, 3);
+  await tab.receive({ type: "commit", revision, field: 0, change: { kind: "text", value: "first" } });
   await tab.receive({ type: "draft", revision, field: 0, change: { kind: "text", value: "second" } });
   f.requests[2].resolve({ ...response(), editing: { ...editable("first", "b".repeat(64)), undo: true } });
   await settle();
-  f.requests[3].resolve({ ...editable("first", "b".repeat(64)), undo: true }); await saving;
+  f.requests[3].resolve({ ...editable("first", "b".repeat(64)), undo: true }); await settle();
+  assert.equal(f.requests.length, 4, "Enter followed by blur cannot save the same accepted value twice");
+  await saving;
   assert.equal(tab.state.editing.blocked, false);
   assert.equal(Object.values(tab.state.editing.drafts)[0].value, "second");
   assert.equal(tab.state.editing.schema.undo, true);

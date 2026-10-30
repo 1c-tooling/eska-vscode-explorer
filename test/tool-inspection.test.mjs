@@ -1,3 +1,4 @@
+import { deferCleanup } from "./cleanup.mjs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, mkdir, writeFile, chmod, rm, realpath } from "node:fs/promises";
@@ -61,7 +62,7 @@ test("native target selection does not invent upstream ARM Linux, Intel macOS or
 
 test("explicit paths never fall back while default discovery ignores workspace-relative PATH entries", async t => {
   const root = await mkdtemp(join(process.env.ESKA_TEST_ROOT ?? resolve("../eska-playground"), "explorer-tool-paths-"));
-  t.after(() => rm(root, { recursive: true, force: true }));
+  deferCleanup(t, () => rm(root, { recursive: true, force: true }));
   const bin = join(root, "managed");
   await mkdir(bin);
   const name = process.platform === "win32" ? "eska-project.exe" : "eska-project";
@@ -77,7 +78,7 @@ test("real project inspection negotiates its API and validates the installed con
   skip: !process.env.ESKA_TEST_BINARY,
 }, async t => {
   const root = await mkdtemp(join(process.env.ESKA_TEST_ROOT ?? resolve("../eska-playground"), "explorer-tool-project-"));
-  t.after(() => rm(root, { recursive: true, force: true }));
+  deferCleanup(t, () => rm(root, { recursive: true, force: true }));
   const path = process.env.ESKA_TEST_BINARY;
   const info = await inspectProject(path, root, () => {});
   assert.equal(info.kind, "project"); assert.ok(info.version);
@@ -90,7 +91,7 @@ test("real project inspection negotiates its API and validates the installed con
 /** Discovery must not reject a usable API 1.12 executable before Connection can negotiate its optional features. */
 test("project preflight accepts the minimum tree API without query support", { skip: process.platform === "win32" }, async t => {
   const root = await mkdtemp(join(process.env.ESKA_TEST_ROOT ?? resolve("../eska-playground"), "explorer-tool-api12-"));
-  t.after(() => rm(root, { recursive: true, force: true }));
+  deferCleanup(t, () => rm(root, { recursive: true, force: true }));
   const path = join(root, "eska-project");
   const peer = fileURLToPath(new URL("fake-backend.mjs", import.meta.url));
   await writeFile(path, `#!${process.execPath}\nprocess.argv[2] = "api12"; import(${JSON.stringify(peer)});\n`);
@@ -102,7 +103,7 @@ test("real analyzer inspection verifies both bounded processes against the pinne
   skip: !process.env.ESKA_TEST_ANALYZER_BINARY,
 }, async t => {
   const root = await mkdtemp(join(process.env.ESKA_TEST_ROOT ?? resolve("../eska-playground"), "explorer-tool-analyzer-"));
-  t.after(() => rm(root, { recursive: true, force: true }));
+  deferCleanup(t, () => rm(root, { recursive: true, force: true }));
   const info = await inspectAnalyzer(process.env.ESKA_TEST_ANALYZER_BINARY, root);
   assert.match(info.version, /^\d+\.\d+\.\d+$/); assert.equal(info.kind, "analyzer");
   await assert.rejects(inspectAnalyzer(process.env.ESKA_TEST_ANALYZER_BINARY, root, AbortSignal.abort()), { code: "cancelled" });

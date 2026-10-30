@@ -1,3 +1,4 @@
+import { deferCleanup } from "./cleanup.mjs";
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, writeFile, readFile, rm } from 'node:fs/promises';
@@ -48,7 +49,7 @@ test('typing is debounced, slow obsolete results are cancelled and cannot replac
     } };
   const snapshots = [];
   const session = new SearchSession(tree, snapshot => snapshots.push(snapshot), 15, 15);
-  t.after(() => session.dispose());
+  deferCleanup(t, () => session.dispose());
   session.setText('o'); session.setText('ol'); session.setText('old');
   await until(() => first, 'first query');
   assert.equal(calls.filter(call => call.method === 'metadata/search').length, 1);
@@ -71,9 +72,9 @@ test('typing is debounced, slow obsolete results are cancelled and cannot replac
 const executable = process.env.ESKA_TEST_BINARY;
 test('real search finds synonyms, duplicate nested names and unseen branches across four schemas', { skip: !executable }, async t => {
   const root = await mkdtemp(join(process.env.ESKA_TEST_ROOT ?? resolve('../eska-playground'), 'explorer-search-'));
-  t.after(() => rm(root, { recursive: true, force: true }));
+  deferCleanup(t, () => rm(root, { recursive: true, force: true }));
   const connection = new Connection('test', () => {}, () => {});
-  t.after(() => connection.dispose());
+  deferCleanup(t, () => connection.dispose());
   for (const type of ['configuration', 'extension', 'report', 'processing']) {
     const fixture = await createTreeProject(join(root, type), type);
     const original = await readFile(fixture.descriptor, 'utf8');
@@ -117,7 +118,7 @@ test('real search finds synonyms, duplicate nested names and unseen branches acr
 
 test('real workspace search retains project identities, reports truncation and an incomplete index', { skip: !executable }, async t => {
   const root = await mkdtemp(join(process.env.ESKA_TEST_ROOT ?? resolve('../eska-playground'), 'explorer-search-workspace-'));
-  t.after(() => rm(root, { recursive: true, force: true }));
+  deferCleanup(t, () => rm(root, { recursive: true, force: true }));
   const first = await createTreeProject(join(root, 'first'));
   await createTreeProject(join(root, 'second'));
   for (const member of ['first', 'second']) await writeFile(join(root, member, 'eska.toml'), `[project]\nname='${member}'\ntype='configuration'\n`);
@@ -127,13 +128,13 @@ test('real workspace search retains project identities, reports truncation and a
   await writeFile(first.descriptor, xml.replace('<ChildObjects>', '<ChildObjects>' + many));
   await writeFile(join(first.source, 'Catalogs', 'Покупатели.xml'), '<broken');
   const connection = new Connection('test', () => {}, () => {});
-  t.after(() => connection.dispose());
+  deferCleanup(t, () => connection.dispose());
   await connection.connect({ executable, path: root, name: 'workspace', locale: 'en-US' });
   assert.equal(connection.state.kind, 'ready', JSON.stringify(connection.state));
   const tree = new MetadataTree(connection, connection.state.session, () => {}, () => {});
-  t.after(() => tree.dispose());
+  deferCleanup(t, () => tree.dispose());
   const session = new SearchSession(tree, () => {}, 5, 10);
-  t.after(() => session.dispose());
+  deferCleanup(t, () => session.dispose());
   session.setText('Артикул');
   await until(() => !session.snapshot.loading && session.snapshot.projects.length === 2
     && session.snapshot.projects.every(row => ['ready', 'incomplete'].includes(row.progress?.state)), 'workspace completion');
@@ -170,7 +171,7 @@ test('progress bursts update partial results once and isolate errors in other pr
       return { progress: progress(), hits: [hit()], truncated: false };
     } };
   const session = new SearchSession(tree, () => {}, 5, 15);
-  t.after(() => session.dispose());
+  deferCleanup(t, () => session.dispose());
   session.setText('Артикул');
   await until(() => !session.snapshot.loading, 'partial response');
   assert.equal(session.snapshot.projects[0].progress.state, 'building');

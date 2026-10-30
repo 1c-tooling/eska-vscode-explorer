@@ -29,11 +29,50 @@ exports.run = async function () {
   assert.equal(await editor.edit(edit => edit.insert(new vscode.Position(0, 0), "// unsaved navigation\n")), true);
   const dirty = document.getText(), version = document.version;
   const methods = [];
+  const events = [];
+  let coldRoot = true;
+  const visibility = explorer.view.onDidChangeVisibility(event => events.push({ visible: event.visible, time: performance.now() }));
+  const refreshes = explorer.changed.event(entry => events.push({ refresh: entry?.key ?? "roots", time: performance.now() }));
+  const selections = explorer.view.onDidChangeSelection(event => events.push({ selection: event.selection.map(row => row.key), time: performance.now() }));
+  const errors = [];
+  const reveal = explorer.view.reveal.bind(explorer.view);
+  explorer.view.reveal = async (entry, options) => {
+    events.push({ reveal: entry.key, options, time: performance.now() });
+    try { await reveal(entry, options); events.push({ revealed: entry.key, time: performance.now() }); }
+    catch (error) { events.push({ revealError: String(error.stack ?? error), time: performance.now() }); throw error; }
+  };
+  const showError = explorer.showError.bind(explorer);
+  explorer.showError = error => { errors.push({code:error.code,domain:error.domain,details:error.details}); showError(error); };
   const request = explorer.connection.request.bind(explorer.connection);
-  explorer.connection.request = (session, method, ...args) => { methods.push(method); return request(session, method, ...args); };
+  explorer.connection.request = (session, method, ...args) => {
+    methods.push(method);
+    const time = performance.now();
+    // Simulate a slow first provider read without changing the real backend result or native tree API.
+    const delay = coldRoot && method === "metadata/children";
+    if (delay) coldRoot = false;
+    const pending = delay ? new Promise(resolve => setTimeout(resolve, 150)).then(() => request(session, method, ...args))
+      : request(session, method, ...args);
+    void pending.then(() => events.push({ method, elapsed: performance.now() - time }), error => events.push({ method, error: String(error) }));
+    return pending;
+  };
   const started = performance.now();
   await vscode.commands.executeCommand("eska.explorer.revealActiveFile");
-  await until(() => explorer.view.selection[0]?.node?.id.kind === "module", "native tree selected the module");
+  try { await until(() => explorer.view.selection[0]?.node?.id.kind === "module", "native tree selected the module"); }
+  catch (error) {
+    await fs.writeFile(path.join(fixture.root, "host-result.json"), JSON.stringify({ passed: false,
+      error: String(error.stack ?? error), methods, errors, events, visible: explorer.view.visible,
+      roots: explorer.tree.projects.map(project => ({ dirty: project.rootDirty, nodes: project.nodes.size,
+        children: project.root?.children?.map(row => row.node.id) })),
+      connection: explorer.connection.state.kind,
+      selection: explorer.view.selection.map(row => ({ key: row.key, node: row.node?.id })),
+      active: vscode.window.activeTextEditor?.document.uri.toString() }));
+    throw error;
+  } finally {
+    visibility.dispose();
+    refreshes.dispose();
+    selections.dispose();
+    explorer.view.reveal = reveal;
+  }
   const elapsedMs = performance.now() - started;
   assert.equal(explorer.view.selection[0].node.id.role, "object");
   assert.equal(methods.filter(method => method === "metadata/revealSource").length, 1);
@@ -45,11 +84,61 @@ exports.run = async function () {
   const project = explorer.tree.projects[0];
   const progress = await explorer.tree.request(project, "metadata/index", { action: "status" });
   assert.equal(progress.progress.state, "not_started");
+  // The observed native error must retry only root expansion, preserving a single source lookup.
+  let rootAttempts = 0, targetReveals = 0;
+  explorer.view.reveal = async (entry, options) => {
+    if (entry === project.root && ++rootAttempts === 1) {
+      throw new Error("TreeError [eska.explorer.projects] Tree element not found: [object Object]");
+    }
+    if (entry.node?.id.kind === "module") targetReveals++;
+    await reveal(entry, options);
+  };
+  try {
+    await vscode.window.showTextDocument(document);
+    await vscode.commands.executeCommand("eska.explorer.revealActiveFile");
+    await until(() => explorer.view.selection[0]?.node?.id.kind === "module", "retry selected the module");
+    assert.equal(rootAttempts, 2, "only the transient native root miss is repeated");
+    assert.equal(targetReveals, 1, "target selection is not replayed");
+    assert.equal(methods.filter(method => method === "metadata/revealSource").length, 2, "one source lookup per public command");
+    assert.equal(document.getText(), dirty);
+    assert.equal(document.version, version);
+    assert.equal(document.isDirty, true);
+    assert.deepEqual(await fs.readFile(fixture.module), original);
+  } finally { explorer.view.reveal = reveal; }
+  // A permanent native miss must finish, while unrelated failures must never enter the readiness retry.
+  const reportError = explorer.showError;
+  const reported = [];
+  let permanentAttempts = 0, unrelatedAttempts = 0;
+  explorer.showError = error => reported.push(error.code);
+  try {
+    await vscode.window.showTextDocument(document);
+    await until(() => vscode.window.activeTextEditor?.document === document, "fault test editor active");
+    explorer.view.reveal = async () => {
+      permanentAttempts++;
+      throw new Error("TreeError [eska.explorer.projects] Tree element not found: [object Object]");
+    };
+    let timer;
+    try {
+      await Promise.race([vscode.commands.executeCommand("eska.explorer.revealActiveFile"),
+        new Promise((_,reject) => { timer = setTimeout(() => reject(new Error("native root retry exceeded its deadline")), 8000); })]);
+    } finally { clearTimeout(timer); }
+    assert.ok(permanentAttempts > 1);
+    assert.equal(reported.at(-1), "sourceMissing");
+    explorer.view.reveal = async () => { unrelatedAttempts++; throw new Error("unrelated native failure"); };
+    await vscode.commands.executeCommand("eska.explorer.revealActiveFile");
+    assert.equal(unrelatedAttempts, 1);
+    assert.equal(methods.filter(method => method === "metadata/revealSource").length, 4, "retry never repeats a source lookup");
+    assert.equal(document.getText(), dirty);
+    assert.equal(document.version, version);
+    assert.deepEqual(await fs.readFile(fixture.module), original);
+  } finally { explorer.view.reveal = reveal; explorer.showError = reportError; }
   explorer.connection.request = request;
   await vscode.window.showTextDocument(document);
   await vscode.commands.executeCommand("workbench.action.revertAndCloseActiveEditor");
   await vscode.commands.executeCommand("eska.explorer.disconnect");
   await fs.writeFile(path.join(fixture.root, "host-result.json"), JSON.stringify({ passed: true,
     suite: "source-navigation", projectType: fixture.type ?? process.env.ESKA_HOST_PROJECT_TYPE ?? "configuration",
-    vscode: vscode.version, locale: vscode.env.language, elapsedMs, methods }));
+    vscode: vscode.version, locale: vscode.env.language, elapsedMs, coldTreeMissRecovered: true,
+    permanentMissBounded: true, unrelatedErrorNotRetried: true,
+    nativeColdRootMisses: events.filter(event => event.revealError?.includes("Tree element not found:")).length, methods }));
 };

@@ -31,7 +31,7 @@ async function replace(editor, text) {
 
 /** Git fixtures are local, uniquely owned and use no repository outside the runner's project. */
 async function git(root, ...args) {
-  return execute("git", ["-c", "maintenance.auto=false", "-c", "user.name=ESKA fixture", "-c", "user.email=fixture@example.invalid", ...args], { cwd: root, timeout: 30000 });
+  return execute("git", ["-c", "maintenance.auto=false", "-c", "core.autocrlf=false", "-c", "user.name=ESKA fixture", "-c", "user.email=fixture@example.invalid", ...args], { cwd: root, timeout: 30000 });
 }
 
 /** Query the actual upstream definition provider and normalize the two standard result representations. */

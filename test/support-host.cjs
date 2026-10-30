@@ -35,14 +35,17 @@ exports.run = async function () {
   await until(() => explorer.support.provideFileDecoration(vscode.Uri.file(fixture.descriptor))?.badge === '🔒', 'mixed XML policy without expanding tree');
   await until(() => explorer.support.provideFileDecoration(uri)?.badge === 'S', 'module policy is requested independently of XML');
   await until(() => !explorer.support.loading, 'complete initial publication');
-  const journal = explorer.support.context.workspaceState;
-  const owned = explorer.support.ownedRules();
-  await journal.update('supportReadonlyRules.v1', owned);
-  await journal.update('supportReadonlyRules.v2', undefined);
-  await explorer.support.apply(owned);
-  assert.equal(journal.get('supportReadonlyRules.v1'), undefined, 'legacy journal migrated');
-  assert.ok(journal.get('supportReadonlyRules.v2').every(value => value.length === 44), 'journal retains only compact hashes');
-  assert.deepEqual(explorer.support.ownedRules().sort(), [...owned].sort(), 'ownership recovered from exact existing settings');
+  // The migration must share the publication queue with pending decoration/file requests.
+  await (explorer.support.serial = explorer.support.serial.then(async () => {
+    const journal = explorer.support.context.workspaceState;
+    const owned = explorer.support.ownedRules();
+    await journal.update('supportReadonlyRules.v1', owned);
+    await journal.update('supportReadonlyRules.v2', undefined);
+    await explorer.support.apply(owned);
+    assert.equal(journal.get('supportReadonlyRules.v1'), undefined, 'legacy journal migrated');
+    assert.ok(journal.get('supportReadonlyRules.v2').every(value => value.length === 44), 'journal retains only compact hashes');
+    assert.deepEqual(explorer.support.ownedRules().sort(), [...owned].sort(), 'ownership recovered from exact existing settings');
+  }));
   assert.equal(vscode.workspace.getConfiguration('files', uri).get('readonlyInclude')['**/*.os'], true);
 
   let editor = await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(vscode.Uri.file(fixture.descriptor)));
@@ -52,12 +55,22 @@ exports.run = async function () {
   editor = await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(uri));
   original = editor.document.getText();
   const userRules = {...vscode.workspace.getConfiguration('files',uri).get('readonlyInclude'),'**/*.bsl':true};
-  await files.update('readonlyInclude',userRules,vscode.ConfigurationTarget.Workspace);
-  await new Promise(resolve=>setTimeout(resolve,200));
+  async function updateRules(rules, locked) {
+    let changed = false;
+    const subscription = vscode.workspace.onDidChangeConfiguration(event => {
+      if (event.affectsConfiguration('files.readonlyInclude', uri)
+        && Boolean(vscode.workspace.getConfiguration('files', uri).get('readonlyInclude')['**/*.bsl']) === locked) changed = true;
+    });
+    try {
+      await files.update('readonlyInclude',rules,vscode.ConfigurationTarget.Workspace);
+      await until(() => changed, 'native readonly configuration acknowledged');
+      await explorer.support.serial;
+    } finally { subscription.dispose(); }
+  }
+  await updateRules(userRules, true);
   await vscode.commands.executeCommand('type',{text:'user blocked'});
   assert.equal(editor.document.getText(),original,'user BSL lock is independent of support permission');
-  delete userRules['**/*.bsl'];await files.update('readonlyInclude',userRules,vscode.ConfigurationTarget.Workspace);
-  await new Promise(resolve=>setTimeout(resolve,200));
+  delete userRules['**/*.bsl'];await updateRules(userRules, false);
   await vscode.commands.executeCommand('type', { text: '// allowed\n' });
   assert.notEqual(editor.document.getText(), original, 'separate module stays writable');
   const dirty = editor.document.getText();

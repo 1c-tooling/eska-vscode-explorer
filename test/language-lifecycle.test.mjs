@@ -1,3 +1,4 @@
+import { deferCleanup } from "./cleanup.mjs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, writeFile, chmod, rm } from "node:fs/promises";
@@ -10,7 +11,7 @@ import { analysisContext, analyzerConfiguration } from "../out/language/context.
 /** Process fixtures stay in unique playground directories and never use a global temporary project. */
 async function fixture(t) {
   const root = await mkdtemp(join(process.env.ESKA_TEST_ROOT ?? resolve("../eska-playground"), "explorer-language-"));
-  t.after(() => rm(root, { recursive: true, force: true })); return root;
+  deferCleanup(t, () => rm(root, { recursive: true, force: true })); return root;
 }
 
 test("cancelled dialogs settle shutdown while late choices and rejections stay obsolete", async () => {
@@ -47,7 +48,7 @@ test("owned server cancellation reaps a peer which ignores normal termination", 
   await writeFile(file, `#!${process.execPath}\nprocess.on('SIGTERM',()=>{});process.stdout.write('ready');setInterval(()=>{},500);\n`);
   await chmod(file, 0o755);
   const controller = new AbortController(), owner = new LanguageProcess(file, root, () => {}, () => {}, controller.signal);
-  t.after(() => owner.stop()); await once(owner.child.stdout, "data");
+  deferCleanup(t, () => owner.stop()); await once(owner.child.stdout, "data");
   const pid = owner.child.pid; controller.abort(); await owner.stop();
   assert.equal(owner.child.signalCode, "SIGKILL");
   assert.throws(() => process.kill(pid, 0), { code: "ESRCH" });
@@ -58,7 +59,7 @@ test("owned server explicitly selects stdio instead of the upstream shared backe
   await writeFile(file, `#!${process.execPath}\nprocess.stdout.write(JSON.stringify(process.argv.slice(2)));\n`);
   await chmod(file, 0o755);
   const owner = new LanguageProcess(file, root, value => logs.push(value), () => {});
-  t.after(() => owner.stop());
+  deferCleanup(t, () => owner.stop());
   const chunks = [];
   owner.child.stdout.on("data", chunk => chunks.push(chunk));
   await owner.closed;

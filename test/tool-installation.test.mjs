@@ -1,3 +1,4 @@
+import { deferCleanup } from "./cleanup.mjs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
@@ -17,23 +18,25 @@ import { publishTransaction, cleanStage, restoreTransaction } from "../out/tooli
 
 const run = promisify(execFile), repository = fileURLToPath(new URL("../", import.meta.url));
 const pythonTools = process.env.ESKA_TEST_PYTHON_TOOLS ?? resolve(repository, "../eska/tools");
+const python = process.env.ESKA_TEST_PYTHON ?? (process.platform === "win32" ? "python" : "python3");
 
 /** Each scenario owns one unique playground directory and removes only that directory. */
 async function fixture(t) {
-  const path = await mkdtemp(join(process.env.ESKA_TEST_ROOT ?? resolve(repository, "../eska-playground"), "explorer-install-"));
-  t.after(() => rm(path, { recursive: true, force: true }));
+  const path = await mkdtemp(join(process.env.ESKA_TEST_ROOT ?? resolve(repository, "../eska-playground"), "explorer-install-каталог-😀-"));
+  deferCleanup(t, () => rm(path, { recursive: true, force: true }));
   return path;
 }
 
 /** Test archives use Python's independent ZIP writer, with real executable bytes for native acceptance. */
 async function archive(root, binary, contract) {
   const payload = await readFile(binary), notice = Buffer.from("Fixture notice\n");
-  const files = [{ path: `bin/${contract.tool}`, sha256: createHash("sha256").update(payload).digest("hex"), size: payload.length, executable: true },
+  const executable = `${contract.tool}${contract.target.includes("windows") ? ".exe" : ""}`;
+  const files = [{ path: `bin/${executable}`, sha256: createHash("sha256").update(payload).digest("hex"), size: payload.length, executable: true },
     { path: "licenses/LICENSE", sha256: createHash("sha256").update(notice).digest("hex"), size: notice.length, executable: false }];
   const value = { schema_version: 1, tool: contract.tool, version: contract.version, target: contract.target, contract, files };
   const metadata = join(root, "package.json"), license = join(root, "LICENSE"), output = join(root, "component.zip");
   await writeFile(metadata, JSON.stringify(value)); await writeFile(license, notice);
-  await run("python3", ["-B", "-c", "import sys,zipfile\nwith zipfile.ZipFile(sys.argv[1],'w',compression=zipfile.ZIP_DEFLATED) as z:\n z.write(sys.argv[2],'package.json')\n z.write(sys.argv[3],'bin/'+sys.argv[5])\n z.write(sys.argv[4],'licenses/LICENSE')", output, metadata, binary, license, contract.tool]);
+  await run(python, ["-B", "-c", "import sys,zipfile\nwith zipfile.ZipFile(sys.argv[1],'w',compression=zipfile.ZIP_DEFLATED) as z:\n z.write(sys.argv[2],'package.json')\n z.write(sys.argv[3],'bin/'+sys.argv[5])\n z.write(sys.argv[4],'licenses/LICENSE')", output, metadata, binary, license, executable]);
   const data = await readFile(output), sha256 = createHash("sha256").update(data).digest("hex");
   return { data, output, release: { kind: contract.tool === "eska-fmt" ? "formatter" : "project", version: value.version, target: value.target, asset: { name: "fixture.zip", url: "https://example.invalid/fixture.zip", size: data.length, sha256 } } };
 }
@@ -47,9 +50,9 @@ test("strict JSON and portable paths reject ambiguous installation instructions"
 test("release selection never substitutes the monolith or an unverified analyzer version/asset", () => {
   const target = hostTarget(), value = { draft: false, prerelease: false, tag_name: "v0.14.3", assets: [] };
   assert.match(parseRelease("project", target, value).restriction, /^missing-asset:/);
-  const asset = analyzerAsset(target);
+  const analyzerTarget = "x86_64-unknown-linux-gnu", asset = analyzerAsset(analyzerTarget);
   for (const version of ["0.4.1", "0.5.0", "1.2.3"]) {
-    const release = parseRelease("analyzer", target, { ...value, tag_name: `v${version}`, assets: [{ name: asset, size: 1,
+    const release = parseRelease("analyzer", analyzerTarget, { ...value, tag_name: `v${version}`, assets: [{ name: asset, size: 1,
       state: "uploaded", digest: "sha256:" + "b".repeat(64),
       browser_download_url: `https://github.com/itrous/bsl-analyzer/releases/download/v${version}/${asset}` }] });
     assert.equal(release.version, version);
@@ -69,31 +72,33 @@ test("release selection never substitutes the monolith or an unverified analyzer
   assert.equal(parseRelease("project", target, value).restriction, "asset-integrity");
 });
 
-test("ZIP validation rejects traversal, links, undeclared members, lengths and corrupt payloads", async t => {
+test("ZIP validation rejects traversal, links, undeclared members, lengths and corrupt payloads", { timeout: 30_000 }, async t => {
   const root = await fixture(t), binary = join(root, "fixture"); await writeFile(binary, "fixture");
   const contract = { schema_version: 2, tool: "eska-project", target: hostTarget(), version: "0.14.3", config_schema: "designer-xml-4", bridge_schema: 1, metadata_api: { major: 1, minor: 12 } };
   const packed = await archive(root, binary, contract);
+  const valid = await unpackComponent(packed.data, join(root, "valid"), hostTarget());
+  assert.deepEqual(await readFile(join(root, "valid", valid.files[0].path)), await readFile(binary));
   const program = "import json,sys,zipfile\nwith zipfile.ZipFile(sys.argv[1]) as z: items=[(i,z.read(i)) for i in z.infolist()]\nmode=sys.argv[3]\nwith zipfile.ZipFile(sys.argv[2],'w') as z:\n for info,data in items:\n  if info.filename=='package.json':\n   v=json.loads(data)\n   if mode=='length': v['files'][0]['size']+=1\n   if mode=='checksum': v['files'][0]['sha256']='0'*64\n   if mode=='schema': v['contract']['bridge_schema']=99\n   data=json.dumps(v).encode()\n  elif mode=='link' and info.filename.startswith('bin/'):\n   info.external_attr=0o120777<<16\n  z.writestr(info,data)\n if mode=='traversal': z.writestr('../escape',b'escape')\n if mode=='extra': z.writestr('extra',b'extra')\n if mode=='duplicate': z.writestr('package.json',b'{}')";
   for (const mode of ["traversal", "link", "extra", "length", "checksum", "schema", "duplicate"]) {
     const output = join(root, mode + ".zip");
-    await run("python3", ["-B", "-c", program, packed.output, output, mode]);
+    await run(python, ["-B", "-c", program, packed.output, output, mode]);
     await assert.rejects(unpackComponent(await readFile(output), join(root, "stage-" + mode), hostTarget()));
   }
   assert.equal(await fileHash(join(root, "escape")), null);
   assert.throws(() => strictJson(Buffer.from([0x7b, 0x22, 0xff, 0x22, 0x3a, 0x31, 0x7d])));
 });
 
-test("shared claim excludes Python and Node writers and cannot evict a live owner", async t => {
+test("shared claim excludes Python and Node writers and cannot evict a live owner", { timeout: 30_000 }, async t => {
   const root = await fixture(t), prefix = join(root, "install");
   const program = "import sys\nsys.path.insert(0,sys.argv[1])\nfrom pathlib import Path\nfrom component_package import installation_lock\nwith installation_lock(Path(sys.argv[2])):\n print('locked',flush=True)\n input()";
-  const child = spawn("python3", ["-B", "-c", program, pythonTools, prefix], { stdio: ["pipe", "pipe", "pipe"] });
-  t.after(() => child.kill());
+  const child = spawn(python, ["-B", "-c", program, pythonTools, prefix], { stdio: ["pipe", "pipe", "pipe"] });
+  deferCleanup(t, () => child.kill());
   await once(child.stdout, "data");
   await assert.rejects(installationLock(prefix, undefined, async () => {}), { code: "busy" });
   await assert.rejects(recoverAbandonedClaim(prefix), { code: "busy" });
   child.stdin.end("release\n"); await once(child, "close");
   await installationLock(prefix, undefined, async () => {
-    const value = await run("python3", ["-B", "-c", "import sys\nsys.path.insert(0,sys.argv[1])\nfrom pathlib import Path\nfrom component_package import installation_lock,Failure\ntry:\n with installation_lock(Path(sys.argv[2])): print('unsafe')\nexcept Failure as e: print(e.code)", pythonTools, prefix]);
+    const value = await run(python, ["-B", "-c", "import sys\nsys.path.insert(0,sys.argv[1])\nfrom pathlib import Path\nfrom component_package import installation_lock,Failure\ntry:\n with installation_lock(Path(sys.argv[2])): print('unsafe')\nexcept Failure as e: print(e.code)", pythonTools, prefix]);
     assert.equal(value.stdout.trim(), "busy");
   });
   assert.equal((await readdir(prefix)).includes(".eska-components.claim"), false);
@@ -102,11 +107,12 @@ test("shared claim excludes Python and Node writers and cannot evict a live owne
 test("journal rollback restores every previous byte and retains all backups after an external conflict", async t => {
   const root = await fixture(t), prefix = join(root, "install");
   await mkdir(join(prefix, "bin"), { recursive: true });
-  const file = join(prefix, "bin/eska-project"); await writeFile(file, "previous"); await chmod(file, 0o755);
-  const old = new Map([["bin/eska-project", await fileHash(file)]]);
+  const name = `bin/eska-project${process.platform === "win32" ? ".exe" : ""}`;
+  const file = join(prefix, name); await writeFile(file, "previous"); await chmod(file, 0o755);
+  const old = new Map([[name, await fileHash(file)]]);
   for (const conflict of [false, true]) {
     const stage = await mkdtemp(join(prefix, ".eska-component-")), incoming = join(stage, "next"); await writeFile(incoming, "next");
-    await assert.rejects(publishTransaction(prefix, stage, "eska-project", hostTarget(), old, new Map([["bin/eska-project", incoming]]), async () => {
+    await assert.rejects(publishTransaction(prefix, stage, "eska-project", hostTarget(), old, new Map([[name, incoming]]), async () => {
       if (conflict) await writeFile(file, "external");
       throw new Error("injected verification failure");
     }), conflict ? { code: "recovery" } : /injected/);
@@ -122,8 +128,8 @@ test("journal rollback restores every previous byte and retains all backups afte
 });
 
 test("real project ZIP is shared with the Python CLI, preserves sibling files and reaps a cancelled probe", {
-  skip: !process.env.ESKA_TEST_BINARY || process.platform === "win32",
-  timeout: 30_000,
+  skip: !process.env.ESKA_TEST_BINARY,
+  timeout: 120_000,
 }, async t => {
   const root = await fixture(t), prefix = join(root, "install"), binary = process.env.ESKA_TEST_BINARY;
   const contract = JSON.parse((await runProbe(binary, ["__tool-contract"], root, 10_000, 65536)).stdout);
@@ -133,13 +139,13 @@ test("real project ZIP is shared with the Python CLI, preserves sibling files an
   const info = await installComponent(prefix, packed.data, packed.release, () => {});
   assert.equal(info.path, managedPath(prefix, "project")); assert.equal(info.version, contract.version);
   assert.equal(await readFile(join(prefix, "bin/eska-vcs"), "utf8"), "unmanaged sibling");
-  const status = await run("python3", ["-B", join(pythonTools, "components.py"), "status", "--root", prefix, "--component", "eska-project", "--format", "json"]);
+  const status = await run(python, ["-B", join(pythonTools, "components.py"), "status", "--root", prefix, "--component", "eska-project", "--format", "json"]);
   assert.equal(JSON.parse(status.stdout).status, "installed");
   assert.equal(await managedVersion(prefix, "project"), contract.version);
   assert.equal((await installComponent(prefix, packed.data, packed.release, () => {})).version, contract.version);
-  await run("python3", ["-B", join(pythonTools, "components.py"), "remove", "--root", prefix, "--component", "eska-project", "--format", "json"]);
+  await run(python, ["-B", join(pythonTools, "components.py"), "remove", "--root", prefix, "--component", "eska-project", "--format", "json"]);
   assert.equal(await fileHash(info.path), null);
-  await run("python3", ["-B", join(pythonTools, "components.py"), "install", "--root", prefix, "--archive", packed.output, "--sha256", packed.release.asset.sha256, "--format", "json"]);
+  await run(python, ["-B", join(pythonTools, "components.py"), "install", "--root", prefix, "--archive", packed.output, "--sha256", packed.release.asset.sha256, "--format", "json"]);
   assert.equal((await installComponent(prefix, packed.data, packed.release, () => {})).version, contract.version);
   const modified = Buffer.concat([await readFile(info.path), Buffer.from("changed")]);
   await writeFile(info.path, modified);
@@ -158,9 +164,9 @@ test("reinstall keeps the staging working directory alive through both delayed p
   skip: !process.env.ESKA_TEST_BINARY || process.platform === "win32", timeout: 30000,
 }, async t => {
   const root = await fixture(t), prefix = join(root, "install"), wrapper = join(root, "delayed-project");
-  const python = (await run("python3", ["-c", "import sys; print(sys.executable)"])).stdout.trim();
+  const pythonExecutable = (await run(python, ["-c", "import sys; print(sys.executable)"])).stdout.trim();
   const binary = process.env.ESKA_TEST_BINARY;
-  await writeFile(wrapper, `#!${python}\nimport os,sys,time\ntime.sleep(.1)\nos.execv(${JSON.stringify(binary)},[${JSON.stringify(binary)},*sys.argv[1:]])\n`, { mode: 0o755 });
+  await writeFile(wrapper, `#!${pythonExecutable}\nimport os,sys,time\ntime.sleep(.1)\nos.execv(${JSON.stringify(binary)},[${JSON.stringify(binary)},*sys.argv[1:]])\n`, { mode: 0o755 });
   const contract = JSON.parse((await runProbe(wrapper, ["__tool-contract"], root, 10000, 65536)).stdout);
   const packed = await archive(root, wrapper, contract);
   const first = await installComponent(prefix, packed.data, packed.release, () => {});
@@ -170,6 +176,7 @@ test("reinstall keeps the staging working directory alive through both delayed p
 
 test("real upstream app installs independently and verifies all five notices without replacing project", {
   skip: !process.env.ESKA_TEST_ANALYZER_BINARY,
+  timeout: 120_000,
 }, async t => {
   const root = await fixture(t), prefix = join(root, "install"), data = await readFile(process.env.ESKA_TEST_ANALYZER_BINARY);
   const version = (await runProbe(process.env.ESKA_TEST_ANALYZER_BINARY, ["--version"], root, 10000, 65536)).stdout.trim().split(" ").at(-1);
@@ -186,8 +193,8 @@ test("real upstream app installs independently and verifies all five notices wit
 
 /** Exercise the CI entry point under Node, including real installation and its exported environment. */
 test("backend preparation installs native tools and exports verified paths for subsequent CI steps", {
-  skip: !process.env.ESKA_TEST_BINARY || !process.env.ESKA_TEST_ANALYZER_BINARY || process.platform === "win32",
-  timeout: 30_000,
+  skip: !process.env.ESKA_TEST_BINARY || !process.env.ESKA_TEST_ANALYZER_BINARY,
+  timeout: 180_000,
 }, async t => {
   const root = await fixture(t), binary = process.env.ESKA_TEST_BINARY;
   const analyzerVersion = (await runProbe(process.env.ESKA_TEST_ANALYZER_BINARY, ["--version"], root, 10000, 65536)).stdout.trim().split(" ").at(-1);
@@ -198,7 +205,7 @@ test("backend preparation installs native tools and exports verified paths for s
   const bootstrap = ["components.py", "component_installation.py", "component_package.py"];
   for (const name of bootstrap) await copyFile(join(pythonTools, name), join(root, name));
   const { stdout } = await run("node", [join(repository, "scripts/prepare-backends.mjs"), root], {
-    cwd: repository, env: { ...process.env, ESKA_TEST_ROOT: root, GITHUB_ENV: githubEnv }, timeout: 30_000,
+    cwd: repository, env: { ...process.env, ESKA_TEST_ROOT: root, GITHUB_ENV: githubEnv }, timeout: 120_000,
   });
   const prepared = JSON.parse(stdout), prefix = join(prepared.root, "installation"), environment = prepared.environment;
   assert.equal(prepared.project, contract.version); assert.equal(prepared.analyzer, analyzerVersion);
@@ -214,7 +221,9 @@ test("backend preparation installs native tools and exports verified paths for s
 });
 
 /** The real optional formatter archive uses the same producer/receipt boundary as the project component. */
-test("formatter archive installs alone, round-trips Python ownership and preserves its project sibling", { skip: !process.env.ESKA_TEST_FMT_BINARY || !process.env.ESKA_TEST_BINARY }, async t => {
+test("formatter archive installs alone, round-trips Python ownership and preserves its project sibling", {
+  skip: !process.env.ESKA_TEST_FMT_BINARY || !process.env.ESKA_TEST_BINARY, timeout: 120_000,
+}, async t => {
   const root = await fixture(t), prefix = join(root, "selected");
   const formatter = process.env.ESKA_TEST_FMT_BINARY;
   const contract = JSON.parse((await runProbe(formatter, ["__tool-contract"], root, 10_000, 65536)).stdout);
@@ -232,7 +241,7 @@ test("formatter archive installs alone, round-trips Python ownership and preserv
   assert.equal(await fileHash(info.path),prior); assert.equal(await fileHash(join(prefix,"components/eska-fmt.json")),receiptHash);
   await installComponent(prefix,packed.data,packed.release,()=>{});
   assert.deepEqual(JSON.parse(await readFile(join(prefix,"components/eska-fmt.json"),"utf8")),receipt);
-  const inspected = await run("python3",["-B",join(pythonTools,"components.py"),"status","--component","eska-fmt","--root",prefix,"--format","json"]);
+  const inspected = await run(python,["-B",join(pythonTools,"components.py"),"status","--component","eska-fmt","--root",prefix,"--format","json"]);
   assert.deepEqual(JSON.parse(inspected.stdout).contract,contract);
 });
 

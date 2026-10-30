@@ -9,6 +9,7 @@ import type { SupportController } from "../support.js";
 import { message, type MessageKey } from "../messages.js";
 import { isRecord } from "../protocol.js";
 import type { AnalysisContext } from "./context.js";
+import { languageUri } from "./uri.js";
 
 type Reason = "readonly" | "stale" | "resource" | "invalid" | "command" | "backend";
 interface Origin { documents: Map<string, { document: vscode.TextDocument; version: number }>; model: number; token?: vscode.CancellationToken }
@@ -28,7 +29,7 @@ export class LanguageEdits implements vscode.Disposable {
   /** Each language session owns its action handles and advertises only resource operations it can commit atomically. */
   constructor(private readonly client: LanguageClient, private readonly context: AnalysisContext,
     private readonly support: SupportController, private readonly current: () => boolean, private readonly log: (value: string) => void,
-    private readonly model: () => number) {
+    private readonly model: () => number, private readonly wireVersion: (document: vscode.TextDocument) => number | undefined) {
     this.command = vscode.commands.registerCommand(APPLY_ACTION, async (id: unknown) => {
       const pending = typeof id === "string" ? this.actions.get(id) : undefined;
       if (typeof id === "string") this.actions.delete(id);
@@ -117,7 +118,7 @@ export class LanguageEdits implements vscode.Disposable {
   /** Versions of already open buffers belong to the request, not to the later response or action invocation. */
   private origin(token?: vscode.CancellationToken): Origin {
     return { documents: new Map(vscode.workspace.textDocuments.filter(document => document.uri.scheme === "file" && this.inside(document.uri.fsPath))
-      .map(document => [document.uri.toString(), { document, version: document.version }])), model: this.model(), ...(token ? { token } : {}) };
+      .map(document => [languageUri(document.uri.toString()), { document, version: document.version }])), model: this.model(), ...(token ? { token } : {}) };
   }
 
   /** Late requests cannot write after a context replacement, closed buffer or unsaved change. */
@@ -169,14 +170,14 @@ export class LanguageEdits implements vscode.Disposable {
     const targets: Target[] = [], seen = new Set<string>();
     for (const entry of entries) {
       if (typeof entry.uri !== "string" || !Array.isArray(entry.edits) || entry.edits.length > 100000) throw new Rejected("invalid");
-      if (requireVersions && (entry.version == null || !origin.documents.has(entry.uri))) throw new Rejected("stale");
+      if (requireVersions && (entry.version == null || !origin.documents.has(languageUri(entry.uri)))) throw new Rejected("stale");
       // Only rename may discover unopened targets, and it must request a new versioned result before returning any edit.
-      if (entry.version == null && !origin.documents.has(entry.uri) && !discoverRenameTargets) throw new Rejected("stale");
+      if (entry.version == null && !origin.documents.has(languageUri(entry.uri)) && !discoverRenameTargets) throw new Rejected("stale");
       const target = await this.target(entry.uri);
       this.assertOrigin(origin);
       if (seen.has(target.path)) throw new Rejected("invalid");
       seen.add(target.path);
-      if (entry.version != null && (!Number.isSafeInteger(entry.version) || entry.version < 0 || target.version !== entry.version)) throw new Rejected("stale");
+      if (entry.version != null && (!Number.isSafeInteger(entry.version) || entry.version < 0 || this.wireVersion(target.document) !== entry.version)) throw new Rejected("stale");
       this.ranges(target.document, entry.edits);
       targets.push(target);
     }

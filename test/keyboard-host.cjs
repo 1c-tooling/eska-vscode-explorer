@@ -4,13 +4,13 @@ const path = require("node:path");
 const vscode = require("vscode");
 
 /** Wait for renderer selection events, which arrive after the reveal request completes. */
-async function until(predicate) {
+async function until(predicate, label = "Tree selection was not delivered") {
   const deadline = Date.now() + 10000;
   while (Date.now() < deadline) {
     if (predicate()) return;
     await new Promise(resolve => setTimeout(resolve, 30));
   }
-  assert.fail("Tree selection was not delivered");
+  assert.fail(label);
 }
 
 /** Exercise the commands on cold trees, preserving unsaved editor contents. */
@@ -33,6 +33,14 @@ exports.run = async function () {
   await vscode.workspace.getConfiguration("eska.explorer").update("executable", process.env.ESKA_TEST_BINARY, vscode.ConfigurationTarget.Workspace);
   const explorer = await vscode.extensions.all.find(value => value.packageJSON.name === "eska-explorer").activate();
   await vscode.commands.executeCommand("eska.explorer.connect");
+  const errors = [], revealEvents = [];
+  const showError = explorer.showError.bind(explorer);
+  explorer.showError = error => { errors.push({code:error.code,domain:error.domain,details:error.details}); showError(error); };
+  const reveal = explorer.view.reveal.bind(explorer.view);
+  explorer.view.reveal = async (entry, options) => {
+    try { await reveal(entry, options); revealEvents.push({key:entry.key,options}); }
+    catch(error) { revealEvents.push({key:entry.key,error:String(error.stack??error)}); throw error; }
+  };
   for (const [file, matches] of [
     [fixture.module, entry => entry?.node?.id.kind === "module" && entry.node.id.role === "object"],
     [fixture.descriptor, entry => entry?.node?.label.text === "Товары"],
@@ -43,8 +51,15 @@ exports.run = async function () {
     const document = await vscode.workspace.openTextDocument(file);
     const editor = await vscode.window.showTextDocument(document);
     if (file === fixture.module) await editor.edit(edit => edit.insert(new vscode.Position(0, 0), "// unsaved\n"));
+    await until(() => vscode.window.activeTextEditor === editor, `Active editor was not delivered: ${file}`);
     await vscode.commands.executeCommand("eska.explorer.revealActiveFile");
-    await until(() => matches(explorer.view.selection[0]));
+    try { await until(() => matches(explorer.view.selection[0]), `Tree selection was not delivered: ${file}`); }
+    catch(error) {
+      await fs.writeFile(path.join(fixture.root,"host-result.json"),JSON.stringify({passed:false,error:String(error.stack??error),
+        file,active:vscode.window.activeTextEditor?.document.uri.toString(),errors,revealEvents,
+        selection:explorer.view.selection.map(entry=>({key:entry.key,node:entry.node?.id,target:entry.target,owner:entry.owner?.node.id}))}));
+      throw error;
+    }
     assert.equal(vscode.window.activeTextEditor.document, document);
     if (file === fixture.module) assert.equal(document.isDirty, true);
   }

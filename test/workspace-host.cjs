@@ -18,7 +18,12 @@ async function until(predicate, reason) {
 exports.run = async function () {
   const fixture = JSON.parse(process.env.ESKA_HOST_FIXTURE);
   const { createTreeProject } = await import("./fixture.mjs");
-  await fs.rm(fixture.source, { recursive: true });
+  const explorer = await vscode.extensions.all.find(value => value.packageJSON.name === "eska-explorer").activate();
+  await vscode.commands.executeCommand("eska.explorer.disconnect");
+  const owned = path.relative(process.env.ESKA_TEST_ROOT ?? path.resolve("../eska-playground"), fixture.root);
+  assert.ok(owned && !path.isAbsolute(owned) && !owned.split(path.sep).includes("..") && owned.startsWith("explorer-host-"));
+  assert.equal(path.relative(fixture.root, fixture.source), "src");
+  await fs.rm(fixture.source, { recursive: true, maxRetries: process.platform === "win32" ? 20 : 0, retryDelay: 250 });
   const first = await createTreeProject(path.join(fixture.root, "src/first"));
   const second = await createTreeProject(path.join(fixture.root, "src/second"), "processing");
   for (const member of [first, second]) {
@@ -48,7 +53,6 @@ exports.run = async function () {
   const config = vscode.workspace.getConfiguration("eska.explorer");
   await config.update("executable", process.env.ESKA_TEST_BINARY, vscode.ConfigurationTarget.Workspace);
   await config.update("treeLanguage", "ru-RU", vscode.ConfigurationTarget.Workspace);
-  const explorer = await vscode.extensions.all.find(value => value.packageJSON.name === "eska-explorer").activate();
   await vscode.commands.executeCommand("eska.explorer.connect");
   await vscode.commands.executeCommand("eska.explorer.projects.focus");
   const rows = await explorer.getChildren();
@@ -60,8 +64,8 @@ exports.run = async function () {
   assert.ok(!otherFiles.some(row => row.path === path.join(fixture.root, "src")), "member-only src is hidden");
   const root = projects[0];
   // Match members by their authoritative physical paths.
-  const firstRoot = projects.find(row => row.project.info.rootPath.value === first.root);
-  assert.ok(firstRoot);
+  const firstRoot = projects.find(row => path.relative(path.toNamespacedPath(row.project.info.rootPath.value), path.toNamespacedPath(first.root)) === "");
+  assert.ok(firstRoot, JSON.stringify({ expected: first.root, roots: projects.map(row => row.project.info.rootPath) }));
   assert.equal(explorer.getParent(firstRoot), undefined);
   const sections = await explorer.getChildren(firstRoot);
   const groups = sections.filter(row => row.fileKind === "group");
@@ -72,6 +76,7 @@ exports.run = async function () {
   assert.equal(explorer.getParent(groups[0]), firstRoot);
   assert.ok(sections.indexOf(catalogs) < sections.indexOf(groups[0]), "metadata precedes file groups");
   for (const group of rows.filter(row => row.fileKind === "group")) assert.equal(explorer.getParent(group), undefined);
+  await explorer.expandRootForReveal(explorer.tree, firstRoot.project);
   await explorer.view.reveal(catalogs, { select: true, focus: true });
   try { await until(() => explorer.view.selection[0]?.key === catalogs.key, "metadata is directly inside the configuration"); }
   catch (error) { throw new Error(`${error.message}: ${JSON.stringify({ selected: explorer.view.selection.map(row => row.key),
@@ -88,7 +93,7 @@ exports.run = async function () {
     await vscode.commands.executeCommand(item.command.command, ...item.command.arguments);
     assert.equal(vscode.window.activeTextEditor.document.uri.fsPath, file);
     await vscode.commands.executeCommand("eska.explorer.revealActiveFile");
-    await until(() => explorer.view.selection[0]?.path === file, `reveal ${file}`);
+    await until(() => explorer.view.selection[0]?.path && path.relative(explorer.view.selection[0].path, file) === "", `reveal ${file}`);
   }
   const tree = explorer.tree;
   const secondRoot = projects.find(row => row !== firstRoot);

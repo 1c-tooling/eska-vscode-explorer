@@ -41,7 +41,9 @@ exports.run = async function () {
   }
   await vscode.commands.executeCommand("eska.explorer.projects.focus");
   const root = (await explorer.getChildren()).find(row => row.node);
+  await explorer.expandRootForReveal(explorer.tree, root.project);
   await explorer.view.reveal(root, { select: true, focus: true, expand: true });
+  await until(() => explorer.view.selection[0] === root);
   await vscode.commands.executeCommand("list.collapse");
   await until(() => explorer.getTreeItem(root).collapsibleState === vscode.TreeItemCollapsibleState.Collapsed);
   await vscode.commands.executeCommand("eska.explorer.refresh");

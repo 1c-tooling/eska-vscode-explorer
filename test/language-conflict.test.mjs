@@ -64,7 +64,7 @@ function fixture({ available = false, enabled = true, hold, outside = false, sta
       onDidChange(callback) { listeners.add(callback); return { dispose() { listeners.delete(callback); } }; } },
     window: { showWarningMessage(text, ...actions) { const answer = barrier(); warnings.push({ text, actions, answer }); return answer.promise; },
       async showErrorMessage(text) { calls.push(`error:${text}`); } },
-    commands: { async executeCommand(...args) { commands.push(args); } }, Uri: { file: value => value },
+    commands: { async executeCommand(...args) { commands.push(args); } }, Uri: { file: value => ({ fsPath: value }) },
   };
   class FakeClient {
     constructor(_id, _name, start, options) { this.startServer = start; this.clientOptions = options; this.protocol2CodeConverter = {};
@@ -334,6 +334,69 @@ test("semantic tokens and symbols remain independent background providers", { ti
   assert.deepEqual(await middleware.provideDocumentSemanticTokens(document, token,
     () => middleware.sendRequest("textDocument/semanticTokens/full", params, undefined, async () => [0, 0, 5, 0, 0])), [0, 0, 5, 0, 0]);
   held.release(["symbol"]); assert.deepEqual(await symbols, ["symbol"]);
+});
+
+test("a cached outline waits for a current configuration instead of publishing an empty startup result", { timeout: 5000 }, async t => {
+  const f = fixture(); t.after(() => { f.pause.release(); return f.service.shutdown(); }); f.connect(); await settled(f.service);
+  f.holdAt("analyzer/configStatus"); f.watchers[0].fire();
+  const document = { uri: { toString: () => "file:///same.bsl" }, version: 1, isClosed: false };
+  let calls = 0;
+  const symbols = f.clients[0].clientOptions.middleware.provideDocumentSymbols(document, f.cancellation().token,
+    async () => { calls++; return ["current function"]; });
+  await f.waiting.promise;
+  assert.equal(calls, 0);
+  f.pause.release(); await configurationSettled(f.service);
+  assert.deepEqual(await symbols, ["current function"]); assert.equal(calls, 1);
+});
+
+test("back-to-back configuration checks cannot cache an outline between their barriers", { timeout: 5000 }, async t => {
+  const f = fixture(); t.after(() => { f.pause.release(); return f.service.shutdown(); }); f.connect(); await settled(f.service);
+  f.holdAt("analyzer/configStatus"); f.watchers[0].fire();
+  void f.service.configurationReady.then(() => f.watchers[0].fire());
+  const document = { uri: { toString: () => "file:///same.bsl" }, version: 1, isClosed: false };
+  let calls = 0;
+  const symbols = f.clients[0].clientOptions.middleware.provideDocumentSymbols(document, f.cancellation().token,
+    async () => { calls++; return ["latest function"]; });
+  await f.waiting.promise; assert.equal(calls, 0);
+  f.pause.release();
+  assert.deepEqual(await symbols, ["latest function"]); assert.equal(calls, 1);
+  assert.equal(f.service.configurationPending, false);
+});
+
+test("Windows drive aliases of a root descriptor hold the same configuration barrier", { skip: process.platform !== "win32" }, async t => {
+  const f = fixture(); t.after(() => f.service.shutdown()); f.connect(); await settled(f.service);
+  const descriptor = join(f.sourceRoot, "src", "Configuration.xml");
+  const alias = descriptor.replace(/^[a-z]:/i, drive => drive === drive.toLowerCase() ? drive.toUpperCase() : drive.toLowerCase());
+  assert.notEqual(alias, descriptor);
+  f.service.sourceChanged(alias);
+  assert.equal(f.service.configurationPending, true);
+  await configurationSettled(f.service);
+  assert.equal(f.service.configurationPending, false);
+});
+
+for (const mode of ["cancel", "stop"]) test(`a ${mode} settles a provider while configuration validation is still blocked`, { timeout: 5000 }, async t => {
+  const f = fixture(); t.after(() => { f.pause.release(); return f.service.shutdown(); }); f.connect(); await settled(f.service);
+  f.holdAt("analyzer/configStatus"); f.watchers[0].fire();
+  const document = { uri: { toString: () => "file:///same.bsl" }, version: 1, isClosed: false }, cancellation = f.cancellation();
+  let calls = 0;
+  const symbols = f.clients[0].clientOptions.middleware.provideDocumentSymbols(document, cancellation.token,
+    async () => { calls++; return ["must not publish"]; });
+  await f.waiting.promise;
+  if (mode === "cancel") cancellation.cancel(); else await f.service.stop();
+  assert.equal(await symbols, undefined); assert.equal(calls, 0);
+});
+
+for (const mode of ["edit", "close"]) test(`${mode === "edit" ? "an" : "a"} ${mode} during configuration validation cannot reuse a provider position`, { timeout: 5000 }, async t => {
+  const f = fixture(); t.after(() => { f.pause.release(); return f.service.shutdown(); }); f.connect(); await settled(f.service);
+  f.holdAt("analyzer/configStatus"); f.watchers[0].fire();
+  const document = { uri: { toString: () => "file:///same.bsl" }, version: 1, isClosed: false };
+  let calls = 0;
+  const symbols = f.clients[0].clientOptions.middleware.provideDocumentSymbols(document, f.cancellation().token,
+    async () => { calls++; return ["stale position"]; });
+  await f.waiting.promise;
+  if (mode === "edit") document.version++; else document.isClosed = true;
+  f.pause.release(); await configurationSettled(f.service);
+  assert.equal(await symbols, undefined); assert.equal(calls, 0);
 });
 
 test("root-descriptor changes replace the old client only after releasing its lease and drop its diagnostics", async t => {

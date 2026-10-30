@@ -6,6 +6,7 @@ const vscode = require("vscode");
 /** Repeated native provider queries tolerate only startup; each observed result still has a bounded deadline. */
 async function until(action, label) {
   const deadline = Date.now() + 30000;
+  let lastError;
   while (Date.now() < deadline) {
     let timer;
     try {
@@ -13,11 +14,11 @@ async function until(action, label) {
         timer = setTimeout(() => reject(new Error("provider deadline")), Math.max(1, deadline - Date.now()));
       })]);
       if (value) return value;
-    } catch { /* A starting LSP can return ContentModified; a hung provider still consumes the same deadline. */ }
+    } catch (error) { lastError = error; /* A starting LSP can return ContentModified; a hung provider still consumes the same deadline. */ }
     finally { clearTimeout(timer); }
     await new Promise(resolve => setTimeout(resolve, 50));
   }
-  throw new Error(typeof label === "function" ? label() : label);
+  throw new Error((typeof label === "function" ? label() : label) + (lastError ? `\n${lastError.stack ?? lastError}` : ""));
 }
 
 /** Check owned PIDs without sending termination to any process. */
@@ -64,10 +65,11 @@ exports.run = async function () {
     const values = await vscode.commands.executeCommand("vscode.executeDefinitionProvider", uri, position);
     return values?.some(value => (value.uri ?? value.targetUri).fsPath === file && (value.range ?? value.targetSelectionRange).start.line === 1) && values;
   }, "definition points at the expected declaration");
+  let observedSymbols;
   const symbols = await until(async () => {
-    const values = await vscode.commands.executeCommand("vscode.executeDocumentSymbolProvider", uri);
+    const values = observedSymbols = await vscode.commands.executeCommand("vscode.executeDocumentSymbolProvider", uri);
     return values?.some(value => value.name === "Проверка") && values;
-  }, "document symbols");
+  }, () => `document symbols: ${JSON.stringify({ observedSymbols, capability: capabilities.documentSymbolProvider })}`);
   const completion = await until(async () => {
     const value = await vscode.commands.executeCommand("vscode.executeCompletionItemProvider", uri, position);
     return value?.items?.some(item => (typeof item.label === "string" ? item.label : item.label.label) === "Проверка") && value;

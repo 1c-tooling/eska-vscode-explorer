@@ -233,7 +233,7 @@ exports.run = async function () {
   const constants = named(await children(root), 'Константы');
   // TreeDataProvider refresh is asynchronous; await native visibility after the filter command.
   await until(async () => {
-    try { await explorer.view.reveal(constants, { select: true, focus: true }); return true; }
+    try { await explorer.view.reveal(constants, { select: true, focus: true }); return explorer.view.selection[0] === constants; }
     catch { return false; }
   }, 'native filter redraw');
   await vscode.commands.executeCommand('eska.explorer.hideEmptyGroups', root);

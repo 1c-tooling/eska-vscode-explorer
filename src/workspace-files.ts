@@ -1,5 +1,5 @@
 import { readdir, realpath, stat } from "node:fs/promises";
-import { basename, join, resolve } from "node:path";
+import { basename, join, relative, resolve } from "node:path";
 import { relativeFile } from "./reveal.js";
 import { nativePath } from "./source.js";
 import type { ProjectTree } from "./tree.js";
@@ -69,8 +69,8 @@ export class WorkspaceFiles {
   /** Never list a connected project's source directory or another member twice. */
   private excluded(path: string, scope: FileScope): boolean {
     return this.scopes.some(other => other.project && (
-      path === nativePath(other.project.info.sourcePath)
-      || (other !== scope && path === other.path)));
+      relative(path, nativePath(other.project.info.sourcePath)) === ""
+      || (other !== scope && relative(path, other.path) === "")));
   }
 
   /** Watch only directories requested by the user, avoiding recursive watchers over build and Git internals. */
@@ -191,9 +191,9 @@ export class WorkspaceFiles {
       for (const group of await this.groups(scope.project?.info.scope.kind === "member" ? scope.project : undefined)) {
         let children = await this.children(group);
         for (let depth = 0; depth < 128; depth++) {
-          const entry = children.find(entry => entry.path === path || (entry.directory && relativeFile(entry.path, path)));
+          const entry = children.find(entry => relative(entry.path, path) === "" || (entry.directory && relativeFile(entry.path, path)));
           if (!entry) break;
-          if (entry.path === path) return entry;
+          if (relative(entry.path, path) === "") return entry;
           children = await this.children(entry);
         }
       }

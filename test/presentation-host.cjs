@@ -101,7 +101,9 @@ exports.run = async function () {
     await openProperties(form);
     const rows = await explorer.getChildren(form);
     assert.deepEqual(rows.map(row => explorer.getTreeItem(row).label), ["Форма", "Модуль"]);
-    assert.equal(await explorer.getChildren(form), rows, "source rows reuse the loaded branch");
+    const repeated = await explorer.getChildren(form);
+    assert.equal(repeated.length, rows.length);
+    assert.ok(repeated.every((row, index) => row === rows[index]), "source rows reuse the loaded branch");
     for (let index = 0; index < rows.length; index++) {
       assert.equal(explorer.getParent(rows[index]), form);
       const action = explorer.getTreeItem(rows[index]);
@@ -133,8 +135,20 @@ exports.run = async function () {
   await openProperties(form);
   const objectForm = entries.get("ObjectFormDemo");
   await fs.rename(objectFormModule, objectFormModule.replace(/\.bsl$/, ".bin"));
-  await vscode.commands.executeCommand("eska.explorer.refreshNode", objectForm);
-  assert.deepEqual((await explorer.getChildren(objectForm)).map(row => row.target), ["form"], "manual refresh updates a closed source");
+  const errors = [], showError = explorer.showError.bind(explorer);
+  explorer.showError = error => { errors.push({code:error.code,domain:error.domain}); showError(error); };
+  try {
+    await vscode.commands.executeCommand("eska.explorer.refreshNode", objectForm);
+    const refreshDeadline = Date.now() + 15000;
+    let refreshed;
+    while (Date.now() < refreshDeadline) {
+      refreshed = await explorer.getChildren(objectForm);
+      if (refreshed.length === 1 && refreshed[0].target === "form") break;
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+    assert.deepEqual(errors, [], "manual refresh command succeeds without a user-visible error");
+    assert.deepEqual(refreshed?.map(row => row.target), ["form"], `manual refresh updates a closed source: ${JSON.stringify(refreshed?.map(row => ({target:row.target,label:row.label,kind:row.kind})))}`);
+  } finally { explorer.showError = showError; }
   await openProperties(objectForm);
   await fs.writeFile(path.join(fixture.root, "host-result.json"), JSON.stringify({ passed: true, directModules: modules.size, moduleOwners, nestedChildren: 6, propertyForms: 2, formSources: 2 }));
 };

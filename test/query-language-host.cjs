@@ -113,6 +113,34 @@ exports.run = async function () {
     await vscode.commands.executeCommand("eska.explorer.cancelQuery", draft.uri);
     assert.ok(owner.getText().includes("Other = 99")); assert.deepEqual(await fs.readFile(fixture.module), disk);
     accepted.push("cancel_preserves_unrelated_native_edit_and_disk");
+    const otherOriginal = other.getText(), ownerBeforeRename = owner.getText(), otherDisk = await fs.readFile(fixture.languageSource.other);
+    const queryPoint = other.positionAt(other.getText().indexOf("SELECT ") + 3);
+    await vscode.window.showTextDocument(other, { preview: false, selection: new vscode.Range(queryPoint, queryPoint) });
+    await vscode.commands.executeCommand("workbench.action.focusActiveEditorGroup");
+    await until(() => vscode.window.activeTextEditor?.document === other
+      && vscode.window.activeTextEditor.selection.active.isEqual(queryPoint), "second native owner selection");
+    await vscode.commands.executeCommand("eska.explorer.editBslQuery");
+    const secondDraft = await until(() => vscode.window.activeTextEditor?.document.uri.scheme === "eska-query"
+      && vscode.window.activeTextEditor.document, "second query draft");
+    await until(() => completion(secondDraft, "Товар.Ар", "Артикул"), "second owner projection is synchronized");
+    await vscode.commands.executeCommand("eska.explorer.cancelQuery", secondDraft.uri);
+    const live = explorer.language.session;
+    await live.documents.settled(other.uri.toString());
+    const wireVersion = live.documents.wireVersion(other);
+    assert.ok(Number.isInteger(wireVersion)); assert.notEqual(wireVersion, other.version, "query projection advances only the LSP clock");
+    const renamePoint = other.positionAt(other.getText().indexOf("Other = 42") + 2);
+    const rename = await until(async () => {
+      const value = await vscode.commands.executeCommand("vscode.executeDocumentRenameProvider", other.uri, renamePoint, "AfterProjection");
+      return value?.size && value;
+    }, "native rename after restoring a query projection");
+    assert.equal(await vscode.workspace.applyEdit(rename), true);
+    assert.ok(other.getText().includes("AfterProjection = 42")); assert.equal(owner.getText(), ownerBeforeRename);
+    await vscode.window.showTextDocument(other, { preview: false });
+    await vscode.commands.executeCommand("workbench.action.focusActiveEditorGroup");
+    await vscode.commands.executeCommand("undo");
+    await until(() => other.getText() === otherOriginal, "native rename undo after projection");
+    assert.deepEqual(await fs.readFile(fixture.languageSource.other), otherDisk);
+    accepted.push("native_rename_after_query_cancel_preserves_wire_version_guards_and_undo");
     await fs.writeFile(path.join(fixture.root, "host-result.json"), JSON.stringify({ passed: true, suite: "query-language", accepted, errors, pid, locale: vscode.env.language }));
   } catch (error) {
     await fs.writeFile(path.join(fixture.root, "host-result.json"), JSON.stringify({ passed: false, suite: "query-language", accepted, errors,

@@ -1,3 +1,4 @@
+import { deferCleanup } from "./cleanup.mjs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
@@ -85,13 +86,13 @@ test("property captions preserve both locales at every depth and reject malforme
 /** Real Designer mappings select the intended property for root, object and inline child. */
 test("property action opens exact XML and rejects a stale tab result", { skip: !process.env.ESKA_TEST_BINARY }, async t => {
   const directory = await mkdtemp(join(process.env.ESKA_TEST_ROOT ?? resolve("../eska-playground"), "explorer-properties-"));
-  t.after(() => rm(directory, { recursive: true, force: true }));
+  deferCleanup(t, () => rm(directory, { recursive: true, force: true }));
   const fixture = await createTreeProject(join(directory, "project"));
   const connection = new Connection("test", () => {}, () => {});
-  t.after(() => connection.dispose());
+  deferCleanup(t, () => connection.dispose());
   await connection.connect({ executable: process.env.ESKA_TEST_BINARY, path: fixture.root, name: "test", locale: "ru-RU" });
   const tree = new MetadataTree(connection, connection.state.session, () => {}, () => {});
-  t.after(() => tree.dispose());
+  deferCleanup(t, () => tree.dispose());
   const [root] = await tree.roots();
   const catalogs = (await tree.children(root)).find(entry => entry.node.id.collection?.metadataKind === "catalog");
   assert.ok(catalogs);

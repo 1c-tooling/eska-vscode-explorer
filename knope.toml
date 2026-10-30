@@ -9,7 +9,7 @@ extra_changelog_sections = [
 ]
 
 [github]
-owner = "1c-tooling"
+owner = "odineska"
 repo = "eska-vscode-explorer"
 
 [[workflows]]

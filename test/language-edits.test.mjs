@@ -1,3 +1,4 @@
+import { deferCleanup } from "./cleanup.mjs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, mkdir, readFile, writeFile, symlink, rm } from "node:fs/promises";
@@ -6,6 +7,8 @@ import { join, resolve } from "node:path";
 import { pathToFileURL, fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 import { runInNewContext } from "node:vm";
+import { LanguageDocuments } from "../out/language/documents.js";
+import { languageUri } from "../out/language/uri.js";
 
 /** Deterministically pause a protocol/policy boundary, never a wall-clock guess. */
 function barrier() { let release; const promise = new Promise(done => { release = done; }); return { promise, release }; }
@@ -22,17 +25,22 @@ class Uri {
   get fsPath() { return fileURLToPath(this.value); }
   get query() { return this.value.search.slice(1); }
   get fragment() { return this.value.hash.slice(1); }
-  toString() { return this.value.href; }
+  toString() {
+    // VS Code serializes the drive differently from Node's standard file URL.
+    return process.platform === "win32" && this.scheme === "file" ? this.value.href.replace(/^file:\/\/\/([a-z])(?::|%3a)/i,
+      (_value, drive) => `file:///${drive.toLowerCase()}%3A`) : this.value.href;
+  }
 }
 
 /** Editor primitives are mocked, but canonical paths, symlinks, file metadata and I/O races use real owned files. */
 async function fixture(t) {
   const root = await mkdtemp(join(process.env.ESKA_TEST_ROOT ?? resolve("../eska-playground"), "explorer-language-edits-")), source = join(root, "src");
-  t.after(() => rm(root, { recursive: true, force: true })); await mkdir(source);
+  deferCleanup(t, () => rm(root, { recursive: true, force: true })); await mkdir(source);
   const files = [join(source, "a.bsl"), join(source, "b.bsl")], text = "Переменная = 1;\n";
   await Promise.all(files.map(file => writeFile(file, text)));
   const docs = new Map(), commands = new Map(), applications = [], warnings = [], policy = new Set(), readonly = new Set();
-  let active = true, model = 0, authorize = async () => {}, convert = async () => {}, apply = async () => true;
+  let active = true, model = 0, authorize = async () => {}, convert = async () => {}, apply = async () => true,
+    wireVersion = document => document.version;
   const timers = new Set();
   const document = async uri => {
     const key = uri.toString(); if (docs.has(key)) return docs.get(key);
@@ -67,8 +75,9 @@ async function fixture(t) {
     process, structuredClone, setTimeout(callback) { timers.add(callback); return callback; }, clearTimeout(callback) { timers.delete(callback); },
   })(
     name => name === "vscode" ? vscode : name === "../editor-policy.js" ? policyModule.exports : require(name), adapter, adapter.exports);
-  const edits = new adapter.exports.LanguageEdits(client, { sources: [{ source }] }, support, () => active, () => {}, () => model);
-  t.after(() => edits.shutdown());
+  const edits = new adapter.exports.LanguageEdits(client, { sources: [{ source }] }, support, () => active, () => {}, () => model,
+    document => wireVersion(document));
+  deferCleanup(t, () => edits.shutdown());
   const change = (index, version = opened[index].version) => ({ textDocument: { uri: opened[index].uri.toString(), version },
     edits: [{ range: { start: { line: 0, character: 0 }, end: { line: 0, character: 10 } }, newText: "Значение" }] });
   return { root, source, files, opened, edits, middleware: edits.middleware(), applications, warnings, policy, readonly, reply, commands, capabilities, change,
@@ -77,6 +86,7 @@ async function fixture(t) {
     /** Advance the guard's only timer deterministically; protocol and I/O boundaries use explicit barriers. */
     expireTimers() { for (const callback of [...timers]) callback(); },
     setActive(value) { active = value; }, setAuthorize(value) { authorize = value; }, setConvert(value) { convert = value; }, setApply(value) { apply = value; },
+    setWireVersion(value) { wireVersion = value; },
     /** A dependency change supersedes pending actions even when target text versions stay equal. */
     advanceModel() { model++; } };
 }
@@ -88,6 +98,31 @@ test("one blocked target rejects the whole WorkspaceEdit; an allowed multi-file 
   f.policy.clear(); assert.equal((await f.middleware.workspace.handleApplyEdit({ edit })).applied, true);
   assert.equal(f.applications.length, 1); assert.deepEqual(JSON.parse(JSON.stringify(f.applications[0].raw)), edit);
   assert.equal(f.capabilities.workspace.workspaceEdit.resourceOperations.length, 0); assert.equal(f.capabilities.workspace.workspaceEdit.snippetEditSupport, false);
+});
+
+test("Windows upstream file URLs retain native version guards and cannot duplicate an aliased edit target", { skip: process.platform !== "win32" }, async t => {
+  const f = await fixture(t), change = f.change(0);
+  const standard = pathToFileURL(f.files[0].replace(/^[a-z]:/i, drive => drive.toUpperCase())).href;
+  const upstream = { ...change, textDocument: { ...change.textDocument, uri: standard } };
+  assert.equal((await f.middleware.workspace.handleApplyEdit({ edit: { documentChanges: [upstream] } })).applied, true);
+  assert.equal((await f.middleware.workspace.handleApplyEdit({ edit: { documentChanges: [change, upstream] } })).applied, false);
+  assert.equal(f.applications.length, 1);
+});
+
+test("a restored query projection validates the server clock without treating the native version as an LSP version", async t => {
+  const f = await fixture(t), document = f.opened[0], uri = document.uri.toString(), sent = [];
+  const documents = new LanguageDocuments(async (_method, params) => sent.push(params),
+    value => languageUri(uri) === value ? document : undefined);
+  await documents.notification("textDocument/didOpen", { textDocument: { uri } }, () => assert.fail("owned stream"));
+  const owner = {};
+  await documents.project(uri, "projected query", owner);
+  await documents.release(uri, owner);
+  f.setWireVersion(document => documents.wireVersion(document));
+  const serverVersion = sent.at(-1).textDocument.version;
+  assert.notEqual(serverVersion, document.version);
+  const change = f.change(0); change.textDocument.version = serverVersion;
+  assert.equal((await f.middleware.workspace.handleApplyEdit({ edit: { documentChanges: [change] } })).applied, true);
+  assert.equal((await f.middleware.workspace.handleApplyEdit({ edit: { documentChanges: [f.change(0)] } })).applied, false);
 });
 
 test("stale, unversioned, protected and resource edits cannot partially apply an otherwise permitted target", async t => {

@@ -1,4 +1,5 @@
-import { spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
+import { promisify } from "node:util";
 import { createWriteStream } from "node:fs";
 import { mkdtemp, rm, readFile, writeFile, cp, mkdir, symlink } from "node:fs/promises";
 import { resolve, join, isAbsolute, basename } from "node:path";
@@ -17,8 +18,13 @@ if (!["project", "legacy"].includes(backend)) throw new Error("ESKA_TEST_BACKEND
 if (!isAbsolute(globalBinary)) throw new Error("ESKA_HOST_GLOBAL_BINARY must be absolute.");
 const playground = process.env.ESKA_TEST_ROOT ?? resolve(repository, "../eska-playground");
 if (!isAbsolute(playground)) throw new Error("ESKA_TEST_ROOT must be absolute.");
-const root = await mkdtemp(join(playground, "explorer-host-"));
+// VS Code's Uri.fsPath lowercases drive letters; keep native fixture expectations in that form.
+const root = (await mkdtemp(join(playground, "explorer-host-"))).replace(/^[A-Z]:/, drive => drive.toLowerCase());
 try {
+  await mkdir(join(root, "profile", "User"), { recursive: true });
+  await writeFile(join(root, "profile", "User", "settings.json"), JSON.stringify({
+    "workbench.startupEditor": "none", "onboarding.enabled": false,
+  }));
   const fixture = await createTreeProject(join(root, "project"), basename(suite) === "language-reference-host.cjs" ? "processing" : process.env.ESKA_HOST_PROJECT_TYPE ?? "configuration");
   if (["query-layout-host.cjs", "query-compact-performance-host.cjs"].includes(basename(suite))) {
     fixture.query = await (await import("./query-fixture.mjs")).createQuerySource(fixture);
@@ -79,20 +85,27 @@ try {
   await mkdir(join(fixture.root, ".vscode"), { recursive: true });
   // Prevent the first-run welcome page from taking focus during native formatting/menu assertions.
   const nativeUiSettings = ["formatting-readonly-host.cjs", "tool-status-host.cjs", "language-host.cjs"].includes(basename(suite)) ? { "workbench.startupEditor": "none" } : {};
-  // Language acceptance must select its release binary before activation starts a connection.
-  const explicitBinary = process.env.ESKA_HOST_GLOBAL_BINARY || fixture.query || basename(suite) === "language-host.cjs";
+  // Configure the binary before activation: a later settings notification deliberately disconnects.
+  // The general explorer suite separately exercises discovery through the isolated PATH.
+  const explicitBinary = process.env.ESKA_HOST_GLOBAL_BINARY || basename(suite) !== "extension-host.cjs";
   await writeFile(join(fixture.root, ".vscode/settings.json"), JSON.stringify({ ...nativeUiSettings, "eska.explorer.checkForUpdates": false, "eska.explorer.checkForAnalyzerUpdates": false, "eska.explorer.checkForFormatterUpdates": false, ...(process.env.ESKA_TEST_FMT_BINARY ? { "eska.explorer.formatterExecutable": process.env.ESKA_TEST_FMT_BINARY } : {}), "eska.explorer.languageFeatures": process.env.ESKA_TEST_LANGUAGE === "1", "eska.explorer.analyzerExecutable": process.env.ESKA_TEST_ANALYZER_BINARY ?? join(root, "missing-analyzer"), "eska.explorer.backend": backend,
     ...(explicitBinary ? { "eska.explorer.executable": binary } : {}),
     ...(process.env.ESKA_HOST_SUPPORT_DISABLED ? { "eska.explorer.supportPolicy": false } : {}) }));
   const executable = process.env.VSCODE_EXECUTABLE ?? "code";
+  // Windows Code.exe launches the workbench; extension installation belongs to its Node CLI.
+  const cli = process.env.VSCODE_CLI_JS;
+  if (cli && !isAbsolute(cli)) throw new Error("VSCODE_CLI_JS must be absolute.");
+  const run = promisify(execFile);
+  const runCli = (args, options) => run(executable, cli ? [cli, ...args] : args, {
+    ...options, windowsHide: true,
+    ...(cli ? { env: { ...process.env, ...options?.env, ELECTRON_RUN_AS_NODE: "1" } } : {}),
+  });
   let extensionPath = repository;
   if (process.env.ESKA_HOST_LANGUAGE_PACK_VSIX) {
     const languagePack = process.env.ESKA_HOST_LANGUAGE_PACK_VSIX;
     if (!isAbsolute(languagePack)) throw new Error("ESKA_HOST_LANGUAGE_PACK_VSIX must be absolute.");
-    const { promisify } = await import("node:util");
-    const { execFile } = await import("node:child_process");
-    await promisify(execFile)(executable, [`--user-data-dir=${join(root, "profile")}`, `--extensions-dir=${join(root, "extensions")}`,
-      "--install-extension", languagePack, "--force"], { timeout: 60000 });
+    await runCli([`--user-data-dir=${join(root, "profile")}`, `--extensions-dir=${join(root, "extensions")}`,
+      "--install-extension", languagePack, "--force"], { timeout: 120000 });
   }
   const conflictFixture = process.env.ESKA_HOST_CONFLICT_FIXTURE ? await (await import("./conflict-fixture.mjs")).createConflictFixture(root) : undefined;
   if (conflictFixture && process.env.ESKA_HOST_CONFLICT_FIXTURE === "initial") {
@@ -115,19 +128,19 @@ try {
   }
   if (process.env.ESKA_TEST_VSIX) {
     if (!isAbsolute(process.env.ESKA_TEST_VSIX)) throw new Error("ESKA_TEST_VSIX must be absolute.");
-    const { execFile } = await import("node:child_process");
-    const { promisify } = await import("node:util");
-    const run = promisify(execFile);
     const directories = [`--user-data-dir=${join(root, "profile")}`, `--extensions-dir=${join(root, "extensions")}`];
-    await run(executable, [...directories, "--install-extension", process.env.ESKA_TEST_VSIX], { timeout: 60000 });
-    const { stdout } = await run(executable, [...directories, "--list-extensions", "--show-versions"], { timeout: 30000 });
+    await runCli([...directories, "--install-extension", process.env.ESKA_TEST_VSIX], { timeout: 120000 });
+    const { stdout } = await runCli([...directories, "--list-extensions", "--show-versions"], { timeout: 30000 });
     const installed = stdout.split(/\r?\n/).find(line => line.startsWith("1c-tooling.eska-explorer@"));
     if (!installed) throw new Error(`VSIX was not installed: ${stdout}`);
     extensionPath = join(root, "extensions", installed.replace("@", "-"));
     const { createHash } = await import("node:crypto");
     const installedBundle = await readFile(join(extensionPath,"out/extension.js"));
     if (!installedBundle.equals(await readFile(join(repository,"out/extension.js")))) throw new Error("Installed VSIX bundle differs from the packaged checkout.");
-    console.log(JSON.stringify({installedVsix:process.env.ESKA_TEST_VSIX,installedBundle:join(extensionPath,"out/extension.js"),bundleSha256:createHash("sha256").update(installedBundle).digest("hex")}));
+    const installedRenderer = await readFile(join(extensionPath,"resources/properties/view.js"));
+    if (!installedRenderer.equals(await readFile(join(repository,"resources/properties/view.js")))) throw new Error("Installed VSIX property renderer differs from the checkout.");
+    console.log(JSON.stringify({installedVsix:process.env.ESKA_TEST_VSIX,installedBundle:join(extensionPath,"out/extension.js"),bundleSha256:createHash("sha256").update(installedBundle).digest("hex"),
+      propertyRendererSha256:createHash("sha256").update(installedRenderer).digest("hex")}));
     // Test mode exposes the provider only for acceptance. All runtime files come from the installed VSIX.
   }
   let workspace = fixture.root;
@@ -144,7 +157,19 @@ try {
       ...(process.env.ESKA_HOST_SUPPORT_DISABLED ? { "eska.explorer.supportPolicy": false } : {}) } }));
   }
   // A second process reuses the same profile and workspace to test restored editors.
-  const hostArguments = [`--extensionTestsPath=${suite}`];
+  // Validate the actual host locale, including normal startup probes, before the suite runs.
+  const hostSuite = join(root, "locale-suite.cjs");
+  await writeFile(hostSuite, `exports.run = async function () {
+    const vscode = require('vscode');
+    const assert = require('node:assert/strict');
+    const expected = process.env.ESKA_HOST_LOCALE;
+    if (expected) assert.equal(vscode.env.language.split('-')[0], expected, 'native host locale');
+    await require(${JSON.stringify(suite)}).run();
+    const fs = require('node:fs/promises'), file = ${JSON.stringify(join(fixture.root, "host-result.json"))};
+    const result = JSON.parse(await fs.readFile(file, 'utf8'));
+    await fs.writeFile(file, JSON.stringify({ ...result, locale: vscode.env.language }));
+  };\n`);
+  const hostArguments = [`--extensionTestsPath=${hostSuite}`];
   let languageWarmup;
   if (process.env.ESKA_HOST_LANGUAGE_PACK_VSIX) {
     // A fresh profile registers installed language packs during its first normal startup.
@@ -171,7 +196,7 @@ exports.activate = async function () {
     await writeFile(join(probe, "extension.cjs"), `const vscode = require('vscode');
 exports.activate = async function () {
   if (process.env.ESKA_HOST_RUN === '-1') return;
-  try { await require(${JSON.stringify(suite)}).run(); }
+  try { await require(${JSON.stringify(hostSuite)}).run(); }
   catch (error) {
     const fs = require('node:fs/promises'), file = ${JSON.stringify(join(fixture.root, "host-result.json"))};
     let reported;
@@ -184,21 +209,20 @@ exports.activate = async function () {
     if (process.env.ESKA_TEST_VSIX) {
       // Development hosts suppress native hot-exit backups; a real installed startup probe preserves the normal lifecycle.
       const probeVsix = join(root, "restore-probe.vsix");
-      const { promisify } = await import("node:util");
-      const { execFile } = await import("node:child_process");
       await writeFile(join(probe, "README.md"), "# Private ESKA acceptance probe\n");
-      await promisify(execFile)(process.execPath, [join(repository, "node_modules/@vscode/vsce/vsce"), "package", "--no-dependencies",
+      await run(process.execPath, [join(repository, "node_modules/@vscode/vsce/vsce"), "package", "--no-dependencies",
         "--allow-missing-repository", "--skip-license", "--out", probeVsix], { cwd: probe });
-      await promisify(execFile)(executable, [`--user-data-dir=${join(root, "profile")}`, `--extensions-dir=${join(root, "extensions")}`,
+      await runCli([`--user-data-dir=${join(root, "profile")}`, `--extensions-dir=${join(root, "extensions")}`,
         "--install-extension", probeVsix, "--force"]);
       hostArguments.splice(0, 1);
       installedStartupProbe = true;
     } else hostArguments.splice(0, 1, `--extensionDevelopmentPath=${probe}`);
   }
+  let languageAttempts = 0;
   const runs = process.env.ESKA_HOST_CONFLICT_RELOAD ? 3 : process.env.ESKA_HOST_RESTART || process.env.ESKA_HOST_QUERY_RESTART ? 2 : 1;
   for (let run = languageWarmup ? -1 : 0; run < runs; run++) {
     await rm(join(fixture.root, "host-result.json"), { force: true });
-    const child = spawn(executable, ["--verbose", "--wait", ...(locale ? [`--locale=${locale}`] : []), ...(process.env.ESKA_HOST_DEBUG_PORT ? [`--remote-debugging-port=${process.env.ESKA_HOST_DEBUG_PORT}`] : []),
+    const child = spawn(executable, ["--verbose", "--skip-welcome", "--skip-release-notes", ...(locale ? [`--locale=${locale}`] : []), ...(process.env.ESKA_HOST_DEBUG_PORT ? [`--remote-debugging-port=${process.env.ESKA_HOST_DEBUG_PORT}`] : []),
       ...(installedStartupProbe && run !== -1 ? [] : [`--extensionDevelopmentPath=${extensionPath}`]), ...(run === -1 ? [`--extensionDevelopmentPath=${languageWarmup}`] : hostArguments),
       `--user-data-dir=${join(root, "profile")}`, `--extensions-dir=${join(root, "extensions")}`,
       "--disable-workspace-trust", ...(process.env.ESKA_BSL_EXTENSION || process.env.ESKA_HOST_ENABLE_EXTENSIONS || languageWarmup || installedStartupProbe ? [] : ["--disable-extensions"]),
@@ -212,10 +236,19 @@ exports.activate = async function () {
     const capture = (data) => { fullLog?.write(data); output = (output + data.toString()).slice(-32000); };
     child.stdout.on("data", capture);
     child.stderr.on("data", capture);
-    const code = await new Promise((resolve, reject) => { child.once("error", reject); child.once("close", resolve); });
+    // Windows crash reporters can inherit these pipes after the workbench exits.
+    // The owned workbench process and its result file determine suite completion.
+    const code = await new Promise((resolve, reject) => { child.once("error", reject); child.once("exit", resolve); });
+    child.stdout.destroy();
+    child.stderr.destroy();
     if (fullLog) await new Promise(resolve => fullLog.end(resolve));
     if (process.env.ESKA_HOST_LOG) await writeFile(process.env.ESKA_HOST_LOG, output);
-    if (code !== 0) throw new Error(`Extension host exited ${code}\n${output}`);
+    // Preserve suite evidence even when the extension test runner exits unsuccessfully.
+    if (code !== 0) {
+      const result = await readFile(join(fixture.root, "host-result.json"), "utf8").catch(() => "");
+      if (result && process.env.ESKA_HOST_FULL_LOG) await writeFile(`${process.env.ESKA_HOST_FULL_LOG}.result.json`, result);
+      throw new Error(`Extension host exited ${code}\n${result}\n${output}`);
+    }
     try {
       const result = JSON.parse(await readFile(join(fixture.root, "host-result.json"), "utf8"));
       if (result.passed !== true) {
@@ -230,7 +263,12 @@ exports.activate = async function () {
         throw new Error(`Backend ${pid} survived native host shutdown`);
       }
       console.log(JSON.stringify(result));
+      // Registration may finish after the first startup; repeat only this read-only locale probe.
+      if (run === -1 && locale && result.locale?.split('-')[0] !== locale) {
+        if (++languageAttempts >= 3) throw new Error(`Language pack did not register ${locale}`);
+        run--;
+      }
     }
     catch (error) { throw new Error(`Extension host did not report success: ${error.message}\n${output}`); }
   }
-} finally { await rm(root, { recursive: true, force: true }); }
+} finally { await rm(root, { recursive: true, force: true, maxRetries: process.platform === "win32" ? 20 : 0, retryDelay: 250 }); }

@@ -44,6 +44,7 @@ exports.run = async function () {
   const samples = [[root, 'configuration'], [catalog, 'catalog'], [goods, 'catalog'], [modules, 'modules'],
     [module, 'module'], [section, 'tabular-section'], [quantity, 'tabular-attribute'], [commonModule, 'common-module']];
   const tree = explorer.tree, session = explorer.connection.state.session.sessionId;
+  await explorer.expandRootForReveal(tree, root.project);
   let repaints = 0;
   const subscription = explorer.onDidChangeTreeData(() => repaints++);
   for (const [name, kind, folder] of [
@@ -63,6 +64,7 @@ exports.run = async function () {
       assert.ok(item.accessibilityInformation.label);
     }
     await explorer.view.reveal(quantity, { select: true, focus: false });
+    await until(() => explorer.view.selection[0] === quantity, 'quantity selected');
     assert.equal(explorer.view.selection[0], quantity);
     assert.equal(explorer.tree, tree);
     assert.equal(explorer.connection.state.session.sessionId, session);
@@ -70,6 +72,7 @@ exports.run = async function () {
   for (const zoom of [-1, 0, 1, 2]) {
     await vscode.workspace.getConfiguration('window').update('zoomLevel', zoom, vscode.ConfigurationTarget.Global);
     await explorer.view.reveal(commonModule, { select: true, focus: false });
+    await until(() => explorer.view.selection[0] === commonModule, 'common module selected');
     assert.equal(explorer.getTreeItem(commonModule).collapsibleState, vscode.TreeItemCollapsibleState.None);
   }
   subscription.dispose();

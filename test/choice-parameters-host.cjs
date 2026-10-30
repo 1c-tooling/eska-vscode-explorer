@@ -23,6 +23,21 @@ exports.run = async function () {
   const entry = (await explorer.getChildren(attributes)).find(entry => entry.node.label.text === 'Артикул');
   await vscode.commands.executeCommand('eska.explorer.properties', entry);
   const [tab] = explorer.propertiesTabs.tabs.values();
+  const picks = [], writes = [], requests = [], writeEdit = tab.writeEdit.bind(tab);
+  tab.writeEdit = async (...args) => {
+    writes.push({field:args[0],change:args[1],direction:args[2],checkingExternal:tab.checkingExternal,busy:tab.editor.busy,revision:tab.revision});
+    return writeEdit(...args);
+  };
+  const request = tab.tree.request.bind(tab.tree);
+  let releaseCheck;
+  const checkGate = new Promise(resolve => { releaseCheck = resolve; });
+  let holdChecks = false;
+  tab.tree.request = async (...args) => {
+    requests.push({method:args[1],change:args[2]?.change});
+    const result = await request(...args);
+    if (holdChecks && args[1] === 'metadata/propertyEditing') await checkGate;
+    return result;
+  };
   const dom = await frame(tab);
   try {
     await until(() => dom.evaluate("!document.getElementById('read-only').disabled"), 'tab loaded');
@@ -41,28 +56,53 @@ exports.run = async function () {
     const renamed = original.replace('name="Filter.Owner"', 'name="Filter.Recipient"');
     await until(async () => !tab.state.editing.busy && await fs.readFile(file, 'utf8') === renamed, 'name attribute autosaved');
     /** Search and accept one visible native picker option; no host mutation shortcut is used. */
-    async function pick(query) {
-      await until(() => dom.workbench("Boolean(document.querySelector('.quick-input-widget:not([style*=\"display: none\"]) input'))"), 'native picker visible');
+    async function pick(query, title) {
+      await until(() => dom.workbench(`(()=>{const widget=[...document.querySelectorAll('.quick-input-widget')].find(node=>node.offsetWidth&&node.offsetHeight);
+        return widget?.querySelector('.quick-input-title')?.textContent===${JSON.stringify(title)};})()`), `native picker stage: ${title}`);
       await dom.workbench(`(()=>{const input=document.querySelector('.quick-input-widget input[type=text]');input.focus();input.value=${JSON.stringify(query)};input.dispatchEvent(new Event('input',{bubbles:true}));})()`);
-      await until(() => dom.workbench("document.querySelectorAll('.quick-input-list .monaco-list-row').length===1"), 'single matching option');
+      await until(() => dom.workbench(`(()=>{const rows=[...document.querySelectorAll('.quick-input-list .monaco-list-row')].filter(row=>row.offsetWidth&&row.offsetHeight);
+        return rows.length===1&&rows[0].textContent.toLowerCase().includes(${JSON.stringify(query.toLowerCase())});})()`), `single matching option: ${query}`);
+      const label = await dom.workbench("[...document.querySelectorAll('.quick-input-list .monaco-list-row')].find(row=>row.offsetWidth&&row.offsetHeight)?.querySelector('.label-name')?.textContent");
+      picks.push({query,title,label});
       await vscode.commands.executeCommand('workbench.action.acceptSelectedQuickOpenItem');
+      await until(() => dom.workbench(`(()=>{const widget=[...document.querySelectorAll('.quick-input-widget')].find(node=>node.offsetWidth&&node.offsetHeight);
+        return !widget||widget.querySelector('.quick-input-title')?.textContent!==${JSON.stringify(title)};})()`), `native picker completed: ${title}`);
+      return label;
     }
+    await dom.rendered();
     await dom.evaluate(`document.getElementById('edit-${scalar}').click()`);
-    await pick('Товары');
-    await pick('Empty reference');
+    const referenceTitle = await pick('Товары', tab.state.labels.chooseValue);
+    await pick('Empty reference', referenceTitle);
     await until(async () => !tab.state.editing.busy && (await fs.readFile(file,'utf8')).includes('>Catalog.Товары.EmptyRef</a:value>'), 'reference value autosaved');
     const reference = await fs.readFile(file, 'utf8');
+    await dom.rendered();
     await dom.evaluate(`document.getElementById('edit-${array}').click()`);
-    await pick('String');
+    await pick('String', tab.state.labels.chooseValue);
     await until(() => dom.workbench("document.querySelector('.quick-input-widget input[type=text]')?.value === 'second'"), 'existing array value shown');
+    holdChecks = true;
+    const externalCheck = tab.checkExternalChange();
+    assert.equal(tab.checkingExternal, true);
     await dom.workbench("(()=>{const input=document.querySelector('.quick-input-widget input[type=text]');input.value='updated';input.dispatchEvent(new Event('input',{bubbles:true}));})()");
     await vscode.commands.executeCommand('workbench.action.acceptSelectedQuickOpenItem');
+    await until(() => writes.some(write => write.change?.value === 'updated'), 'native value accepted during the external check');
+    assert.equal(await fs.readFile(file, 'utf8'), reference, 'no write precedes the external snapshot check');
+    holdChecks = false;
+    releaseCheck();
+    await externalCheck;
     await until(async () => !tab.state.editing.busy && await fs.readFile(file,'utf8') === reference.replace('>second<','>updated<'), 'one array entry autosaved');
+    assert.equal(requests.filter(item => item.method === 'metadata/updateProperty' && item.change?.value === 'updated').length, 1,
+      'the accepted value is written exactly once after the check');
     await dom.screenshot('choice-parameters-properties.png');
     for (const expected of [reference, renamed, original]) {
       await dom.evaluate("document.getElementById('undo').click()");
       await until(async () => !tab.state.editing.busy && await fs.readFile(file,'utf8') === expected, 'parameter undo');
     }
     await fs.writeFile(path.join(fixture.root,'host-result.json'), JSON.stringify({passed:true,suite:'property-choice-parameters',vscode:vscode.version}));
-  } finally { dom.close(); }
+  } catch(error) {
+    await fs.writeFile(path.join(fixture.root,'host-result.json'),JSON.stringify({passed:false,error:String(error.stack??error),failure:error,picks,writes,
+      editing:tab.state.editing,checkingExternal:tab.checkingExternal,notice:tab.state.notice,
+      picker:await dom.workbench(`({active:document.activeElement?.outerHTML.slice(0,200),
+        title:document.querySelector('.quick-input-title')?.textContent,rows:[...document.querySelectorAll('.quick-input-list .monaco-list-row')].map(row=>({text:row.textContent,width:row.offsetWidth,height:row.offsetHeight}))})`).catch(()=>undefined)}));
+    throw error;
+  } finally { holdChecks = false; releaseCheck(); tab.tree.request = request; dom.close(); }
 };

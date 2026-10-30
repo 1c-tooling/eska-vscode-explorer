@@ -24,6 +24,47 @@ ESKA_TEST_ROOT="$(realpath ../eska-playground)" bun test
 node --test test/*.test.mjs
 ```
 
+### Windows PowerShell
+
+Проверки выполняются в Node Extension Host. Для интеграционных сценариев нужны
+собранные `eska-project.exe`, `eska-fmt.exe` и, для языковых функций,
+`bsl-analyzer-app.exe`. Каталог playground должен существовать рядом с репозиториями.
+
+```powershell
+bun install --frozen-lockfile --ignore-scripts
+bun run --bun check
+bun run --bun compile
+$env:ESKA_TEST_ROOT = (Resolve-Path ../eska-playground).Path
+$env:ESKA_TEST_BINARY = (Resolve-Path ../eska/target/debug/eska-project.exe).Path
+$env:ESKA_TEST_FMT_BINARY = (Resolve-Path ../eska/target/debug/eska-fmt.exe).Path
+node --test --test-concurrency=2 test/*.test.mjs
+bun run --bun package
+```
+
+Для нативной проверки задайте `VSCODE_EXECUTABLE` абсолютным путём к `Code.exe`,
+а `VSCODE_CLI_JS` — к его `resources/app/out/cli.js`. В поставках с каталогом
+версии `resources` находится внутри этого каталога. Runner вызывает CLI через
+Electron с `ELECTRON_RUN_AS_NODE=1`, а окно IDE запускает отдельно.
+
+```powershell
+$env:VSCODE_EXECUTABLE = 'C:/Tools/VSCode/Code.exe' # путь вашей установки
+$env:VSCODE_CLI_JS = 'C:/Tools/VSCode/resources/app/out/cli.js' # путь вашей установки
+$env:ESKA_TEST_VSIX = (Resolve-Path ./eska-explorer-0.1.5.vsix).Path
+$env:ESKA_HOST_LOCALE = 'en'
+node test/run-host.mjs test/extension-host.cjs
+```
+
+`VSCODE_EXECUTABLE` должен указывать на executable, а не на `code.cmd`.
+Для `ru` нужен `ESKA_HOST_LANGUAGE_PACK_VSIX` с русским language pack:
+runner установит его в приватный профиль и проверит фактическую локаль IDE.
+Для webview-сценариев задайте свободный локальный `ESKA_HOST_DEBUG_PORT`.
+Файловые алиасы проверяются через directory junction без прав на создание symlink.
+Освобождение backend предшествует удалению его временных каталогов.
+Нативные UI-профили запускайте последовательно: окна разделяют OS focus,
+поэтому параллельный запуск нарушает проверки QuickPick и dirty-close.
+Регистрация language pack подтверждается отдельным read-only startup probe;
+тестовый сценарий начинается только в требуемой фактической локали.
+
 Клиент query RPC находится в `src/query/`: планы исходников используют API 1.13,
 общее восстановление — API 1.14, устойчивые сессии — API 1.16. Рабочий адаптер
 запрашивает 1.33. После явного ответа о поддержке более ранней версии из диапазона
@@ -43,6 +84,10 @@ analyzer config — разные контракты.
 после отмены и ошибок. План проверяется по диапазонам UTF-8/UTF-16 и хэшу полного
 результата до передачи редактору. Клиент не записывает XML/BSL и не запускает
 анализатор. Вкладки, сохранение и восстановление T101 проверяются отдельно.
+До выделения документа адаптер обрабатывает накопленные файловые события
+и ограниченно повторяет только чтение владельца, если между запросами
+сменились generation/eventSequence. Создание документа, сессии и изменения
+исходников этот retry не охватывает.
 
 Форматирование использует API 1.33 и отдельный `eska-fmt`. Text-only соединение
 проходит только initialize, без workspace/open; query-черновик использует процесс
@@ -108,15 +153,21 @@ node test/run-host.mjs test/query-eol-host.cjs
 ```sh
 ESKA_TEST_BINARY="$(realpath ../eska/target/debug/eska-project)" \
 ESKA_TEST_ROOT="$(realpath ../eska/../eska-playground)" \
-ESKA_HOST_SUPPORT_DISABLED=1 ESKA_HOST_QUERY_RESTART=1 \
+ESKA_TEST_VSIX="$(realpath ./eska-explorer-0.1.5.vsix)" \
+ESKA_HOST_SUPPORT_DISABLED=1 ESKA_HOST_RESTART=1 \
 ESKA_HOST_LOCALE=en VSCODE_EXECUTABLE=codium \
-node test/run-host.mjs test/query-tabs-host.cjs
+node test/run-host.mjs test/query-modal-restore-host.cjs
 ```
 
-Два запуска используют один приватный профиль. Первый проверяет дерево,
-сохранение clean/dirty XML, Undo/Redo, ручные списки и внешний конфликт; второй —
-холодное восстановление dirty-черновика, read-only снимок владельца, отказ до
-явного продолжения и применение после проверки новой версии редактора.
+Два обычных запуска установленного VSIX используют один приватный профиль.
+Первый оставляет дочерний запрос с сохранённым checkpoint, второй проверяет
+восстановление без автоматического применения, блокировку родителя, явное
+продолжение, возврат несохранённого BSL и единичный Undo.
+Исторический `query-tabs-host.cjs` относится к контракту до модальной замены
+родителя: его ожидание одновременного dirty XML и дочернего запроса не является
+текущей UI-приёмкой. Сохранение XML, внешние конфликты и сравнение снимков
+проверяет `query-modal-host.cjs`, реальные решения Save/Discard/Cancel —
+`query-modal-normal-host.cjs` с `ESKA_HOST_NORMAL=1`.
 `ESKA_HOST_LOCALE=ru` проверяет фактическую русскую UI-локаль. Для нового профиля
 передайте `ESKA_HOST_LANGUAGE_PACK_VSIX` с абсолютным путём к совместимому
 русскому языковому пакету. Runner установит его только в приватный профиль
@@ -218,8 +269,10 @@ VSCODE_EXECUTABLE=codium node test/run-host.mjs test/icons-host.cjs
 проверяют четыре типа проектов, workspace из двух участников, ошибки manifest,
 перезапуск и отсутствие оставшихся процессов. Smoke-test в Extension Host
 VSCodium 1.109.5 (Node 22.21.1) подтвердил активацию, подключение, перезапуск
-и отключение с проверкой дочерних процессов. Windows, macOS и Remote пока
-не проверены в реальной среде; полная матрица приёмки относится к T81.
+и отключение с проверкой дочерних процессов. Дополнительная
+[серия Windows 11 / Microsoft VS Code](windows-validation.md) выполнена
+2026-10-29–31. macOS и Remote требуют отдельной проверки;
+полная матрица приёмки относится к T81.
 
 ## Релизы
 
@@ -278,9 +331,10 @@ ESKA_TEST_ROOT="$(realpath ../eska-playground)" \
 VSCODE_EXECUTABLE=codium node test/run-host.mjs test/presentation-host.cjs
 ```
 
-Проверены Linux/VSCodium: семь объектов с прямым открытием BSL, шесть видов
+На Linux/VSCodium проверены семь объектов с прямым открытием BSL, шесть видов
 вложенных элементов, подписи источников формы RU/EN и удаление модуля через
-файловый watcher. Это не заменяет приёмку Windows/macOS/Remote.
+файловый watcher. Дополнительная Windows-проверка описана в
+[отчёте](windows-validation.md); macOS и Remote требуют отдельной приёмки.
 
 Нативная проверка предопределённых данных:
 

@@ -1,3 +1,4 @@
+import { deferCleanup } from "./cleanup.mjs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, mkdir, writeFile, rm, readFile } from "node:fs/promises";
@@ -24,14 +25,14 @@ test("real eska: four project types, two workspace members, errors and restarts"
   assert.ok(isAbsolute(playground), "ESKA_TEST_ROOT must be absolute");
   assert.ok(isAbsolute(executable), "ESKA_TEST_BINARY must be absolute");
   const root = await mkdtemp(join(playground, "explorer-integration-"));
-  t.after(() => rm(root, { recursive: true, force: true }));
+  deferCleanup(t, () => rm(root, { recursive: true, force: true }));
   const pids = [];
   const connection = new Connection("0.0.0", () => {}, () => {}, (options) => {
     const child = new BackendProcess(options);
     pids.push(child.pid);
     return child;
   });
-  t.after(() => connection.dispose());
+  deferCleanup(t, () => connection.dispose());
   /** Open through the same controller used by the extension adapter. */
   async function open(path, locale = "ru-RU") {
     await connection.connect({ executable, path, name: "integration", locale });
@@ -72,14 +73,14 @@ test("real eska: four project types, two workspace members, errors and restarts"
 /** A real older monolith remains an explicit choice; identity mismatch never starts a fallback. */
 test("real legacy backend requires explicit mode and can reconnect to standalone project", { skip: !executable || !legacyExecutable }, async t => {
   const root = await mkdtemp(join(process.env.ESKA_TEST_ROOT ?? resolve("../eska-playground"), "explorer-legacy-"));
-  t.after(() => rm(root, { recursive: true, force: true }));
+  deferCleanup(t, () => rm(root, { recursive: true, force: true }));
   const path = join(root, "project"); await project(path, "configuration");
   const starts = [], pids = [];
   const connection = new Connection("test", () => {}, () => {}, options => {
     starts.push(options.args);
     const child = new BackendProcess(options); pids.push(child.pid); return child;
   });
-  t.after(() => connection.dispose());
+  deferCleanup(t, () => connection.dispose());
   const target = { path, name: "legacy", locale: "en-US" };
   await connection.connect({ ...target, executable: legacyExecutable, backend: "legacy" });
   assert.equal(connection.state.kind, "ready", JSON.stringify(connection.state));

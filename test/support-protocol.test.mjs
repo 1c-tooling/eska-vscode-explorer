@@ -1,3 +1,4 @@
+import { deferCleanup } from "./cleanup.mjs";
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
@@ -8,7 +9,7 @@ import { createTreeProject } from './fixture.mjs';
 /** Use the real protocol in both locales; identities and policy fields must remain identical. */
 test('support capability and paginated policies are independent of locale', { skip: !process.env.ESKA_TEST_BINARY }, async t => {
   const root=await mkdtemp(join(resolve('../eska-playground'),'support-protocol-'));
-  t.after(()=>rm(root,{recursive:true,force:true}));
+  deferCleanup(t, ()=>rm(root,{recursive:true,force:true}));
   const fixture=await createTreeProject(join(root,'project'));
   await mkdir(join(fixture.source,'Ext'),{recursive:true});
   const id='11111111-1111-1111-1111-111111111111';

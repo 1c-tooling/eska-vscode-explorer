@@ -1,3 +1,4 @@
+import { deferCleanup } from "./cleanup.mjs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, mkdir, readFile, writeFile, rm } from "node:fs/promises";
@@ -68,9 +69,9 @@ test("only proven empty root and immediate Common sections are hidden", () => {
 const executable = process.env.ESKA_TEST_BINARY;
 test("real filters hide empty Common sections, retain object groups and reuse cached children", { skip: !executable }, async t => {
   const root = await mkdtemp(join(process.env.ESKA_TEST_ROOT ?? resolve("../eska-playground"), "explorer-filter-"));
-  t.after(() => rm(root, { recursive: true, force: true }));
+  deferCleanup(t, () => rm(root, { recursive: true, force: true }));
   const connection = new Connection("test", () => {}, () => {});
-  t.after(() => connection.dispose());
+  deferCleanup(t, () => connection.dispose());
   for (const type of ["configuration", "extension", "report", "processing"]) {
     const fixture = await createTreeProject(join(root, type), type);
     if (["configuration", "extension"].includes(type)) {
@@ -124,7 +125,7 @@ test("real filters hide empty Common sections, retain object groups and reuse ca
 
 test("workspace members retain independent filters after reconnect", { skip: !executable }, async t => {
   const root = await mkdtemp(join(process.env.ESKA_TEST_ROOT ?? resolve("../eska-playground"), "explorer-filters-workspace-"));
-  t.after(() => rm(root, { recursive: true, force: true }));
+  deferCleanup(t, () => rm(root, { recursive: true, force: true }));
   await createTreeProject(join(root, "first"));
   await createTreeProject(join(root, "second"), "extension");
   await writeFile(join(root, "eska.toml"), "[workspace]\n[workspace.members.app]\nconfiguration='first'\nextensions=[{path='second'}]\n");
@@ -132,7 +133,7 @@ test("workspace members retain independent filters after reconnect", { skip: !ex
     await writeFile(join(root, name, "eska.toml"), `[project]\nname='${name}'\ntype='${type}'\n`);
   }
   const connection = new Connection("test", () => {}, () => {});
-  t.after(() => connection.dispose());
+  deferCleanup(t, () => connection.dispose());
   const filters = new ProjectFilters(storage());
   for (let run = 0; run < 2; run++) {
     await connection.connect({ executable, path: root, name: "workspace", locale: "ru-RU" });
