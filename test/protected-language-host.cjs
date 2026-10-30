@@ -41,7 +41,7 @@ async function run() {
   const source = vscode.Uri.file(fixture.module);
   const uri = source.with({ scheme: 'eska-protected' });
   const explorer = await vscode.extensions.all.find(extension => extension.packageJSON.name === 'eska-explorer').activate();
-  let deniedByPolicy = false;
+  let deniedByPolicy = false, protectedActions = [];
   if (own) {
     const originalLog = explorer.language.log;
     /** Observe the production write guard's category rather than counting a transient cancellation as a policy rejection. */
@@ -56,6 +56,7 @@ async function run() {
   const entry = await revealFile(explorer.tree, fixture.module);
   assert.ok(entry);
   await vscode.commands.executeCommand('eska.explorer.openSource', entry);
+  await until(() => vscode.window.activeTextEditor?.document.uri.toString() === uri.toString(), 'protected editor is active');
   const view = vscode.window.activeTextEditor.document;
   assert.equal(view.uri.toString(), uri.toString(), 'support policy opens a protected module');
   assert.equal(view.languageId, 'bsl');
@@ -141,7 +142,15 @@ async function run() {
     }, 'native alias rename was denied by source policy');
     assert.ok(!rename?.size, 'native file alias cannot rename a locked source');
     assert.equal((await vscode.commands.executeCommand('vscode.executeFormatDocumentProvider', uri, { tabSize: 4, insertSpaces: true }))?.length ?? 0, 0);
-    assert.equal((await vscode.commands.executeCommand('vscode.executeCodeActionProvider', uri, fullRange(view)))?.length ?? 0, 0);
+    let analyzerActions = 0;
+    client.sendRequest = (method, ...args) => {
+      if ((typeof method === 'string' ? method : method.method) === 'textDocument/codeAction') analyzerActions++;
+      return originalRequest(method, ...args);
+    };
+    try { protectedActions = await vscode.commands.executeCommand('vscode.executeCodeActionProvider', uri, fullRange(view)) ?? []; }
+    finally { client.sendRequest = originalRequest; }
+    assert.equal(analyzerActions, 0, 'protected views never forward executable analyzer code actions');
+    assert.ok(protectedActions.every(action => !action.edit), 'editor contributions do not expose text edits on this protected URI');
     const oldPid = explorer.language.session.owner.child.pid; ownedPids.push(oldPid);
     stage = 'own-restart';
     await explorer.language.restart();
@@ -154,7 +163,8 @@ async function run() {
   assert.ok(!vscode.window.tabGroups.all.flatMap(group => group.tabs).some(tab => tab.input instanceof vscode.TabInputText
     && tab.input.uri.toString() === source.toString()), 'no writable counterpart tab was created');
   await fs.writeFile(path.join(fixture.root, 'host-result.json'), JSON.stringify({ passed: true, suite: 'protected-language',
-    vscode: vscode.version, locale: vscode.env.language, analyzer: own ? '0.4.0 (own LSP)' : analyzer.packageJSON.version, semanticTokens: tokens.data.length / 5,
+    vscode: vscode.version, locale: vscode.env.language, analyzer: own ? explorer.tooling.states.analyzer.info.version : analyzer.packageJSON.version, semanticTokens: tokens.data.length / 5,
+    unrelated_editor_actions: protectedActions.map(action => ({ title: action.title, command: action.command?.command ?? action.command })),
     outline: true, hover: true, definitions: true, references: true, folding: true, diagnostics: true, readonly: true,
     own_lsp: own, late_real_hover_rejected: own, own_restart: own, native_alias_rename_denied: own, shutdownPids: ownedPids }));
 }

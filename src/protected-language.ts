@@ -8,6 +8,8 @@ interface ProtectedDocument {
   source?: vscode.TextDocument;
   ready: Promise<void>;
   semantic?: vscode.Disposable;
+  symbols?: vscode.Disposable;
+  symbolsVersion?: number;
   legend?: string;
 }
 
@@ -26,13 +28,6 @@ export class ProtectedLanguageFeatures implements vscode.Disposable {
         provideHover: async (document, position, token) => {
           const values = await this.request<vscode.Hover[]>(document, token, "vscode.executeHoverProvider", position);
           return values?.length ? new vscode.Hover(values.flatMap(value => value.contents), values[0]?.range) : undefined;
-        },
-      }),
-      vscode.languages.registerDocumentSymbolProvider(selector, {
-        provideDocumentSymbols: async (document, token) => {
-          const symbols = await this.request<(vscode.DocumentSymbol | vscode.SymbolInformation)[]>(document, token,
-            "vscode.executeDocumentSymbolProvider");
-          return symbols?.map(documentSymbol);
         },
       }),
       vscode.languages.registerDefinitionProvider(selector, {
@@ -103,6 +98,7 @@ export class ProtectedLanguageFeatures implements vscode.Disposable {
       return;
     }
     await this.semantic(state);
+    this.symbols(state);
     this.publishDiagnostics(state);
   }
 
@@ -136,12 +132,14 @@ export class ProtectedLanguageFeatures implements vscode.Disposable {
     const legend = await vscode.commands.executeCommand<vscode.SemanticTokensLegend | undefined>(
       "vscode.provideDocumentSemanticTokensLegend", source.uri);
     // Keep the registration through a temporary provider outage, so refresh events can recover it.
-    if (!this.current(state) || !legend) return;
+    if (!this.current(state)) return;
+    if (!legend) { delete state.legend; return; }
     const key = JSON.stringify(legend);
     if (state.legend === key) return;
     state.semantic?.dispose();
     delete state.semantic;
     state.legend = key;
+    this.symbols(state, true);
     const selector = { scheme: PROTECTED_SOURCE_SCHEME, pattern: readonlyPattern(state.view.uri.fsPath) };
     state.semantic = vscode.languages.registerDocumentSemanticTokensProvider(selector, {
       onDidChangeSemanticTokens: state.changed.event,
@@ -154,6 +152,21 @@ export class ProtectedLanguageFeatures implements vscode.Disposable {
         return state.legend === key ? tokens : undefined;
       },
     }, legend);
+  }
+
+  /** Refresh the outline registration when its hidden source or provider becomes ready, expiring cached empty results. */
+  private symbols(state: ProtectedDocument, refresh = false): void {
+    if (!this.current(state) || !state.source || state.symbols && !refresh) return;
+    state.symbols?.dispose();
+    state.symbolsVersion = state.source.version;
+    state.symbols = vscode.languages.registerDocumentSymbolProvider(
+      { scheme: PROTECTED_SOURCE_SCHEME, pattern: readonlyPattern(state.view.uri.fsPath) }, {
+        provideDocumentSymbols: async (document, token) => {
+          const symbols = await this.request<(vscode.DocumentSymbol | vscode.SymbolInformation)[]>(document, token,
+            "vscode.executeDocumentSymbolProvider");
+          return symbols?.map(documentSymbol);
+        },
+      });
   }
 
   /** Map local navigation back into this readonly editor; other files keep their normal policy checks. */
@@ -182,7 +195,8 @@ export class ProtectedLanguageFeatures implements vscode.Disposable {
     if (!state) return;
     this.publishDiagnostics(state);
     // Some extensions register providers after activate() returns. Diagnostics mark their readiness.
-    if (!state.semantic) void this.semantic(state).catch(this.log);
+    this.symbols(state, state.symbolsVersion !== state.source?.version || state.legend === undefined);
+    void this.semantic(state).catch(this.log);
     state.changed.fire();
   }
 
@@ -209,6 +223,7 @@ export class ProtectedLanguageFeatures implements vscode.Disposable {
     if (state?.view !== document) return;
     this.documents.delete(document.uri.toString());
     state.semantic?.dispose();
+    state.symbols?.dispose();
     state.changed.dispose();
     this.diagnostics.delete(document.uri);
   }
