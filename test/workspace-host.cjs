@@ -76,6 +76,7 @@ exports.run = async function () {
   assert.equal(explorer.getParent(groups[0]), firstRoot);
   assert.ok(sections.indexOf(catalogs) < sections.indexOf(groups[0]), "metadata precedes file groups");
   for (const group of rows.filter(row => row.fileKind === "group")) assert.equal(explorer.getParent(group), undefined);
+  await explorer.expandRootForReveal(explorer.tree, firstRoot.project);
   await explorer.view.reveal(catalogs, { select: true, focus: true });
   try { await until(() => explorer.view.selection[0]?.key === catalogs.key, "metadata is directly inside the configuration"); }
   catch (error) { throw new Error(`${error.message}: ${JSON.stringify({ selected: explorer.view.selection.map(row => row.key),
