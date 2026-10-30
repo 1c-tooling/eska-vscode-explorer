@@ -51,6 +51,8 @@ export class LanguageService implements vscode.Disposable {
   private modelRevision = 0;
   private readonly reading = new Set<vscode.CancellationTokenSource>();
   private configurationPending = false;
+  private configurationReady = Promise.resolve();
+  private resumeConfiguration: (() => void) | undefined;
   private configurationTimer: NodeJS.Timeout | undefined;
   private configurationCheck: Promise<void> | undefined;
   private checkRequested = false;
@@ -104,7 +106,7 @@ export class LanguageService implements vscode.Disposable {
       return local === "" || (!isAbsolute(local) && local !== ".." && !local.startsWith(`..${sep}`));
     })) return;
     this.invalidateModel();
-    if (session.context.sources.some(source => source.descriptor === path)) this.holdConfiguration();
+    if (session.context.sources.some(source => relative(source.descriptor, path) === "")) this.holdConfiguration();
     if (!/\.bsl$/i.test(path)) this.scheduleConfigurationCheck();
   }
 
@@ -124,6 +126,7 @@ export class LanguageService implements vscode.Disposable {
   /** A changed root/config cannot publish diagnostics or edits before its authoritative fingerprint is checked. */
   private holdConfiguration(): void {
     if (!this.configurationPending) {
+      this.configurationReady = new Promise(resolve => { this.resumeConfiguration = resolve; });
       this.delayedDiagnostics.clear();
       const session = this.session, revision = this.revision, signal = this.scope?.signal, collection = session?.client?.diagnostics;
       if (signal) collection?.forEach((uri, values) => this.bufferDiagnostics(uri,
@@ -131,6 +134,13 @@ export class LanguageService implements vscode.Disposable {
     }
     this.configurationPending = true;
     this.session?.client?.diagnostics?.clear();
+  }
+
+  /** Resume queued reads only after the authoritative configuration is current or this session is retired. */
+  private releaseConfiguration(): void {
+    this.configurationPending = false;
+    this.resumeConfiguration?.();
+    this.resumeConfiguration = undefined;
   }
 
   /** A same-fingerprint event must restore current diagnostics even when upstream correctly emits no new push. */
@@ -178,7 +188,7 @@ export class LanguageService implements vscode.Disposable {
         this.log(JSON.stringify({ event: "language_context_changed", status: status.status }));
         await this.restart(false, session.context.name ?? undefined);
       } else {
-        this.configurationPending = false;
+        this.releaseConfiguration();
         const delayed = [...this.delayedDiagnostics.values()]; this.delayedDiagnostics.clear();
         for (const publish of delayed) publish();
         this.log(JSON.stringify({ event: "language_context_current", pid: session.owner?.child.pid }));
@@ -204,7 +214,7 @@ export class LanguageService implements vscode.Disposable {
     if (manual) this.wanted = true;
     this.refreshConflict(false);
     const revision = ++this.revision;
-    this.invalidateModel(); this.configurationPending = false; this.delayedDiagnostics.clear();
+    this.invalidateModel(); this.releaseConfiguration(); this.delayedDiagnostics.clear();
     clearTimeout(this.configurationTimer); this.configurationTimer = undefined; this.checkRequested = false;
     this.scope?.abort();
     const controller = new AbortController(); this.scope = controller;
@@ -239,7 +249,7 @@ export class LanguageService implements vscode.Disposable {
   /** Stop the child before releasing its config lease; replacing the metadata connection must await this method. */
   stop(detail?: string): Promise<void> {
     ++this.revision; this.scope?.abort(); this.scope = undefined;
-    this.invalidateModel(); this.configurationPending = false; this.delayedDiagnostics.clear();
+    this.invalidateModel(); this.releaseConfiguration(); this.delayedDiagnostics.clear();
     clearTimeout(this.configurationTimer); this.configurationTimer = undefined; this.checkRequested = false;
     if (this.refreshConflict(false)) this.showConflictState();
     else if (detail) this.tooling.analyzerState("suspended", detail);
@@ -323,7 +333,9 @@ export class LanguageService implements vscode.Disposable {
         }, signal);
         return { reader: session.owner.child.stdout, writer: session.owner.child.stdin };
       }, {
-        documentSelector: context.sources.map(source => ({ scheme: "file", language: "bsl", pattern: readonlyPattern(source.source).replace(/\/$/, "") + "/**/*.[bB][sS][lL]" })),
+        // Match VS Code's normalized drive letter rather than the backend's native path spelling.
+        documentSelector: context.sources.map(source => ({ scheme: "file", language: "bsl",
+          pattern: readonlyPattern(vscode.Uri.file(source.source).fsPath).replace(/\/$/, "") + "/**/*.[bB][sS][lL]" })),
         workspaceFolder: { uri: vscode.Uri.file(context.root), name: context.name ?? basename(context.root), index: 0 },
         diagnosticCollectionName: "eska-bsl", outputChannel: this.output,
         initializationFailedHandler: () => false, connectionOptions: { maxRestartCount: 0 },
@@ -379,7 +391,15 @@ export class LanguageService implements vscode.Disposable {
     /** The generic client middleware expects a protocol cancellation, which it handles without an error notification. */
     const cancelled = () => new ResponseError(LSPErrorCodes.RequestCancelled, "request_cancelled");
     const read = async <T>(document: vscode.TextDocument, token: vscode.CancellationToken, action: () => vscode.ProviderResult<T>): Promise<T | undefined> => {
-      const version = document.version, model = this.modelRevision, documents = this.session?.documents, languageEpoch = documents?.epoch;
+      const version = document.version;
+      while (this.configurationPending && this.current(revision, signal) && !token.isCancellationRequested) {
+        // Returning an empty outline during this barrier makes VS Code cache it for the unchanged buffer.
+        const cancellation = new AbortController(), subscription = token.onCancellationRequested(() => cancellation.abort());
+        try { await cancellableChoice(this.configurationReady, AbortSignal.any([signal, cancellation.signal])); }
+        finally { subscription.dispose(); }
+      }
+      const model = this.modelRevision, documents = this.session?.documents, languageEpoch = documents?.epoch;
+      if (document.isClosed || document.version !== version) return undefined;
       if (!this.accepts(revision, signal) || token.isCancellationRequested || documents?.projected(document.uri.toString())) return undefined;
       const value = await action();
       return this.accepts(revision, signal) && model === this.modelRevision && languageEpoch === documents?.epoch
