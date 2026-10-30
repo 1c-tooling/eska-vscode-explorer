@@ -65,6 +65,9 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
   private readonly queryDesigner: QueryDesigner;
   private readonly legacyNotices = new Set<string>();
   private readonly view: vscode.TreeView<Element>;
+  private readonly treeReads = new Set<Promise<Element[]>>();
+  private publishedTree: MetadataTree | undefined;
+  private readonly rootWaiters = new Set<() => void>();
   private readonly status = vscode.window.createStatusBarItem("eska.explorer.connection", vscode.StatusBarAlignment.Right, 0);
   private readonly disposables: vscode.Disposable[] = [];
   readonly support: SupportController;
@@ -271,10 +274,19 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
   }
 
   /** Discard filesystem and metadata results after disconnect or a session replacement. */
-  async getChildren(entry?: Element): Promise<Element[]> {
+  getChildren(entry?: Element): Promise<Element[]> {
     const tree = this.tree;
-    const children = await this.loadChildren(entry);
-    return !this.disposed && tree === this.tree ? children : [];
+    const reading = this.loadChildren(entry).then(children => !this.disposed && tree === this.tree ? children : []);
+    this.treeReads.add(reading);
+    void reading.finally(() => { this.treeReads.delete(reading); }).catch(() => {});
+    void reading.then(children => {
+      if (!entry && tree && tree === this.tree && children.some(child => "node" in child && !child.node.parent)) {
+        this.publishedTree = tree;
+        for (const resolve of this.rootWaiters) resolve();
+        this.rootWaiters.clear();
+      }
+    }).catch(() => {});
+    return reading;
   }
 
   /** Query only roots or the expanded branch; errors stay next to their owning project/object. */
@@ -468,14 +480,46 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
       // A cold Windows view can still be loading its expanded root when descendant reveal arrives.
       const owner = "node" in entry ? entry : "owner" in entry ? entry.owner : undefined;
       if (owner) {
-        const root = await tree.root(owner.project);
-        if (this.tree !== tree || this.disposed) return;
-        await this.view.reveal(root, { expand: true, select: false, focus: false });
+        await this.expandRootForReveal(tree, owner.project);
       }
       if (this.tree === tree && !this.disposed) await this.view.reveal(entry, { select: true, focus: true });
     } catch (error) {
       if (this.tree === tree && !this.disposed) this.showError(error instanceof ExplorerError ? error : new ExplorerError("sourceMissing"));
     }
+  }
+
+  /** A hidden Windows tree can reject its root while the initial native refresh is still loading. */
+  private async expandRootForReveal(tree: MetadataTree, project: ProjectTree): Promise<void> {
+    if (this.tree !== tree || this.disposed) throw new ExplorerError("obsolete");
+    if (this.publishedTree !== tree) await new Promise<void>(resolve => this.rootWaiters.add(resolve));
+    await Promise.allSettled(this.treeReads);
+    if (this.tree !== tree || this.disposed) throw new ExplorerError("obsolete");
+    const root = await tree.root(project);
+    if (this.tree !== tree || this.disposed) throw new ExplorerError("obsolete");
+    // A default-expanded native root loads these rows before it becomes revealable.
+    // Read only this shallow level; a collapsed root must not wait for a future native expansion.
+    await this.getChildren(root);
+    for (let attempt = 0; attempt < 2; attempt++) {
+      if (this.tree !== tree || this.disposed) throw new ExplorerError("obsolete");
+      try {
+        await this.view.reveal(root, { expand: true, select: false, focus: false });
+        return;
+      } catch (error) {
+        // Retry only the native cold-view miss, never the source lookup, selection or mutations.
+        if (attempt !== 0 || !(error instanceof Error) || !(error.message.startsWith("TreeError [eska.explorer.projects] Tree element not found:")
+          || (error.message.startsWith("Cannot resolve tree item for element ")
+            && error.message.endsWith(" from extension 1c-tooling.eska-explorer")))) throw error;
+        // The workbench has cached the root but cannot reveal it until its pending provider reads return.
+        await Promise.allSettled(this.treeReads);
+      }
+    }
+  }
+
+  /** Release pending navigation when its model is disconnected or the extension is stopped. */
+  private clearRootPublication(): void {
+    this.publishedTree = undefined;
+    for (const resolve of this.rootWaiters) resolve();
+    this.rootWaiters.clear();
   }
 
   /** Search reuses the current backend context and reveals only the chosen branch. */
@@ -490,9 +534,7 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
         await vscode.commands.executeCommand("eska.explorer.projects.focus");
         if (this.tree !== tree) throw new ExplorerError("obsolete");
         // Focusing a cold Windows view does not await its initial root expansion.
-        const root = await tree.root(entry.project);
-        if (this.tree !== tree || this.disposed) throw new ExplorerError("obsolete");
-        await this.view.reveal(root, { expand: true, select: false, focus: false });
+        await this.expandRootForReveal(tree, entry.project);
         if (this.tree !== tree || this.disposed) throw new ExplorerError("obsolete");
         // Support updates can repaint ancestors before native expansion events reach the extension host.
         for (let parent = tree.parent(entry); parent; parent = tree.parent(parent)) this.expanded.set(parent.key, true);
@@ -854,6 +896,7 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
     this.files?.dispose();
     this.files = undefined;
     this.tree = undefined;
+    this.clearRootPublication();
     for (const watcher of this.watchers) watcher.dispose();
     this.watchers = [];
     this.opening++;
@@ -928,6 +971,7 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
   shutdown(): Promise<void> {
     if (!this.stopping) {
       this.disposed = true;
+      this.clearRootPublication();
       this.connecting?.abort();
       void vscode.commands.executeCommand("setContext", "eska.explorer.activeProject", false);
       void vscode.commands.executeCommand("setContext", "eska.explorer.connected", false);
