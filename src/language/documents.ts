@@ -1,5 +1,6 @@
 import type { TextDocument } from "vscode";
 import { isRecord } from "../protocol.js";
+import { languageUri } from "./uri.js";
 
 type Send = (method: string, params: Record<string, unknown>) => Promise<void>;
 interface Stream { version: number; opened: boolean; poisoned: boolean; owner?: object; queue: Promise<void> }
@@ -19,19 +20,19 @@ export class LanguageDocuments {
   owns(params: unknown): boolean { return typeof params === "object" && params !== null && this.internal.has(params); }
 
   /** While projected, ordinary providers cannot request results using native owner coordinates. */
-  projected(uri: string): boolean { return this.streams.get(uri)?.owner !== undefined; }
+  projected(uri: string): boolean { return this.streams.get(languageUri(uri))?.owner !== undefined; }
 
   /** Upstream push reports have no version, so a previously projected URI needs guarded pull diagnostics until close. */
-  poisoned(uri: string): boolean { return this.streams.get(uri)?.poisoned === true; }
+  poisoned(uri: string): boolean { return this.streams.get(languageUri(uri))?.poisoned === true; }
 
   /** Complete queued restoration before allowing an ordinary request against this URI. */
-  async settled(uri: string): Promise<void> { await this.streams.get(uri)?.queue; }
+  async settled(uri: string): Promise<void> { await this.streams.get(languageUri(uri))?.queue; }
 
   /** Client document bookkeeping stays intact; only its actual synchronization notifications are replaced. */
   async notification(method: string, params: unknown, forward: (params: unknown) => Promise<void>): Promise<void> {
     if (this.owns(params) || !["textDocument/didOpen", "textDocument/didChange", "textDocument/didClose", "textDocument/didSave"].includes(method)
       || !isRecord(params) || !isRecord(params.textDocument) || typeof params.textDocument.uri !== "string") return forward(params);
-    const uri = params.textDocument.uri, stream = this.stream(uri);
+    const uri = languageUri(params.textDocument.uri), textDocument = params.textDocument, stream = this.stream(uri);
     // The client can flush a pending native open while sending this stream's projection. Suppression must not await itself.
     if (stream.owner) return;
     const document = this.native(uri), text = document?.getText();
@@ -42,13 +43,14 @@ export class LanguageDocuments {
         if (stream.opened) await this.publish("textDocument/didClose", { textDocument: { uri } });
         stream.opened = false; stream.poisoned = false; stream.version = 0;
         if (this.streams.get(uri) === stream && !this.native(uri)) this.streams.delete(uri);
-      } else if (method === "textDocument/didSave") await forward(params);
+      } else if (method === "textDocument/didSave") await forward({ ...params, textDocument: { ...textDocument, uri } });
       else if (text !== undefined) await this.body(uri, stream, text);
     });
   }
 
   /** A projection is memory-only and never changes the native document or its dirty/save state. */
   async project(uri: string, text: string, owner: object): Promise<void> {
+    uri = languageUri(uri);
     const stream = this.stream(uri);
     if (stream.owner && stream.owner !== owner) throw new Error("language_uri_owned");
     stream.owner = owner; stream.poisoned = true; ++this.revision;
@@ -57,6 +59,7 @@ export class LanguageDocuments {
 
   /** Release only the caller's overlay and restore the latest native body, including edits made during the session. */
   async release(uri: string, owner: object): Promise<void> {
+    uri = languageUri(uri);
     const stream = this.streams.get(uri);
     if (!stream || stream.owner !== owner) return;
     delete stream.owner;

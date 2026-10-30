@@ -23,7 +23,11 @@ class Uri {
   get fsPath() { return fileURLToPath(this.value); }
   get query() { return this.value.search.slice(1); }
   get fragment() { return this.value.hash.slice(1); }
-  toString() { return this.value.href; }
+  toString() {
+    // VS Code serializes the drive differently from Node's standard file URL.
+    return process.platform === "win32" && this.scheme === "file" ? this.value.href.replace(/^file:\/\/\/([a-z])(?::|%3a)/i,
+      (_value, drive) => `file:///${drive.toLowerCase()}%3A`) : this.value.href;
+  }
 }
 
 /** Editor primitives are mocked, but canonical paths, symlinks, file metadata and I/O races use real owned files. */
@@ -89,6 +93,15 @@ test("one blocked target rejects the whole WorkspaceEdit; an allowed multi-file 
   f.policy.clear(); assert.equal((await f.middleware.workspace.handleApplyEdit({ edit })).applied, true);
   assert.equal(f.applications.length, 1); assert.deepEqual(JSON.parse(JSON.stringify(f.applications[0].raw)), edit);
   assert.equal(f.capabilities.workspace.workspaceEdit.resourceOperations.length, 0); assert.equal(f.capabilities.workspace.workspaceEdit.snippetEditSupport, false);
+});
+
+test("Windows upstream file URLs retain native version guards and cannot duplicate an aliased edit target", { skip: process.platform !== "win32" }, async t => {
+  const f = await fixture(t), change = f.change(0);
+  const standard = pathToFileURL(f.files[0].replace(/^[a-z]:/i, drive => drive.toUpperCase())).href;
+  const upstream = { ...change, textDocument: { ...change.textDocument, uri: standard } };
+  assert.equal((await f.middleware.workspace.handleApplyEdit({ edit: { documentChanges: [upstream] } })).applied, true);
+  assert.equal((await f.middleware.workspace.handleApplyEdit({ edit: { documentChanges: [change, upstream] } })).applied, false);
+  assert.equal(f.applications.length, 1);
 });
 
 test("stale, unversioned, protected and resource edits cannot partially apply an otherwise permitted target", async t => {

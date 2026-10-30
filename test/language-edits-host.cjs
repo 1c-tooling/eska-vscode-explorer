@@ -8,7 +8,13 @@ const trace = [];
 /** Poll only an observable provider/diagnostic transition with a fixed deadline. */
 async function until(predicate, reason) {
   const end = Date.now() + 30000;
-  while (Date.now() < end) { const result = await predicate(); if (result) return result; await new Promise(resolve => setTimeout(resolve, 50)); }
+  while (Date.now() < end) {
+    try { const result = await predicate(); if (result) return result; }
+    catch (error) {
+      if (!(error instanceof vscode.CancellationError) && !["No result.", "Результаты отсутствуют."].includes(error.message)) throw error;
+    }
+    await new Promise(resolve => setTimeout(resolve, 50));
+  }
   throw new Error(typeof reason === "function" ? reason() : reason);
 }
 
@@ -26,6 +32,9 @@ async function run() {
   const explorer = await vscode.extensions.all.find(value => value.packageJSON.name === "eska-explorer").activate();
   const originalLog = explorer.language.log;
   explorer.language.log = (...args) => { if (trace.length < 80) trace.push(args[0]); originalLog(...args); };
+  const formattingLog = explorer.formatting.log;
+  explorer.formatting.log = (...args) => { if (trace.length < 80) trace.push(args[0]); formattingLog(...args); };
+  await vscode.workspace.getConfiguration("editor", { languageId: "bsl" }).update("defaultFormatter", "1c-tooling.eska-explorer", vscode.ConfigurationTarget.Workspace);
   assert.equal(explorer.support.enabled, true, "source policy is enabled for this acceptance");
   await until(() => explorer.connection.state.kind === "ready", () => `metadata ready: ${JSON.stringify(explorer.connection.state)}`);
   const file = path.join(fixture.source, "CommonModules", "Обмен", "Ext", "Module.bsl"), uri = vscode.Uri.file(file);
@@ -50,6 +59,8 @@ async function run() {
     try {
       const result = await originalRequest(...args);
       if (args[0] === "textDocument/codeAction" && trace.length < 80) trace.push({ code_action_result: result?.map(value => ({ title: value.title, edit: !!value.edit })) });
+      if (args[0] === "textDocument/rename" && trace.length < 80) trace.push({ rename_result: result?.documentChanges?.map(value => ({
+        uri: value.textDocument?.uri, version: value.textDocument?.version, edits: value.edits?.length })), has_changes: !!result?.changes });
       return result;
     } catch (error) { if (trace.length < 80) trace.push({ request: String(args[0]?.method ?? args[0]), error: String(error), code: error.code }); throw error; }
   };
@@ -81,10 +92,14 @@ async function run() {
   assert.match(document.getText(), /= НоваяПроверка\(/);
   stage = "formatting";
   await replace(editor, LANGUAGE_TEXT.replace("    Возврат", "Возврат"));
+  const fullFormatting = await vscode.commands.executeCommand("vscode.executeFormatDocumentProvider", uri, { tabSize: 4, insertSpaces: true });
+  assert.equal(fullFormatting?.length ?? 0, 0, "a controlled module requires an explicit selection");
+  assert.ok(trace.some(value => typeof value === "string" && value.includes('"event":"formatting_rejected"') && value.includes('"reason":"selection_required"')));
+  const bodyRange = new vscode.Range(2, 0, 2, document.lineAt(2).text.length);
   const formatting = await until(async () => {
-    const values = await vscode.commands.executeCommand("vscode.executeFormatDocumentProvider", uri, { tabSize: 4, insertSpaces: true });
+    const values = await vscode.commands.executeCommand("vscode.executeFormatRangeProvider", uri, bodyRange, { tabSize: 4, insertSpaces: true });
     return values?.length && values;
-  }, "real formatter returns indentation edits");
+  }, "real formatter returns indentation edits for the selected body");
   const formatted = new vscode.WorkspaceEdit(); formatted.set(uri, formatting);
   assert.equal(await vscode.workspace.applyEdit(formatted), true);
   assert.match(document.lineAt(2).text, /^\s+Возврат/);
@@ -132,6 +147,7 @@ async function run() {
     real_backend_policy: true, mixed_xml_atomic_rejection: true, protected_uri_rejected: true, stale_version_rejected: true,
     unversioned_server_edit_rejected: true, resource_edit_rejected: true, versioned_server_text_edit_applied: true,
     server_apply_payloads: "injected through public middleware; native editor transaction", rename: true, formatter_edits: formatting.length,
+    controlled_full_format_rejected: true, selected_body_formatted: true,
     code_action: true, late_code_action_rejected: true, user_readonly_preserved: true, disk_unchanged: true,
     shutdownPids: [explorer.language.session.owner.child.pid, explorer.connection.child.pid] }));
 }

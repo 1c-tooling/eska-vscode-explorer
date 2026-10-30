@@ -18,6 +18,7 @@ import { LanguageEdits } from "./edits.js";
 import { nativePath } from "../source.js";
 import { watchSourceFiles } from "../watch.js";
 import { LanguageDocuments } from "./documents.js";
+import { languageUri } from "./uri.js";
 import type { QueryLanguage } from "../query/language.js";
 
 type Ready = Extract<ConnectionState, { kind: "ready" }>;
@@ -337,6 +338,7 @@ export class LanguageService implements vscode.Disposable {
         documentSelector: context.sources.map(source => ({ scheme: "file", language: "bsl",
           pattern: readonlyPattern(vscode.Uri.file(source.source).fsPath).replace(/\/$/, "") + "/**/*.[bB][sS][lL]" })),
         workspaceFolder: { uri: vscode.Uri.file(context.root), name: context.name ?? basename(context.root), index: 0 },
+        uriConverters: { code2Protocol: uri => languageUri(uri.toString()), protocol2Code: value => vscode.Uri.parse(value) },
         diagnosticCollectionName: "eska-bsl", outputChannel: this.output,
         initializationFailedHandler: () => false, connectionOptions: { maxRestartCount: 0 },
         errorHandler: { error: () => ({ action: ErrorAction.Shutdown, handled: true }), closed: () => ({ action: CloseAction.DoNotRestart, handled: true }) },
@@ -344,7 +346,7 @@ export class LanguageService implements vscode.Disposable {
       });
       session.client = client;
       session.documents = new LanguageDocuments((method, params) => client.sendNotification(method, params),
-        uri => vscode.workspace.textDocuments.find(document => document.uri.toString() === uri && !document.isClosed));
+        uri => vscode.workspace.textDocuments.find(document => languageUri(document.uri.toString()) === uri && !document.isClosed));
       session.edits = new LanguageEdits(client, context, this.support, () => this.accepts(revision, signal), this.log, () => this.modelRevision);
       Object.assign(middleware, session.edits.middleware());
       const watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(vscode.Uri.file(context.root), "bsl-analyzer.toml"));
@@ -413,7 +415,7 @@ export class LanguageService implements vscode.Disposable {
       sendRequest: async (type, params, token, next) => {
         const model = this.modelRevision;
         const uri = isRecord(params) && isRecord(params.textDocument) ? params.textDocument.uri : undefined;
-        const document = typeof uri === "string" ? vscode.workspace.textDocuments.find(value => value.uri.toString() === uri) : undefined;
+        const document = typeof uri === "string" ? vscode.workspace.textDocuments.find(value => languageUri(value.uri.toString()) === languageUri(uri)) : undefined;
         const version = document?.version;
         const documents = this.session?.documents, internal = this.queryLanguage?.owns(params);
         const languageEpoch = documents?.epoch;

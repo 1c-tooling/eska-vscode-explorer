@@ -9,6 +9,7 @@ import type { SupportController } from "../support.js";
 import { message, type MessageKey } from "../messages.js";
 import { isRecord } from "../protocol.js";
 import type { AnalysisContext } from "./context.js";
+import { languageUri } from "./uri.js";
 
 type Reason = "readonly" | "stale" | "resource" | "invalid" | "command" | "backend";
 interface Origin { documents: Map<string, { document: vscode.TextDocument; version: number }>; model: number; token?: vscode.CancellationToken }
@@ -117,7 +118,7 @@ export class LanguageEdits implements vscode.Disposable {
   /** Versions of already open buffers belong to the request, not to the later response or action invocation. */
   private origin(token?: vscode.CancellationToken): Origin {
     return { documents: new Map(vscode.workspace.textDocuments.filter(document => document.uri.scheme === "file" && this.inside(document.uri.fsPath))
-      .map(document => [document.uri.toString(), { document, version: document.version }])), model: this.model(), ...(token ? { token } : {}) };
+      .map(document => [languageUri(document.uri.toString()), { document, version: document.version }])), model: this.model(), ...(token ? { token } : {}) };
   }
 
   /** Late requests cannot write after a context replacement, closed buffer or unsaved change. */
@@ -169,9 +170,9 @@ export class LanguageEdits implements vscode.Disposable {
     const targets: Target[] = [], seen = new Set<string>();
     for (const entry of entries) {
       if (typeof entry.uri !== "string" || !Array.isArray(entry.edits) || entry.edits.length > 100000) throw new Rejected("invalid");
-      if (requireVersions && (entry.version == null || !origin.documents.has(entry.uri))) throw new Rejected("stale");
+      if (requireVersions && (entry.version == null || !origin.documents.has(languageUri(entry.uri)))) throw new Rejected("stale");
       // Only rename may discover unopened targets, and it must request a new versioned result before returning any edit.
-      if (entry.version == null && !origin.documents.has(entry.uri) && !discoverRenameTargets) throw new Rejected("stale");
+      if (entry.version == null && !origin.documents.has(languageUri(entry.uri)) && !discoverRenameTargets) throw new Rejected("stale");
       const target = await this.target(entry.uri);
       this.assertOrigin(origin);
       if (seen.has(target.path)) throw new Rejected("invalid");
