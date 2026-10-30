@@ -36,12 +36,21 @@ exports.run = async function () {
   const [root] = (await explorer.getChildren()).filter(entry => entry.node);
   await vscode.commands.executeCommand('eska.explorer.properties', root);
   const [tab] = explorer.propertiesTabs.tabs.values();
-  const writes = [], writeEdit = tab.writeEdit.bind(tab);
+  const writes = [], requests = [], writeEdit = tab.writeEdit.bind(tab);
   tab.writeEdit = async (...args) => {
     writes.push({field:args[0],change:args[1],direction:args[2],checkingExternal:tab.checkingExternal,
       refreshing:tab.refreshing,busy:tab.editor.busy,blocked:tab.editor.blocked,unlocked:tab.editor.unlocked,
       writable:tab.editor.schema?.writable,trusted:vscode.workspace.isTrusted,revision:tab.revision});
     return writeEdit(...args);
+  };
+  const request = tab.tree.request.bind(tab.tree);
+  tab.tree.request = async (...args) => {
+    const trace = {method:args[1],params:args[2]}; requests.push(trace);
+    try {
+      const result = await request(...args);
+      trace.result = {snapshot:result.snapshot,editingSnapshot:result.editing?.snapshot,writable:result.writable};
+      return result;
+    } catch(error) { trace.error = {message:String(error),domain:error.domain,details:error.details}; throw error; }
   };
   const editEvents = [], edit = tab.edit.bind(tab), clicks = [];
   tab.edit = async input => {
@@ -161,12 +170,12 @@ exports.run = async function () {
     await fs.writeFile(path.join(fixture.root, 'host-result.json'), JSON.stringify({ passed: true, suite: 'property-editing', vscode: vscode.version }));
   } catch (error) {
     await fs.writeFile(path.join(fixture.root,'host-result.json'),JSON.stringify({passed:false,error:String(error.stack??error),failure:error,
-      editing:tab.state.editing,notice:tab.state.notice,revision:tab.revision,refreshing:tab.refreshing,checkingExternal:tab.checkingExternal,writes,editEvents,clicks,
+      editing:tab.state.editing,notice:tab.state.notice,revision:tab.revision,refreshing:tab.refreshing,checkingExternal:tab.checkingExternal,writes,requests,editEvents,clicks,
       quickInput:await dom.workbench(`({active:document.activeElement?.outerHTML.slice(0,250),
         widgets:[...document.querySelectorAll('.quick-input-widget')].map(node=>({style:node.getAttribute('style'),rect:{width:node.offsetWidth,height:node.offsetHeight},
           title:node.querySelector('.quick-input-title')?.textContent,rows:[...node.querySelectorAll('.monaco-list-row')].map(row=>({text:row.textContent,cls:row.className,width:row.offsetWidth,height:row.offsetHeight}))}))})`).catch(()=>undefined)}));
     throw error;
-  } finally { dom.close(); }
+  } finally { tab.tree.request = request; dom.close(); }
 };
 
 /** Exercise both native dialog stages and ensure one typed value creates only the intended XML diff. */
@@ -200,6 +209,8 @@ async function valueEditor(explorer, root, fixture, standard) {
     const expected = original.replace(`<${tag} s:nil="true"/>`, `<${tag} s:type="xs:string">My &lt;value&gt;</${tag}>`);
     await until(async () => !tab.state.editing.busy && await fs.readFile(file, 'utf8') === expected, 'typed value autosave');
     await dom.screenshot(standard ? 'standard-value-editing.png' : 'value-editing.png');
+    await tab.checkExternalChange();
+    await dom.rendered();
     await dom.evaluate("window.dispatchEvent(new KeyboardEvent('keydown',{key:'z',ctrlKey:true,bubbles:true}))");
     await until(async () => !tab.state.editing.busy && await fs.readFile(file, 'utf8') === original, 'typed value undo');
   } finally { dom.close(); tab.dispose(); }

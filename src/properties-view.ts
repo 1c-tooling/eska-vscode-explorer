@@ -258,7 +258,10 @@ class PropertyTab implements vscode.Disposable {
     finally {
       if (check === this.externalCheck) {
         this.checkingExternal = false;
-        if (!this.disposed) { this.state = this.makeState(this.state.status, this.state.notice); this.publish(); }
+        if (!this.disposed) {
+          this.state = this.makeState(this.state.status, this.state.notice); this.publish();
+          await this.flushPendingEdit();
+        }
       }
     }
   }
@@ -284,6 +287,7 @@ class PropertyTab implements vscode.Disposable {
       if (this.editor.busy) { this.lockAfterSave = true; this.renameController?.abort(); return; }
       if (this.editor.unlocked) {
         this.editor.unlocked = false;
+        this.pendingEdits.clear();
         this.editorNotice("propertyReadOnly");
         return;
       }
@@ -463,13 +467,17 @@ class PropertyTab implements vscode.Disposable {
   /** Never overwrite a dirty text editor; writes execute once and require an exact backend snapshot. */
   private async writeEdit(id?: string, change?: PropertyChange, direction?: "undo" | "redo"): Promise<void> {
     const schema = this.editor.schema;
-    if (!schema || !schema.writable || this.editor.busy || this.checkingExternal || this.editor.blocked || !this.editor.unlocked
+    if (!schema || !schema.writable || this.editor.busy || this.editor.blocked || !this.editor.unlocked || this.disposed || this.tree !== this.currentTree()
       || this.entry.node.id.kind !== "object" || !vscode.workspace.isTrusted) return;
     if (direction && (direction === "undo" ? schema.undoRename : schema.redoRename) && this.dirtyProject()) {
       this.editorNotice("renameDirtyProject"); return;
     }
     const field = schema.fields.find(field => fieldId(field.path) === id);
     if (!direction && (!field || !change)) return;
+    if (this.checkingExternal) {
+      if (id && change && !direction) { this.pendingEdits.set(id, change); this.editorNotice("propertySaving"); }
+      return;
+    }
     const linked = direction ? (direction === "undo" ? schema.undoLinked : schema.redoLinked) : field?.linked;
     if (linked && this.dirtyProject()) { this.editorNotice("propertyLinkedDirty"); return; }
     const path = resolve(nativePath(this.entry.project.info.sourcePath), nativePath(schema.source));
@@ -487,6 +495,7 @@ class PropertyTab implements vscode.Disposable {
       });
       if (this.disposed || this.tree !== this.currentTree()) return;
       this.editor.schema = editingSchema(result.editing);
+      if (id && JSON.stringify(this.pendingEdits.get(id)) === JSON.stringify(change)) this.pendingEdits.delete(id);
       if (id && JSON.stringify(this.editor.drafts[id]) === JSON.stringify(change)) {
         delete this.editor.drafts[id];
         delete this.editor.draftTitles[id];
@@ -525,10 +534,17 @@ class PropertyTab implements vscode.Disposable {
         this.state = this.makeState(this.state.status, this.state.notice);
         this.publish();
         if (this.pendingInvalidation) { this.pendingInvalidation = false; await this.checkExternalChange(); }
-        const next = this.pendingEdits.entries().next().value;
-        if (next && !this.editor.blocked) { this.pendingEdits.delete(next[0]); await this.writeEdit(...next); }
+        await this.flushPendingEdit();
       }
     }
+  }
+
+  /** Only the latest completed snapshot check may release a retained field proposal. */
+  private async flushPendingEdit(): Promise<void> {
+    if (this.disposed || this.editor.busy || this.checkingExternal || this.editor.blocked || !this.editor.unlocked
+      || this.tree !== this.currentTree()) return;
+    const next = this.pendingEdits.entries().next().value;
+    if (next) { this.pendingEdits.delete(next[0]); await this.writeEdit(...next); }
   }
 
   /** Revalidate ancestry in the same project and discard navigation overtaken by refresh. */
