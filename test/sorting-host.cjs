@@ -59,6 +59,7 @@ exports.run = async function () {
   const session = explorer.connection.state.session.sessionId;
   const tree = explorer.tree;
   const generation = first.project.info.generation;
+  await explorer.expandRootForReveal(tree, first.project);
   await explorer.view.reveal(goods, { select: true, focus: false });
   await until(() => explorer.view.selection[0] === goods);
   await vscode.commands.executeCommand('eska.explorer.sortObjects', first);

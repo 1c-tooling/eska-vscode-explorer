@@ -54,7 +54,9 @@ exports.run = async function () {
   const generation = root.project.info.generation;
   await vscode.commands.executeCommand('eska.explorer.showEmptyGroups', root);
   const constants = named(await explorer.getChildren(root), 'Константы');
+  await explorer.expandRootForReveal(tree, root.project);
   await explorer.view.reveal(constants, { select: true, focus: true });
+  await until(() => explorer.view.selection[0] === constants, 'empty section selected');
   await vscode.commands.executeCommand('eska.explorer.hideEmptyGroups', root);
   await until(() => explorer.view.selection[0] === root, 'hidden selection moves to root');
   assert.equal(root.children, children, 'filter uses cached children');
@@ -63,6 +65,7 @@ exports.run = async function () {
   await vscode.commands.executeCommand('eska.explorer.showEmptyGroups', root);
   const commonForms = named(await explorer.getChildren(common), 'Общие формы');
   await explorer.view.reveal(commonForms, { select: true, focus: true });
+  await until(() => explorer.view.selection[0] === commonForms, 'empty Common section selected');
   await vscode.commands.executeCommand('eska.explorer.hideEmptyGroups', root);
   await until(() => explorer.view.selection[0] === root, 'hidden Common section selection moves to root');
   assert.equal(common.children, commonChildren, 'Common sections remain cached on toggle');
@@ -81,7 +84,9 @@ exports.run = async function () {
   named(await explorer.getChildren(named(await explorer.getChildren(root), 'Общие')), 'Общие формы');
   await vscode.commands.executeCommand('eska.explorer.hideEmptyGroups', root);
   const currentCatalog = named(await explorer.getChildren(root), 'Справочники');
+  await explorer.expandRootForReveal(explorer.tree, root.project);
   await explorer.view.reveal(currentCatalog, { select: true, focus: true });
+  await until(() => explorer.view.selection[0] === currentCatalog, 'catalog selected before deletion');
   const original = await fs.readFile(rootFile, 'utf8');
   const before = root.project.info.generation;
   await fs.writeFile(rootFile, original.replace(/<Catalog>.*?<\/Catalog>/g, ''));
@@ -94,13 +99,16 @@ exports.run = async function () {
   const modules = named(await explorer.getChildren(currentCommon), 'Общие модули');
   const module = named(await explorer.getChildren(modules), 'Обмен');
   await explorer.view.reveal(module, { select: true, focus: true });
+  await until(() => explorer.view.selection[0] === module, 'common module selected before deletion');
   await fs.writeFile(rootFile, original.replace(/<CommonModule>.*?<\/CommonModule>/g, ''));
   // Do not reload Common from the test: repaint must refresh its summaries before dropping selection.
   await until(() => explorer.view.selection[0] === root, 'last Common object moves descendant selection');
   assert.deepEqual((await explorer.getChildren(currentCommon)).map(entry => entry.node?.label.translations['ru-RU']), ['Роли']);
   await fs.writeFile(rootFile, original);
   await until(async () => (await explorer.getChildren(currentCommon)).some(entry => entry.node?.label.translations?.['ru-RU'] === 'Общие модули'), 'added Common object restores section');
-  await explorer.view.reveal(named(await explorer.getChildren(currentCommon), 'Роли'), { select: true, focus: true });
+  const roles = named(await explorer.getChildren(currentCommon), 'Роли');
+  await explorer.view.reveal(roles, { select: true, focus: true });
+  await until(() => explorer.view.selection[0] === roles, 'roles selected before deletion');
   await fs.writeFile(rootFile, original.replace(/<(CommonModule|Role)>.*?<\/\1>/g, ''));
   await until(() => explorer.view.selection[0] === root, 'empty Common moves descendant selection');
   assert.ok(!(await explorer.getChildren(root)).some(entry => entry.node?.label.translations?.['ru-RU'] === 'Общие'));
