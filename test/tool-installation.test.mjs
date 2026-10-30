@@ -50,9 +50,9 @@ test("strict JSON and portable paths reject ambiguous installation instructions"
 test("release selection never substitutes the monolith or an unverified analyzer version/asset", () => {
   const target = hostTarget(), value = { draft: false, prerelease: false, tag_name: "v0.14.3", assets: [] };
   assert.match(parseRelease("project", target, value).restriction, /^missing-asset:/);
-  const asset = analyzerAsset(target);
+  const analyzerTarget = "x86_64-unknown-linux-gnu", asset = analyzerAsset(analyzerTarget);
   for (const version of ["0.4.1", "0.5.0", "1.2.3"]) {
-    const release = parseRelease("analyzer", target, { ...value, tag_name: `v${version}`, assets: [{ name: asset, size: 1,
+    const release = parseRelease("analyzer", analyzerTarget, { ...value, tag_name: `v${version}`, assets: [{ name: asset, size: 1,
       state: "uploaded", digest: "sha256:" + "b".repeat(64),
       browser_download_url: `https://github.com/itrous/bsl-analyzer/releases/download/v${version}/${asset}` }] });
     assert.equal(release.version, version);
