@@ -18,7 +18,12 @@ async function until(predicate, reason) {
 exports.run = async function () {
   const fixture = JSON.parse(process.env.ESKA_HOST_FIXTURE);
   const { createTreeProject } = await import("./fixture.mjs");
-  await fs.rm(fixture.source, { recursive: true });
+  const explorer = await vscode.extensions.all.find(value => value.packageJSON.name === "eska-explorer").activate();
+  await vscode.commands.executeCommand("eska.explorer.disconnect");
+  const owned = path.relative(process.env.ESKA_TEST_ROOT ?? path.resolve("../eska-playground"), fixture.root);
+  assert.ok(owned && !path.isAbsolute(owned) && !owned.split(path.sep).includes("..") && owned.startsWith("explorer-host-"));
+  assert.equal(path.relative(fixture.root, fixture.source), "src");
+  await fs.rm(fixture.source, { recursive: true, maxRetries: process.platform === "win32" ? 20 : 0, retryDelay: 250 });
   const first = await createTreeProject(path.join(fixture.root, "src/first"));
   const second = await createTreeProject(path.join(fixture.root, "src/second"), "processing");
   for (const member of [first, second]) {
@@ -48,7 +53,6 @@ exports.run = async function () {
   const config = vscode.workspace.getConfiguration("eska.explorer");
   await config.update("executable", process.env.ESKA_TEST_BINARY, vscode.ConfigurationTarget.Workspace);
   await config.update("treeLanguage", "ru-RU", vscode.ConfigurationTarget.Workspace);
-  const explorer = await vscode.extensions.all.find(value => value.packageJSON.name === "eska-explorer").activate();
   await vscode.commands.executeCommand("eska.explorer.connect");
   await vscode.commands.executeCommand("eska.explorer.projects.focus");
   const rows = await explorer.getChildren();
