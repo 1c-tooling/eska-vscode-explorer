@@ -499,18 +499,20 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
     // A default-expanded native root loads these rows before it becomes revealable.
     // Read only this shallow level; a collapsed root must not wait for a future native expansion.
     await this.getChildren(root);
-    for (let attempt = 0; attempt < 2; attempt++) {
+    const retryUntil = performance.now() + 5000;
+    for (;;) {
       if (this.tree !== tree || this.disposed) throw new ExplorerError("obsolete");
       try {
         await this.view.reveal(root, { expand: true, select: false, focus: false });
         return;
       } catch (error) {
         // Retry only the native cold-view miss, never the source lookup, selection or mutations.
-        if (attempt !== 0 || !(error instanceof Error) || !(error.message.startsWith("TreeError [eska.explorer.projects] Tree element not found:")
+        if (performance.now() >= retryUntil || !(error instanceof Error) || !(error.message.startsWith("TreeError [eska.explorer.projects] Tree element not found:")
           || (error.message.startsWith("Cannot resolve tree item for element ")
             && error.message.endsWith(" from extension 1c-tooling.eska-explorer")))) throw error;
         // The workbench has cached the root but cannot reveal it until its pending provider reads return.
         await Promise.allSettled(this.treeReads);
+        await new Promise<void>(resolve => setTimeout(resolve, 50));
       }
     }
   }

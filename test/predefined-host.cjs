@@ -96,5 +96,6 @@ exports.run = async function () {
     const updatedGroup = named(await explorer.getChildren(owner), 'Предопределённые данные');
     return (await explorer.getChildren(updatedGroup)).length === 0;
   }, 'predefined watcher deletion');
-  await fs.writeFile(path.join(fixture.root, 'host-result.json'), JSON.stringify({passed: true, searchReveal: true, xmlSelection: true, languages: 2, watcher: true}));
+  await fs.writeFile(path.join(fixture.root, 'host-result.json'), JSON.stringify({passed: true, searchReveal: true,
+    xmlSelection: true, languages: 2, watcher: true, nativeRootMisses: events.filter(event=>event.revealError).length}));
 };

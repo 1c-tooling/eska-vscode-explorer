@@ -105,6 +105,33 @@ exports.run = async function () {
     assert.equal(document.isDirty, true);
     assert.deepEqual(await fs.readFile(fixture.module), original);
   } finally { explorer.view.reveal = reveal; }
+  // A permanent native miss must finish, while unrelated failures must never enter the readiness retry.
+  const reportError = explorer.showError;
+  const reported = [];
+  let permanentAttempts = 0, unrelatedAttempts = 0;
+  explorer.showError = error => reported.push(error.code);
+  try {
+    await vscode.window.showTextDocument(document);
+    await until(() => vscode.window.activeTextEditor?.document === document, "fault test editor active");
+    explorer.view.reveal = async () => {
+      permanentAttempts++;
+      throw new Error("TreeError [eska.explorer.projects] Tree element not found: [object Object]");
+    };
+    let timer;
+    try {
+      await Promise.race([vscode.commands.executeCommand("eska.explorer.revealActiveFile"),
+        new Promise((_,reject) => { timer = setTimeout(() => reject(new Error("native root retry exceeded its deadline")), 8000); })]);
+    } finally { clearTimeout(timer); }
+    assert.ok(permanentAttempts > 1);
+    assert.equal(reported.at(-1), "sourceMissing");
+    explorer.view.reveal = async () => { unrelatedAttempts++; throw new Error("unrelated native failure"); };
+    await vscode.commands.executeCommand("eska.explorer.revealActiveFile");
+    assert.equal(unrelatedAttempts, 1);
+    assert.equal(methods.filter(method => method === "metadata/revealSource").length, 4, "retry never repeats a source lookup");
+    assert.equal(document.getText(), dirty);
+    assert.equal(document.version, version);
+    assert.deepEqual(await fs.readFile(fixture.module), original);
+  } finally { explorer.view.reveal = reveal; explorer.showError = reportError; }
   explorer.connection.request = request;
   await vscode.window.showTextDocument(document);
   await vscode.commands.executeCommand("workbench.action.revertAndCloseActiveEditor");
@@ -112,5 +139,6 @@ exports.run = async function () {
   await fs.writeFile(path.join(fixture.root, "host-result.json"), JSON.stringify({ passed: true,
     suite: "source-navigation", projectType: fixture.type ?? process.env.ESKA_HOST_PROJECT_TYPE ?? "configuration",
     vscode: vscode.version, locale: vscode.env.language, elapsedMs, coldTreeMissRecovered: true,
+    permanentMissBounded: true, unrelatedErrorNotRetried: true,
     nativeColdRootMisses: events.filter(event => event.revealError?.includes("Tree element not found:")).length, methods }));
 };
