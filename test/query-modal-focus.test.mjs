@@ -96,3 +96,54 @@ test("constructor reveal is idempotent when the panel is already active", async 
   reveal(); assert.equal(focused, 1);
   reveal(); assert.equal(focused, 1);
 });
+
+/** File saves can invalidate an owner between metadata/source and query/open. */
+function openingFixture(drain = () => {}) {
+  const load = nativeAdapters({}), { QueryTabs } = load("tabs"), { ExplorerError } = load("../protocol");
+  const project = { info: { generation: "0", eventSequence: "0" } }, opened = [], closed = [];
+  const tree = { connection: { state: { kind: "ready", queryEditing: {} } }, session: { sessionId: "test" },
+    async synchronizeInputs() { await drain(project); } };
+  load("client").QueryClient = class {
+    async open(owner) { opened.push(owner); return { async close() { closed.push(owner); } }; }
+  };
+  const adapter = Object.assign(Object.create(QueryTabs.prototype), {
+    currentTree: () => tree, recoveryAvailable: true, requiredRecovery() {}, application() {},
+  });
+  const locate = () => ({ entry: { project, node: { id: project.info.generation } }, source: {},
+    document: { version: 1, getText: () => "query" } });
+  return { adapter, tree, project, opened, closed, locate, ExplorerError };
+}
+
+test("a queued save resolves a fresh owner before allocating exactly one query document", async () => {
+  let barriers = 0, located = 0, actions = 0;
+  const value = openingFixture(project => { if (++barriers === 2) project.info.generation = "1"; });
+  const result = await value.adapter.withDocument(value.tree, value.project,
+    async () => { located++; return value.locate(); }, async (_document, owner) => { actions++; return owner.entry.node.id; });
+  assert.equal(result, "1"); assert.equal(located, 2); assert.equal(actions, 1);
+  assert.equal(value.opened.length, 1); assert.equal(value.opened[0].node, "1"); assert.equal(value.closed.length, 1);
+});
+
+test("only stale read-only owner discovery retries after an ordered invalidation", async () => {
+  const value = openingFixture(); let located = 0;
+  await value.adapter.withDocument(value.tree, value.project, async () => {
+    if (++located === 1) { value.project.info.eventSequence = "1"; throw new value.ExplorerError("sourceChanged"); }
+    return value.locate();
+  }, async () => {});
+  assert.equal(located, 2); assert.equal(value.opened.length, 1); assert.equal(value.closed.length, 1);
+});
+
+test("unstable owner discovery stops without allocating a query document", async () => {
+  const value = openingFixture(); let located = 0;
+  await assert.rejects(value.adapter.withDocument(value.tree, value.project, async () => {
+    value.project.info.eventSequence = String(++located); throw new value.ExplorerError("sourceChanged");
+  }, async () => assert.fail("action must not run")), { code: "sourceChanged" });
+  assert.equal(located, 3); assert.equal(value.opened.length, 0);
+});
+
+test("a query action failure closes its document and never replays the action", async () => {
+  const value = openingFixture(); let actions = 0;
+  await assert.rejects(value.adapter.withDocument(value.tree, value.project, async () => value.locate(), async () => {
+    actions++; throw new value.ExplorerError("sourceChanged");
+  }), { code: "sourceChanged" });
+  assert.equal(actions, 1); assert.equal(value.opened.length, 1); assert.equal(value.closed.length, 1);
+});

@@ -119,9 +119,7 @@ export class QueryTabs implements vscode.FileSystemProvider {
   async discover(tree: MetadataTree, entry: TreeEntry): Promise<QueryHeader[]> {
     if (!tree.connection.recovery?.sessions) return [];
     return this.serial(entry.key, async () => {
-      const owner = await xmlQueryOwner(tree, entry);
-      if (!owner) return [];
-      return this.withDocument(tree, owner, async document => document.list());
+      return await this.withDocument(tree, entry.project, () => xmlQueryOwner(tree, entry), document => document.list()) ?? [];
     });
   }
 
@@ -154,11 +152,13 @@ export class QueryTabs implements vscode.FileSystemProvider {
       if (!await parent.hide()) return;
       let session: Session | undefined;
       try {
-        owner = await xmlQueryOwner(tree, entry);
-        if (!owner) throw new ExplorerError("sourceMissing");
-        const currentOwner = owner;
         const endpoint = this.recoveryEndpoint;
-        const source = await this.withDocument(tree, owner, document => this.client(tree, entry.project).open(document, randomUUID(), identity, currentOwner.userReadOnly));
+        const source = await this.withDocument(tree, entry.project, async () => {
+          const current = await xmlQueryOwner(tree, entry);
+          if (current) owner = current;
+          return current;
+        }, (document, current) => this.client(tree, entry.project).open(document, randomUUID(), identity, current.userReadOnly));
+        if (!source) throw new ExplorerError("sourceMissing");
         if (!endpoint || this.disposed || tree !== this.currentTree() || endpoint !== this.recoveryEndpoint) {
           await source.close().catch(() => {});
           throw new ExplorerError("obsolete");
@@ -194,14 +194,16 @@ export class QueryTabs implements vscode.FileSystemProvider {
       let session: Session | undefined;
       try {
         // Native dirty-close may save or revert only after the user's decision. Capture the resulting source, never an earlier version.
-        document = await vscode.workspace.openTextDocument(uri);
-        owner = await bslQueryOwner(tree, document);
         if (existing) { existing.parent = parent; await this.focus(existing); return; }
         const endpoint = this.recoveryEndpoint;
-        const source = await this.withDocument(tree, owner, async retained => {
+        const source = await this.withDocument(tree, owner.entry.project, async () => {
+          document = await vscode.workspace.openTextDocument(uri);
+          return owner = await bslQueryOwner(tree, document);
+        }, async (retained, current) => {
           const query = await retained.read({ at: { line: position.line, character: position.character } });
-          return this.client(tree, owner.entry.project).open(retained, randomUUID(), query.identity, owner.userReadOnly);
+          return this.client(tree, current.entry.project).open(retained, randomUUID(), query.identity, current.userReadOnly);
         });
+        if (!source) throw new ExplorerError("sourceMissing");
         if (!endpoint || tree !== this.currentTree() || endpoint !== this.recoveryEndpoint || this.disposed) {
           await source.close().catch(() => {}); throw new ExplorerError("obsolete");
         }
@@ -804,7 +806,28 @@ export class QueryTabs implements vscode.FileSystemProvider {
   }
 
   /** No document handle survives discovery, save, cancellation or a thrown callback. */
-  private async withDocument<T>(tree: MetadataTree, owner: QueryOwnerView, action: (document: QueryDocument) => Promise<T>): Promise<T> {
+  private async withDocument<T>(tree: MetadataTree, project: ProjectTree,
+    locate: () => Promise<QueryOwnerView | undefined>, action: (document: QueryDocument, owner: QueryOwnerView) => Promise<T>): Promise<T | undefined> {
+    let owner: QueryOwnerView | undefined;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      await tree.synchronizeInputs();
+      const generation = project.info.generation, sequence = project.info.eventSequence;
+      try { owner = await locate(); }
+      catch (error) {
+        if (tree === this.currentTree() && (generation !== project.info.generation || sequence !== project.info.eventSequence)
+          && error instanceof ExplorerError && (error.code === "sourceChanged" || error.domain === "unknown_node" || error.domain === "stale_generation")) {
+          if (attempt === 2) throw new ExplorerError("sourceChanged");
+          continue;
+        }
+        throw error;
+      }
+      await tree.synchronizeInputs();
+      if (this.disposed || tree !== this.currentTree()) throw new ExplorerError("obsolete");
+      if (generation === project.info.generation && sequence === project.info.eventSequence) break;
+      owner = undefined;
+      if (attempt === 2) throw new ExplorerError("sourceChanged");
+    }
+    if (!owner) return undefined;
     const state = tree.connection.state;
     if (tree !== this.currentTree() || state.kind !== "ready" || !state.queryEditing) throw new ExplorerError("incompatible");
     this.requiredRecovery();
@@ -814,7 +837,7 @@ export class QueryTabs implements vscode.FileSystemProvider {
       version: String(owner.document.version), text: owner.document.getText(), ...(application ? { application } : {}) });
     try {
       if (this.disposed || tree !== this.currentTree() || !this.recoveryAvailable) throw new ExplorerError("obsolete");
-      return await action(document);
+      return await action(document, owner);
     }
     finally { await document.close(); }
   }

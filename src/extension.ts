@@ -849,7 +849,10 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
       const tree = new MetadataTree(this.connection, state.session,
         (entries) => { this.support.invalidate(); this.decorations.invalidate(); this.propertiesTabs.changed(tree, entries);
           this.protectedSources.refresh();
-          void this.repaint(entries); }, (project, reopen) => this.recover(project, reopen));
+          void this.repaint(entries); }, (project, reopen) => this.recover(project, reopen), async () => {
+          if (this.tree !== tree) return;
+          for (const watcher of this.watchers) if (watcher instanceof ProjectWatcher) await watcher.flush();
+        });
       this.tree = tree;
       this.files = new WorkspaceFiles(tree.projects, state.target.path, watchDirectory, entry => {
         if (this.tree !== tree) return;

@@ -81,13 +81,21 @@ export class MetadataTree {
 
   constructor(readonly connection: Connection, readonly session: WorkspaceSession,
     private readonly changed: (entries: TreeEntry[] | undefined) => void,
-    private readonly recover: (project: ProjectTree, reopen: boolean) => void) {
+    private readonly recover: (project: ProjectTree, reopen: boolean) => void,
+    private readonly drainInputs: () => Promise<void> = async () => {}) {
     this.projects = session.projects.map((info) => ({ info: { ...info },
       key: JSON.stringify([info.rootPath.encoding, info.rootPath.value, info.scope]),
       nodes: new Map(), root: undefined, rootDirty: true, supportGeneration: info.generation, supportEventSequence: info.eventSequence }));
     this.subscription = connection.onNotification((method, params) => {
       if (method === "metadata/changed") this.invalidated(params);
     });
+  }
+
+  /** Drain known native file events before binding a request to a metadata generation. */
+  async synchronizeInputs(): Promise<void> {
+    if (this.disposed) throw new ExplorerError("obsolete");
+    await this.drainInputs();
+    if (this.disposed) throw new ExplorerError("obsolete");
   }
 
   /** Resolve only root summaries, never descend into object descriptors. */
@@ -182,6 +190,8 @@ export class MetadataTree {
 
   /** Read requests may retry after an intervening change, but never loop indefinitely. */
   async request(project: ProjectTree, method: string, params: Record<string, unknown> = {}, signal?: AbortSignal): Promise<Record<string, unknown>> {
+    // Watcher overflow itself performs refresh; synchronizing it again would await its own delivery.
+    if (method !== "metadata/refresh") await this.synchronizeInputs();
     const mutation = method === "metadata/updateProperty" || method === "metadata/undoProperty" || method === "metadata/renameApply";
     for (let attempt = 0; attempt < (mutation ? 1 : 3); attempt++) {
       if (signal?.aborted) throw new ExplorerError("cancelled");

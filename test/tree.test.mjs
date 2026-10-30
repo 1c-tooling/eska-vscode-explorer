@@ -10,6 +10,23 @@ import { nativePath, editorRange, existingSource, resolveSource, resolveTreeSour
 import { createTreeProject, descriptor, inline, addCommonModules } from "./fixture.mjs";
 
 const executable = process.env.ESKA_TEST_BINARY;
+
+test("metadata requests drain queued file events before capturing generation without refresh recursion", async () => {
+  const calls = [], project = { info: { projectId: "project", generation: "0", eventSequence: "0" } };
+  const tree = Object.assign(Object.create(MetadataTree.prototype), {
+    session: { sessionId: "session" },
+    connection: { async request(_session, method, params) {
+      calls.push([method, params.generation]);
+      return { sessionId: "session", projectId: "project", generation: "1", eventSequence: "1" };
+    } },
+    async drainInputs() {
+      project.info.generation = "1"; project.info.eventSequence = "1";
+      await tree.refresh(project);
+    },
+  });
+  await tree.request(project, "metadata/source");
+  assert.deepEqual(calls, [["metadata/refresh", "1"], ["metadata/source", "1"]]);
+});
 /** Get a backend label without imposing a client-side kind catalog. */
 function label(entry) { const value = entry.node.label; return value.kind === "name" ? value.text : value.translations["ru-RU"]; }
 /** Locate a single intended sibling and provide useful failure context. */
@@ -173,6 +190,8 @@ test("an invalidated in-flight expansion retries; older and gapped notifications
   const [root] = await tree.roots();
   const pending = tree.children(root);
   assert.equal(tree.children(root), pending, 'concurrent expansion uses a single request');
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(typeof release, "function", "the first read reached the transport after the input barrier");
   notify('metadata/changed', responses('1', '1', { affected: ['opaque-root'], requiresRefresh: false, requiresReopen: false }));
   release(responses('0', '0', { nodes: [{ ...rootNode, id: { kind: 'object', objectId: 'obsolete' }, parent: info.root }] }));
   assert.deepEqual(await pending, [], 'old response must not resurrect obsolete objects');
