@@ -779,7 +779,8 @@ export class QueryTabs implements vscode.FileSystemProvider {
     session.resumed = source.header.resumed;
     session.pending = source.header.applyPending;
     this.languageEvents.fire(this.uri(session.record));
-    if (saved) session.mtime++;
+    // Applying a BSL owner does not save or replace the virtual draft file.
+    if (saved && session.record.identity.kind !== "bslLiteral") session.mtime++;
     if (oldOwner !== session.record.ownerText) {
       session.ownerMtime = (session.ownerMtime ?? session.mtime) + 1;
       this.events.fire([{ type: vscode.FileChangeType.Changed, uri: this.ownerUri(session.record) }]);

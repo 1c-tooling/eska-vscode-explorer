@@ -97,6 +97,23 @@ test("constructor reveal is idempotent when the panel is already active", async 
   reveal(); assert.equal(focused, 1);
 });
 
+test("applying a BSL owner preserves the draft file version while owner snapshots advance", () => {
+  for (const kind of ["bslLiteral", "dataSet"]) {
+    const { QueryTabs } = nativeAdapters({ FileChangeType: { Changed: 1 } })("tabs");
+    const endpoint = {}, changed = [], language = [];
+    const source = { record: { identity: { kind }, ownerText: "updated owner" }, header: { resumed: true, applyPending: false } };
+    const session = { source, endpoint, mtime: 100, record: { ...source.record, ownerText: "original owner" } };
+    const adapter = Object.assign(Object.create(QueryTabs.prototype), { recoveryEndpoint: endpoint,
+      uri: () => "draft", ownerUri: () => "owner", events: { fire: value => changed.push(value) },
+      languageEvents: { fire: value => language.push(value) } });
+    adapter.accept(session, source, true);
+    assert.equal(session.mtime, kind === "bslLiteral" ? 100 : 101);
+    assert.ok(session.ownerMtime > 100, "the changed owner snapshot still gets its own version");
+    assert.equal(changed[0][0].uri, "owner");
+    assert.equal(language.length, 1);
+  }
+});
+
 /** File saves can invalidate an owner between metadata/source and query/open. */
 function openingFixture(drain = () => {}) {
   const load = nativeAdapters({}), { QueryTabs } = load("tabs"), { ExplorerError } = load("../protocol");
