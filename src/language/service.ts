@@ -347,7 +347,8 @@ export class LanguageService implements vscode.Disposable {
       session.client = client;
       session.documents = new LanguageDocuments((method, params) => client.sendNotification(method, params),
         uri => vscode.workspace.textDocuments.find(document => languageUri(document.uri.toString()) === uri && !document.isClosed));
-      session.edits = new LanguageEdits(client, context, this.support, () => this.accepts(revision, signal), this.log, () => this.modelRevision);
+      session.edits = new LanguageEdits(client, context, this.support, () => this.accepts(revision, signal), this.log, () => this.modelRevision,
+        document => session.documents?.wireVersion(document));
       Object.assign(middleware, session.edits.middleware());
       const watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(vscode.Uri.file(context.root), "bsl-analyzer.toml"));
       session.configurationWatcher = watcher;

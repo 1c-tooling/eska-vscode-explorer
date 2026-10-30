@@ -7,7 +7,7 @@ import { pathToFileURL } from "node:url";
 /** Track actual wire notifications without involving a second editor or language server. */
 function fixture() {
   const sent = [], uri = "file:///project/Module.bsl";
-  const document = { version: 41, isClosed: false, text: "native", getText() { return this.text; } };
+  const document = { uri: { toString: () => uri }, version: 41, isClosed: false, text: "native", getText() { return this.text; } };
   const documents = new LanguageDocuments(async (method, params) => sent.push({ method, ...params }), value => value === uri && !document.isClosed ? document : undefined);
   const native = (method, value = {}) => documents.notification(`textDocument/${method}`, { textDocument: { uri, version: document.version }, ...value }, async () => assert.fail("native synchronization must share the URI stream"));
   return { sent, uri, document, documents, native };
@@ -30,6 +30,20 @@ test("projection owns one URI, suppresses native traffic and restores the newest
   await native("didChange"); assert.equal(sent[3].textDocument.version, 4);
   assert.equal(documents.projected(uri), false); assert.equal(documents.poisoned(uri), true);
   document.isClosed = true; await native("didClose"); assert.equal(documents.poisoned(uri), false);
+});
+
+test("wire versions identify only the current synchronized native document after projection", async () => {
+  const { uri, document, documents, native } = fixture(), owner = {};
+  assert.equal(documents.wireVersion(document), undefined);
+  await native("didOpen"); assert.equal(documents.wireVersion(document), 1);
+  await documents.project(uri, "projected", owner); assert.equal(documents.wireVersion(document), undefined);
+  document.version++; document.text = "latest native";
+  await native("didChange"); assert.equal(documents.wireVersion(document), undefined);
+  await documents.release(uri, owner); assert.equal(documents.wireVersion(document), 3);
+  document.version++; assert.equal(documents.wireVersion(document), undefined, "an unsent native body cannot authorize an edit");
+  await native("didChange"); assert.equal(documents.wireVersion(document), 4);
+  assert.equal(documents.wireVersion({ ...document }), undefined, "a different document lifetime has no mapping");
+  document.isClosed = true; assert.equal(documents.wireVersion(document), undefined);
 });
 
 test("Windows native and upstream URI spellings own one stream across projection and restoration", { skip: process.platform !== "win32" }, async () => {

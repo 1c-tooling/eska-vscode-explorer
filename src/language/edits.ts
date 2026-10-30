@@ -29,7 +29,7 @@ export class LanguageEdits implements vscode.Disposable {
   /** Each language session owns its action handles and advertises only resource operations it can commit atomically. */
   constructor(private readonly client: LanguageClient, private readonly context: AnalysisContext,
     private readonly support: SupportController, private readonly current: () => boolean, private readonly log: (value: string) => void,
-    private readonly model: () => number) {
+    private readonly model: () => number, private readonly wireVersion: (document: vscode.TextDocument) => number | undefined) {
     this.command = vscode.commands.registerCommand(APPLY_ACTION, async (id: unknown) => {
       const pending = typeof id === "string" ? this.actions.get(id) : undefined;
       if (typeof id === "string") this.actions.delete(id);
@@ -177,7 +177,7 @@ export class LanguageEdits implements vscode.Disposable {
       this.assertOrigin(origin);
       if (seen.has(target.path)) throw new Rejected("invalid");
       seen.add(target.path);
-      if (entry.version != null && (!Number.isSafeInteger(entry.version) || entry.version < 0 || target.version !== entry.version)) throw new Rejected("stale");
+      if (entry.version != null && (!Number.isSafeInteger(entry.version) || entry.version < 0 || this.wireVersion(target.document) !== entry.version)) throw new Rejected("stale");
       this.ranges(target.document, entry.edits);
       targets.push(target);
     }

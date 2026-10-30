@@ -7,6 +7,8 @@ import { join, resolve } from "node:path";
 import { pathToFileURL, fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 import { runInNewContext } from "node:vm";
+import { LanguageDocuments } from "../out/language/documents.js";
+import { languageUri } from "../out/language/uri.js";
 
 /** Deterministically pause a protocol/policy boundary, never a wall-clock guess. */
 function barrier() { let release; const promise = new Promise(done => { release = done; }); return { promise, release }; }
@@ -37,7 +39,8 @@ async function fixture(t) {
   const files = [join(source, "a.bsl"), join(source, "b.bsl")], text = "Переменная = 1;\n";
   await Promise.all(files.map(file => writeFile(file, text)));
   const docs = new Map(), commands = new Map(), applications = [], warnings = [], policy = new Set(), readonly = new Set();
-  let active = true, model = 0, authorize = async () => {}, convert = async () => {}, apply = async () => true;
+  let active = true, model = 0, authorize = async () => {}, convert = async () => {}, apply = async () => true,
+    wireVersion = document => document.version;
   const timers = new Set();
   const document = async uri => {
     const key = uri.toString(); if (docs.has(key)) return docs.get(key);
@@ -72,7 +75,8 @@ async function fixture(t) {
     process, structuredClone, setTimeout(callback) { timers.add(callback); return callback; }, clearTimeout(callback) { timers.delete(callback); },
   })(
     name => name === "vscode" ? vscode : name === "../editor-policy.js" ? policyModule.exports : require(name), adapter, adapter.exports);
-  const edits = new adapter.exports.LanguageEdits(client, { sources: [{ source }] }, support, () => active, () => {}, () => model);
+  const edits = new adapter.exports.LanguageEdits(client, { sources: [{ source }] }, support, () => active, () => {}, () => model,
+    document => wireVersion(document));
   deferCleanup(t, () => edits.shutdown());
   const change = (index, version = opened[index].version) => ({ textDocument: { uri: opened[index].uri.toString(), version },
     edits: [{ range: { start: { line: 0, character: 0 }, end: { line: 0, character: 10 } }, newText: "Значение" }] });
@@ -82,6 +86,7 @@ async function fixture(t) {
     /** Advance the guard's only timer deterministically; protocol and I/O boundaries use explicit barriers. */
     expireTimers() { for (const callback of [...timers]) callback(); },
     setActive(value) { active = value; }, setAuthorize(value) { authorize = value; }, setConvert(value) { convert = value; }, setApply(value) { apply = value; },
+    setWireVersion(value) { wireVersion = value; },
     /** A dependency change supersedes pending actions even when target text versions stay equal. */
     advanceModel() { model++; } };
 }
@@ -102,6 +107,22 @@ test("Windows upstream file URLs retain native version guards and cannot duplica
   assert.equal((await f.middleware.workspace.handleApplyEdit({ edit: { documentChanges: [upstream] } })).applied, true);
   assert.equal((await f.middleware.workspace.handleApplyEdit({ edit: { documentChanges: [change, upstream] } })).applied, false);
   assert.equal(f.applications.length, 1);
+});
+
+test("a restored query projection validates the server clock without treating the native version as an LSP version", async t => {
+  const f = await fixture(t), document = f.opened[0], uri = document.uri.toString(), sent = [];
+  const documents = new LanguageDocuments(async (_method, params) => sent.push(params),
+    value => languageUri(uri) === value ? document : undefined);
+  await documents.notification("textDocument/didOpen", { textDocument: { uri } }, () => assert.fail("owned stream"));
+  const owner = {};
+  await documents.project(uri, "projected query", owner);
+  await documents.release(uri, owner);
+  f.setWireVersion(document => documents.wireVersion(document));
+  const serverVersion = sent.at(-1).textDocument.version;
+  assert.notEqual(serverVersion, document.version);
+  const change = f.change(0); change.textDocument.version = serverVersion;
+  assert.equal((await f.middleware.workspace.handleApplyEdit({ edit: { documentChanges: [change] } })).applied, true);
+  assert.equal((await f.middleware.workspace.handleApplyEdit({ edit: { documentChanges: [f.change(0)] } })).applied, false);
 });
 
 test("stale, unversioned, protected and resource edits cannot partially apply an otherwise permitted target", async t => {
