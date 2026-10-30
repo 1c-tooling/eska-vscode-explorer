@@ -26,7 +26,9 @@ exports.run=async function(){
   assert.equal(await client.evaluate('document.querySelector(".matrix-column").textContent'),'ResultName');
   await client.evaluate('document.querySelector(".matrix-move:last-child").click()');await until(()=>client.evaluate('!!document.querySelector(".action-preview")'),'column move preview');await ready(client);await client.evaluate('document.querySelector(".preview-accept").click()');await until(()=>client.evaluate('!document.querySelector(".action-preview")'),'column move accepted');await ready(client);
   assert.equal(await client.evaluate('document.querySelector(".matrix-column").textContent'),'Extra');
-  const changed=await client.evaluate('document.getElementById("query-text").textContent');await client.evaluate('document.querySelector("header button").click()');client.close();client=undefined;await until(()=>draft.getText()===changed,'matrix applied');await vscode.commands.executeCommand('undo');assert.equal(draft.getText(),text);assert.deepEqual(await fs.readFile(f.module),disk);
+  const changed=await client.evaluate('document.getElementById("query-text").textContent');
+  const appliedText=changed.replace(/\r?\n/g,draft.eol===vscode.EndOfLine.CRLF?'\r\n':'\n');
+  await client.evaluate('document.querySelector("header button").click()');client.close();client=undefined;await until(()=>draft.getText()===appliedText,'matrix applied');await vscode.commands.executeCommand('undo');assert.equal(draft.getText(),text);assert.deepEqual(await fs.readFile(f.module),disk);
   await fs.writeFile(path.join(f.root,'host-result.json'),JSON.stringify({passed:true,suite:'query-union-matrix',locale:vscode.env.language,accepted:['matrix-read-noop','alignment-preview-cancel','alignment-explicit-accept','parent-inert','shared-output-alias','column-move-preview','native-undo','owner-unchanged']}));
  }finally{client?.close();}
 };

@@ -22,7 +22,8 @@ exports.run=async function(){
   await client.evaluate('document.querySelector(".source-fields .edit-nested").click()');await until(()=>client.evaluate('!!document.querySelector(".scope-path")'),'nested breadcrumb');assert.ok(await client.evaluate('document.querySelectorAll(".scope-crumb").length')>=2);
   await client.evaluate('document.querySelector(".back-parent").click()');await until(()=>client.evaluate('!document.querySelector(".scope-path")'),'returned to producer');await ready(client);
   const changed=await client.evaluate('document.getElementById("query-text").textContent');assert.equal(changed.match(/SELECT Tmp.N FROM Tmp/g).length,1);
-  await client.evaluate('document.querySelector("header button").click()');client.close();client=undefined;await until(()=>draft.getText()===changed,'package applied');await vscode.commands.executeCommand('undo');assert.equal(draft.getText(),text);assert.deepEqual(await fs.readFile(f.module),disk);
+  const appliedText=changed.replace(/\r?\n/g,draft.eol===vscode.EndOfLine.CRLF?'\r\n':'\n');
+  await client.evaluate('document.querySelector("header button").click()');client.close();client=undefined;await until(()=>draft.getText()===appliedText,'package applied');await vscode.commands.executeCommand('undo');assert.equal(draft.getText(),text);assert.deepEqual(await fs.readFile(f.module),disk);
   await fs.writeFile(path.join(f.root,'host-result.json'),JSON.stringify({passed:true,suite:'query-package-tree',locale:vscode.env.language,accepted:['copy-preview-fresh-destination','copy-focus','nested-package-tree','lifetime-bound-definition-link','scope-breadcrumb-and-return','original-consumer-unchanged','native-undo','source-unchanged']}));
  }finally{client?.close();}
 };
