@@ -65,15 +65,18 @@ async function run() {
     } catch (error) { if (trace.length < 80) trace.push({ request: String(args[0]?.method ?? args[0]), error: String(error), code: error.code }); throw error; }
   };
   stage = "server-edit-payloads";
-  const change = (doc, text = "// injected\n", version = doc.version, target = doc.uri.toString()) => ({ textDocument: { uri: target, version },
+  const wireVersion = doc => explorer.language.session.documents.wireVersion(doc);
+  await until(() => Number.isSafeInteger(wireVersion(document)), "native document synchronized for server edits");
+  const change = (doc, text = "// injected\n", version = wireVersion(doc) ?? doc.version,
+    target = client.code2ProtocolConverter.asUri(doc.uri)) => ({ textDocument: { uri: target, version },
     edits: [{ range: { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } }, newText: text }] });
   const original = document.getText();
   assert.equal((await apply({ edit: { documentChanges: [change(document), change(xml)] } })).applied, false);
   assert.ok(trace.some(value => typeof value === "string" && value.includes('"event":"language_edit_rejected"')
-    && value.includes('"reason":"readonly"')), "mixed XML is rejected by the actual policy guard");
+    && value.includes('"reason":"stale"')), "an unsynchronized XML target rejects the complete server edit before native application");
   assert.equal(document.getText(), original); assert.equal(xml.getText(), xmlBefore);
   assert.equal((await apply({ edit: { documentChanges: [change(document), change(document, "x", document.version, uri.with({ scheme: "eska-protected" }).toString())] } })).applied, false);
-  assert.equal((await apply({ edit: { documentChanges: [change(document, "x", document.version - 1)] } })).applied, false);
+  assert.equal((await apply({ edit: { documentChanges: [change(document, "x", wireVersion(document) - 1)] } })).applied, false);
   assert.equal((await apply({ edit: { changes: { [uri.toString()]: change(document).edits } } })).applied, false);
   const created = vscode.Uri.file(path.join(fixture.source, "new.bsl"));
   assert.equal((await apply({ edit: { documentChanges: [change(document), { kind: "create", uri: created.toString() }] } })).applied, false);
