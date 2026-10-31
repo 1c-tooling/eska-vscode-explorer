@@ -71,3 +71,11 @@ export async function createLibrarySource(fixture, owner) {
   await writeFile(config, "[build]\nrunner='host'\n[libraries.ssl_3_1]\nsource=" + JSON.stringify(relative(configDir, first.source)) + "\n");
   return { first, second: { ...second, definition: language.file }, configDir, config };
 }
+
+/** Real semantic hints cover the requested builtin, a local function and a nested call. */
+export async function createInlaySource(fixture) {
+  const source = await createLanguageSource(fixture);
+  const text = '\ufeffФункция Собрать(Шаблон, Дополнение)\n    Возврат Шаблон + Дополнение;\nКонецФункции\n\nПроцедура Test()\n    А = СтрШаблон("Найдено кандидатов: %1\n        |Время выполнения: %2\n        |""Кириллица"" 😀", 1, 2);\n    Б = Собрать("Своя строка\n\t|Её продолжение", "два");\n    В = Собрать(СтрШаблон("Вложенный текст\n        |Его продолжение", 1), "два");\n    Г = Собрать("Одиночный текст", "два");\n    Д = Собрать("Первая цепочка\n        |Конец первой", "Начало второй\n        |Конец второй");\nКонецПроцедуры\n'.replaceAll('\n', '\r\n');
+  await writeFile(source.file, text);
+  return { file: source.file, text };
+}

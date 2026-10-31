@@ -1,3 +1,4 @@
+import { stringCapabilities, type StringEndpoint } from "./language/strings.js";
 import { formatCapabilities } from "./formatting/protocol.js";
 import { isAbsolute } from "node:path";
 import { diagnostic, errorContext, type DiagnosticLog } from "./diagnostics.js";
@@ -11,7 +12,7 @@ import { sourceCapabilities, type SourceEndpoint } from "./source-access.js";
 export interface ConnectionTarget { executable: string; path: string; name: string; locale: "ru-RU" | "en-US"; backend?: BackendKind }
 export type ConnectionState =
   | { kind: "disconnected" | "connecting" | "stopping" }
-  | { kind: "ready"; session: WorkspaceSession; version: string; supportPolicy: boolean; supportFiles: boolean; supportObjects: boolean; sourceNavigation: boolean; analyzerConfiguration: boolean; queryEditing: QueryCapabilities | undefined; target: ConnectionTarget }
+  | { kind: "ready"; session: WorkspaceSession; version: string; supportPolicy: boolean; supportFiles: boolean; supportObjects: boolean; sourceNavigation: boolean; analyzerConfiguration: boolean; queryEditing: QueryCapabilities | undefined; multilineStrings?: StringEndpoint; target: ConnectionTarget }
   | { kind: "error"; error: ExplorerError };
 
 /** Own the lifecycle independently of VS Code so restarts can be tested with real pipes. */
@@ -178,6 +179,7 @@ export class Connection {
         const sessions = backend === "project" ? querySessionCapabilities(response) : undefined;
         const sources = backend === "project" ? sourceCapabilities(response) : undefined;
         const formatting = backend === "project" ? formatCapabilities(response) : undefined;
+        const strings = backend === "project" ? stringCapabilities(response) : undefined;
         negotiated = true;
         if (revision !== this.revision) return;
         const request = async (method: string, params: Record<string, unknown>): Promise<unknown> => {
@@ -210,7 +212,13 @@ export class Connection {
           diagnostic(this.log, "connection_ready", { backendVersion: version, sessionId: session.sessionId,
             projects: session.projects.map((project) => ({ projectId: project.projectId, type: project.type,
               rootPath: project.rootPath, sourcePath: project.sourcePath, generation: project.generation })) });
-          this.set({ kind: "ready", session, version, sourceNavigation: isRecord(response) && isRecord(response.capabilities) && response.capabilities.sourceNavigation === true,
+          this.set({ kind: "ready", session, version,
+            ...(strings ? { multilineStrings: { limits: strings, request: async (method, params, signal) => {
+              if (this.child !== child) throw new ExplorerError("obsolete");
+              const result = await child.request(method, params, 30_000, signal);
+              if (this.child !== child) throw new ExplorerError("obsolete");
+              return result;
+            } } } : {}), sourceNavigation: isRecord(response) && isRecord(response.capabilities) && response.capabilities.sourceNavigation === true,
             supportPolicy: isRecord(response) && isRecord(response.capabilities) && response.capabilities.supportPolicy === true,
             supportFiles: isRecord(response) && isRecord(response.capabilities) && response.capabilities.supportFiles === true,
             supportObjects: isRecord(response) && isRecord(response.capabilities) && response.capabilities.supportObjects === true,

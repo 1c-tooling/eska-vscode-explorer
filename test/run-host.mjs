@@ -75,8 +75,9 @@ try {
 
   }
   // These scenarios exercise language lifecycle, not concurrent mutation of XML during workspace/open.
-  if (["language-host.cjs", "language-cancellation-host.cjs", "bundle-update-host.cjs"].includes(basename(suite))) {
-    fixture.languageSource = await (await import("./language-fixture.mjs")).createLanguageSource(fixture);
+  if (["language-host.cjs", "language-cancellation-host.cjs", "bundle-update-host.cjs", "inlay-alignment-host.cjs"].includes(basename(suite))) {
+    const source = await import("./language-fixture.mjs");
+    fixture.languageSource = basename(suite) === "inlay-alignment-host.cjs" ? await source.createInlaySource(fixture) : await source.createLanguageSource(fixture);
   }
   // Reload tests need a stable root descriptor before workspaceContains can activate the extension.
   if (process.env.ESKA_HOST_CONFLICT_RELOAD) await (await import("./language-fixture.mjs")).createLanguageSource(fixture);
@@ -109,6 +110,12 @@ try {
     ...(cli ? { env: { ...process.env, ...options?.env, ELECTRON_RUN_AS_NODE: "1" } } : {}),
   });
   let extensionPath = repository;
+  if (process.env.ESKA_HOST_LANGUAGE_PACK_DIRECTORY) {
+    const source = process.env.ESKA_HOST_LANGUAGE_PACK_DIRECTORY;
+    if (!isAbsolute(source)) throw new Error("ESKA_HOST_LANGUAGE_PACK_DIRECTORY must be absolute.");
+    const manifest = JSON.parse(await readFile(join(source, "package.json"), "utf8"));
+    await cp(source, join(root, "extensions", `${manifest.publisher}.${manifest.name}-${manifest.version}`.toLowerCase()), { recursive: true });
+  }
   if (process.env.ESKA_HOST_LANGUAGE_PACK_VSIX) {
     const languagePack = process.env.ESKA_HOST_LANGUAGE_PACK_VSIX;
     if (!isAbsolute(languagePack)) throw new Error("ESKA_HOST_LANGUAGE_PACK_VSIX must be absolute.");
@@ -179,7 +186,7 @@ try {
   };\n`);
   const hostArguments = [`--extensionTestsPath=${hostSuite}`];
   let languageWarmup;
-  if (process.env.ESKA_HOST_LANGUAGE_PACK_VSIX) {
+  if (process.env.ESKA_HOST_LANGUAGE_PACK_VSIX || process.env.ESKA_HOST_LANGUAGE_PACK_DIRECTORY) {
     // A fresh profile registers installed language packs during its first normal startup.
     // Passing --locale before that registration still resolves to English.
     languageWarmup = join(root, "language-pack-registration");

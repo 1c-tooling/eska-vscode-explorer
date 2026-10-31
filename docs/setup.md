@@ -38,3 +38,13 @@ managed/PATH lookup. `eska.explorer.formatOnSave` is disabled by default.
 Set formatting rules in `[format]` in `eska.toml`; native indentation settings do
 not override them. Missing/incompatible formatters never fall back to the analyzer.
 For offline operation disable `checkForFormatterUpdates` as well as other update checks.
+
+## Multiline parameter hints
+
+With `eska-project` API 1.34, continuation lines of multiline string arguments
+receive the same visual advance as the first line. Related parameter labels and
+invisible offsets use the editor font for an exact match; independent single-line
+calls keep their native hints. This changes neither source text nor font settings.
+Alignment requires `editor.inlayHints.enabled = "on"`. Conditional modifier-key
+modes, explicit accessibility support, and actionable/resolvable hints retain
+native rendering without alignment. [Details](language-service.md).

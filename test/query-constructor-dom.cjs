@@ -44,7 +44,7 @@ exports.connectWorkbench = async function (until) {
   click: async (x, y) => {
     await connection.request('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', clickCount: 1 });
     await connection.request('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', clickCount: 1 });
-  }, viewport: async (width, height) => {
+  }, focus: async () => { await connection.request("Page.bringToFront"); await connection.request("Emulation.setFocusEmulationEnabled", { enabled: true }); }, viewport: async (width, height) => {
     await connection.request('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
   }, evaluate: async expression => {
     const value = await connection.request('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true });

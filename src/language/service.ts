@@ -20,6 +20,7 @@ import { nativePath } from "../source.js";
 import { watchSourceFiles } from "../watch.js";
 import { LanguageDocuments } from "./documents.js";
 import { languageUri } from "./uri.js";
+import { InlayAlignment } from "./inlays.js";
 import type { QueryLanguage } from "../query/language.js";
 
 type Ready = Extract<ConnectionState, { kind: "ready" }>;
@@ -29,7 +30,7 @@ interface LibraryObservation {
 interface Session {
   context: AnalysisContext; configuration: AnalyzerConfiguration; lease: string; state: Ready;
   client?: LanguageClient; owner?: LanguageProcess; edits?: LanguageEdits; progress?: LanguageProgress; documents?: LanguageDocuments; configurationWatcher?: vscode.FileSystemWatcher;
-  observers: vscode.Disposable[];
+  observers: vscode.Disposable[]; alignment?: InlayAlignment;
 }
 const CONFLICTING_EXTENSION = "elishevkirill.bsl-analyzer-lsp";
 const SHARED_READS = new Set(["textDocument/documentSymbol", "textDocument/inlayHint"]);
@@ -410,6 +411,18 @@ export class LanguageService implements vscode.Disposable {
         middleware,
       });
       session.client = client;
+      if (state.multilineStrings) session.alignment = new InlayAlignment(vscode, state.multilineStrings,
+        () => this.session === session && this.accepts(revision, signal),
+        () => {
+          const events = new Set<vscode.EventEmitter<void>>();
+          for (const document of vscode.workspace.textDocuments) {
+            const provider = client.getFeature("textDocument/inlayHint").getProvider(document);
+            if (provider) events.add(provider.onDidChangeInlayHints);
+          }
+          for (const event of events) event.fire();
+        },
+        document => client.getFeature("textDocument/inlayHint").getProvider(document)?.provider.resolveInlayHint !== undefined,
+        () => session.documents?.epoch);
       session.documents = new LanguageDocuments((method, params) => client.sendNotification(method, params),
         uri => vscode.workspace.textDocuments.find(document => languageUri(document.uri.toString()) === uri && !document.isClosed));
       session.edits = new LanguageEdits(client, context, this.support, () => this.accepts(revision, signal), this.log, () => this.modelRevision,
@@ -524,6 +537,8 @@ export class LanguageService implements vscode.Disposable {
           this.reading.delete(cancellation); subscription?.dispose(); cancellation.dispose();
         }
       },
+      provideInlayHints: (doc, range, token, next) => read(doc, token, () => this.session?.alignment
+        ? this.session.alignment.provide(doc, range, token, next) : next(doc, range, token)),
       provideHover: (doc, pos, token, next) => read(doc, token, () => next(doc, pos, token)),
       provideDefinition: (doc, pos, token, next) => read(doc, token, () => next(doc, pos, token)),
       provideTypeDefinition: (doc, pos, token, next) => read(doc, token, () => next(doc, pos, token)),
@@ -545,6 +560,7 @@ export class LanguageService implements vscode.Disposable {
   /** Stop obsolete upstream work immediately instead of waiting for its result merely to discard it. */
   private invalidateModel(): void {
     ++this.modelRevision;
+    this.session?.alignment?.invalidate();
     for (const request of this.reading) request.cancel();
     this.queryLanguage?.changed();
   }
@@ -553,6 +569,7 @@ export class LanguageService implements vscode.Disposable {
   private async cleanup(): Promise<void> {
     const session = this.session;
     if (!session) return;
+    session.alignment?.dispose();
     await this.queryLanguage?.detach();
     session.configurationWatcher?.dispose();
     session.progress?.dispose();
