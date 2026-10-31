@@ -1,3 +1,4 @@
+import { projectEnabled } from "./protocol.js";
 import { ExplorerError, isRecord } from "./protocol.js";
 import { isNodeId, MetadataTree, nodeKey, type NodeId, type ProjectTree, type TreeEntry } from "./tree.js";
 
@@ -96,6 +97,7 @@ export class SearchSession {
     this.snapshot = { text: "", loading: false, projects: [] };
     this.subscription = tree.connection.onNotification((method, value) => {
       if (!isRecord(value) || value.sessionId !== tree.session.sessionId) return;
+      if (method === "workspace/activityChanged") { this.setText(this.snapshot.text); return; }
       const project = tree.projects.find((item) => item.info.projectId === value.projectId);
       if (!project || value.generation !== project.info.generation) return;
       if (method === "metadata/changed") this.setText(this.snapshot.text);
@@ -134,6 +136,7 @@ export class SearchSession {
     const projects: SearchProject[] = [];
     try {
       for (const project of this.tree.projects) {
+        if (!projectEnabled(project.info)) continue;
         if (controller.signal.aborted || this.disposed) break;
         let row: SearchProject;
         try {
@@ -148,6 +151,7 @@ export class SearchSession {
           if (controller.signal.aborted || this.disposed) break;
           row = { project, hits: [], truncated: false, error: error instanceof ExplorerError ? error : new ExplorerError("requestFailed") };
         }
+        if (!projectEnabled(project.info)) continue;
         projects.push(row);
         if (revision === this.revision && !this.disposed) {
           this.snapshot = { text, loading: true, projects: [...projects] };

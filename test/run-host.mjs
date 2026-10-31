@@ -31,6 +31,7 @@ try {
     const fields = Array.from({ length: 48 }, (_, index) => `${index} AS КолонкаРезультата${index}WithLongEnglishName`).join(',\r\n|');
     await writeFile(fixture.module, `\ufeffПроцедура Test()\r\nQ = "SELECT ${fields}\r\n|FROM (SELECT 1 AS NestedValue) AS Child";\r\nКонецПроцедуры\r\n`);
   }
+  if (basename(suite) === "project-activity-host.cjs") fixture.activity = await (await import("./activity-fixture.mjs")).createActivitySource(fixture, root);
   if (basename(suite) === "project-groups-host.cjs") fixture.grouping = await (await import("./fixture.mjs")).createProjectGroupingSource(fixture);
   if (basename(suite) === "formatting-host.cjs") {
     if (process.env.ESKA_TEST_LANGUAGE === "1") fixture.languageSource = await (await import("./language-fixture.mjs")).createLanguageSource(fixture);
@@ -98,7 +99,7 @@ try {
   // Configure the binary before activation: a later settings notification deliberately disconnects.
   // The general explorer suite separately exercises discovery through the isolated PATH.
   const explicitBinary = process.env.ESKA_HOST_GLOBAL_BINARY || basename(suite) !== "extension-host.cjs";
-  await writeFile(join(fixture.root, ".vscode/settings.json"), JSON.stringify({ ...nativeUiSettings, "eska.explorer.checkForUpdates": false, "eska.explorer.checkForAnalyzerUpdates": false, "eska.explorer.checkForFormatterUpdates": false, ...(process.env.ESKA_TEST_FMT_BINARY ? { "eska.explorer.formatterExecutable": process.env.ESKA_TEST_FMT_BINARY } : {}), "eska.explorer.languageFeatures": process.env.ESKA_TEST_LANGUAGE === "1", "eska.explorer.analyzerExecutable": process.env.ESKA_TEST_ANALYZER_BINARY ?? join(root, "missing-analyzer"), "eska.explorer.backend": backend,
+  await writeFile(join(fixture.root, ".vscode/settings.json"), JSON.stringify({ ...nativeUiSettings, "eska.explorer.checkForUpdates": false, "eska.explorer.checkForAnalyzerUpdates": false, "eska.explorer.checkForFormatterUpdates": false, ...(process.env.ESKA_TEST_FMT_BINARY ? { "eska.explorer.formatterExecutable": process.env.ESKA_TEST_FMT_BINARY } : {}), "eska.explorer.languageFeatures": process.env.ESKA_TEST_LANGUAGE === "1", "eska.explorer.analyzerExecutable": fixture.activity?.analyzer ?? process.env.ESKA_TEST_ANALYZER_BINARY ?? join(root, "missing-analyzer"), "eska.explorer.backend": backend,
     ...(explicitBinary ? { "eska.explorer.executable": binary } : {}),
     ...(process.env.ESKA_HOST_SUPPORT_DISABLED ? { "eska.explorer.supportPolicy": false } : {}) }));
   const executable = process.env.VSCODE_EXECUTABLE ?? "code";
@@ -135,7 +136,7 @@ try {
     await cp(process.env.ESKA_BSL_EXTENSION, join(root, "extensions", `${analyzer.publisher}.${analyzer.name}-${analyzer.version}`), { recursive: true });
     await mkdir(join(fixture.root, ".vscode"), { recursive: true });
     await writeFile(join(fixture.root, ".vscode", "settings.json"), JSON.stringify({
-      "eska.explorer.checkForUpdates": false, "eska.explorer.checkForAnalyzerUpdates": false, "eska.explorer.checkForFormatterUpdates": false, ...(process.env.ESKA_TEST_FMT_BINARY ? { "eska.explorer.formatterExecutable": process.env.ESKA_TEST_FMT_BINARY } : {}), "eska.explorer.languageFeatures": process.env.ESKA_TEST_LANGUAGE === "1", "eska.explorer.analyzerExecutable": process.env.ESKA_TEST_ANALYZER_BINARY ?? join(root, "missing-analyzer"), "eska.explorer.backend": backend,
+      "eska.explorer.checkForUpdates": false, "eska.explorer.checkForAnalyzerUpdates": false, "eska.explorer.checkForFormatterUpdates": false, ...(process.env.ESKA_TEST_FMT_BINARY ? { "eska.explorer.formatterExecutable": process.env.ESKA_TEST_FMT_BINARY } : {}), "eska.explorer.languageFeatures": process.env.ESKA_TEST_LANGUAGE === "1", "eska.explorer.analyzerExecutable": fixture.activity?.analyzer ?? process.env.ESKA_TEST_ANALYZER_BINARY ?? join(root, "missing-analyzer"), "eska.explorer.backend": backend,
       "bsl-analyzer-lsp.server.path": process.env.ESKA_BSL_BINARY,
       "[bsl]": { "editor.defaultFormatter": `${analyzer.publisher}.${analyzer.name}` },
       ...(process.env.ESKA_HOST_SUPPORT_DISABLED ? { "eska.explorer.supportPolicy": false } : {})
@@ -164,12 +165,12 @@ try {
   if (process.env.ESKA_HOST_MULTI_ROOT) {
     secondFixture = await createTreeProject(join(root, "second"));
     workspace = join(root, "support.code-workspace");
-    await writeFile(workspace, JSON.stringify({ folders: [{ path: fixture.root }, { path: secondFixture.root }], settings: { "eska.explorer.checkForUpdates": false, "eska.explorer.checkForAnalyzerUpdates": false, "eska.explorer.checkForFormatterUpdates": false, ...(process.env.ESKA_TEST_FMT_BINARY ? { "eska.explorer.formatterExecutable": process.env.ESKA_TEST_FMT_BINARY } : {}), "eska.explorer.languageFeatures": process.env.ESKA_TEST_LANGUAGE === "1", "eska.explorer.analyzerExecutable": process.env.ESKA_TEST_ANALYZER_BINARY ?? join(root, "missing-analyzer"), "eska.explorer.backend": backend } }));
+    await writeFile(workspace, JSON.stringify({ folders: [{ path: fixture.root }, { path: secondFixture.root }], settings: { "eska.explorer.checkForUpdates": false, "eska.explorer.checkForAnalyzerUpdates": false, "eska.explorer.checkForFormatterUpdates": false, ...(process.env.ESKA_TEST_FMT_BINARY ? { "eska.explorer.formatterExecutable": process.env.ESKA_TEST_FMT_BINARY } : {}), "eska.explorer.languageFeatures": process.env.ESKA_TEST_LANGUAGE === "1", "eska.explorer.analyzerExecutable": fixture.activity?.analyzer ?? process.env.ESKA_TEST_ANALYZER_BINARY ?? join(root, "missing-analyzer"), "eska.explorer.backend": backend } }));
   }
   if (process.env.ESKA_PERF_PROJECT) {
     if (!isAbsolute(process.env.ESKA_PERF_PROJECT)) throw new Error("ESKA_PERF_PROJECT must be absolute.");
     workspace = join(root, "performance.code-workspace");
-    await writeFile(workspace, JSON.stringify({ folders: [{ path: process.env.ESKA_PERF_PROJECT }], settings: { "eska.explorer.checkForUpdates": false, "eska.explorer.checkForAnalyzerUpdates": false, "eska.explorer.checkForFormatterUpdates": false, ...(process.env.ESKA_TEST_FMT_BINARY ? { "eska.explorer.formatterExecutable": process.env.ESKA_TEST_FMT_BINARY } : {}), "eska.explorer.languageFeatures": process.env.ESKA_TEST_LANGUAGE === "1", "eska.explorer.analyzerExecutable": process.env.ESKA_TEST_ANALYZER_BINARY ?? join(root, "missing-analyzer"), "eska.explorer.backend": backend, "eska.explorer.executable": binary,
+    await writeFile(workspace, JSON.stringify({ folders: [{ path: process.env.ESKA_PERF_PROJECT }], settings: { "eska.explorer.checkForUpdates": false, "eska.explorer.checkForAnalyzerUpdates": false, "eska.explorer.checkForFormatterUpdates": false, ...(process.env.ESKA_TEST_FMT_BINARY ? { "eska.explorer.formatterExecutable": process.env.ESKA_TEST_FMT_BINARY } : {}), "eska.explorer.languageFeatures": process.env.ESKA_TEST_LANGUAGE === "1", "eska.explorer.analyzerExecutable": fixture.activity?.analyzer ?? process.env.ESKA_TEST_ANALYZER_BINARY ?? join(root, "missing-analyzer"), "eska.explorer.backend": backend, "eska.explorer.executable": binary,
       ...(process.env.ESKA_HOST_SUPPORT_DISABLED ? { "eska.explorer.supportPolicy": false } : {}) } }));
   }
   // A second process reuses the same profile and workspace to test restored editors.
@@ -235,7 +236,7 @@ exports.activate = async function () {
     } else hostArguments.splice(0, 1, `--extensionDevelopmentPath=${probe}`);
   }
   let languageAttempts = 0;
-  const runs = process.env.ESKA_HOST_CONFLICT_RELOAD ? 3 : process.env.ESKA_HOST_RESTART || process.env.ESKA_HOST_QUERY_RESTART ? 2 : 1;
+  const runs = process.env.ESKA_HOST_CONFLICT_RELOAD ? 3 : process.env.ESKA_HOST_RESTART || process.env.ESKA_HOST_QUERY_RESTART || process.env.ESKA_HOST_ACTIVITY_RESTART ? 2 : 1;
   for (let run = languageWarmup ? -1 : 0; run < runs; run++) {
     await rm(join(fixture.root, "host-result.json"), { force: true });
     const child = spawn(executable, ["--verbose", "--skip-welcome", "--skip-release-notes", ...(locale ? [`--locale=${locale}`] : []), ...(process.env.ESKA_HOST_DEBUG_PORT ? [`--remote-debugging-port=${process.env.ESKA_HOST_DEBUG_PORT}`] : []),
@@ -246,6 +247,7 @@ exports.activate = async function () {
     { env: { ...process.env, PATH: bin + (process.platform === "win32" ? ";" : ":") + (process.env.PATH ?? ""), ESKA_HOST_RUN: String(run),
       ...(conflictFixture ? { ESKA_HOST_CONFLICT_VSIX: conflictFixture.vsix } : {}),
       ...(fixture.library ? { ESKA_CONFIG_DIR: fixture.library.configDir } : {}),
+      ...(fixture.activity ? { ESKA_CONFIG_DIR: fixture.activity.configDir } : {}),
       ESKA_HOST_FIXTURE: JSON.stringify(fixture), ESKA_HOST_SECOND_FIXTURE: JSON.stringify(secondFixture) }, stdio: ["ignore", "pipe", "pipe"] });
     let output = "";
     const fullLog = process.env.ESKA_HOST_FULL_LOG ? createWriteStream(process.env.ESKA_HOST_FULL_LOG) : undefined;

@@ -32,9 +32,10 @@ import { queryBranches, queryLabel, queryLeaf, type QueryEntry } from "./query/t
 import { WorkspaceFiles, fileName, type WorkspaceEntry } from "./workspace-files.js";
 import { ProjectWatcher, watchManifests, watchDirectory } from "./watch.js";
 import { basename } from "node:path";
+import { projectEnabled, parseWorkspace } from "./protocol.js";
 import { ProjectGroups, type ProjectGroup } from "./project-groups.js";
 
-interface Notice { label: string; loading?: boolean; supportFailure?: boolean; project?: ProjectTree; parent?: Element }
+interface Notice { label: string; inactive?: boolean; loading?: boolean; supportFailure?: boolean; project?: ProjectTree; parent?: Element }
 type Element = TreeEntry | Notice | FormSource | WorkspaceEntry | QueryEntry | ProjectGroup;
 
 let active: Explorer | undefined;
@@ -81,6 +82,8 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
   private files: WorkspaceFiles | undefined;
   private searchView: SearchView | undefined;
   private watchers: vscode.Disposable[] = [];
+  private readonly projectWatchers = new Map<ProjectTree, ProjectWatcher>();
+  private activityQueue: Promise<void> = Promise.resolve();
   private readonly iconPaths = new Map<string, vscode.Uri>();
   private readonly filters: ProjectFilters;
   private readonly sorting: ProjectSorting;
@@ -165,6 +168,15 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
       this.disposables.push(vscode.commands.registerCommand(`eska.explorer.${name}`, action));
     }
     // Context actions accept the native tree element; palette refresh has no argument.
+    this.disposables.push(this.connection.onNotification((method) => {
+      if (method === "workspace/activityChanged") this.activityChanged();
+    }));
+    for (const [name, enabled] of [["disableProject", false], ["enableProject", true]] as const) {
+      this.disposables.push(vscode.commands.registerCommand(`eska.explorer.${name}`, (entry?: Element) => this.setProjectActivity(entry, enabled)));
+    }
+    for (const [name, hidden] of [["hideDisabledProjects", true], ["showDisabledProjects", false]] as const) {
+      this.disposables.push(vscode.commands.registerCommand(`eska.explorer.${name}`, () => this.setActivityFilter(hidden)));
+    }
     this.disposables.push(vscode.commands.registerCommand("eska.explorer.refreshNode", (entry: Element) => this.refresh(entry)));
     this.disposables.push(vscode.commands.registerCommand("eska.explorer.openSource", (entry: TreeEntry) => this.open(entry)));
     this.disposables.push(vscode.commands.registerCommand("eska.explorer.openXml", (entry: TreeEntry) => this.open(entry, "xml")));
@@ -341,6 +353,7 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
 
   /** A broken member remains beside its own group, without hiding healthy siblings. */
   private async projectRoot(tree: MetadataTree, project: ProjectTree, parent?: ProjectGroup): Promise<TreeEntry | Notice> {
+    if (!projectEnabled(project.info)) return { inactive: true, label: project.info.displayName ?? (project.info.scope.kind === "member" ? project.info.scope.name : ""), project, ...(parent ? { parent } : {}) };
     try { return await tree.root(project); }
     catch (error) { return { label: this.text(error instanceof ExplorerError ? error.code : "branchInvalid"), project, ...(parent ? { parent } : {}) }; }
   }
@@ -404,6 +417,16 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
     }
     if (!("node" in entry)) {
       const item = new vscode.TreeItem(entry.label);
+      if (entry.inactive && entry.project) {
+        item.id = `${entry.project.key}:${nodeKey(entry.project.info.root)}`;
+        item.iconPath = new vscode.ThemeIcon("circle-slash");
+        item.contextValue = "eskaInactiveProject";
+        item.description = `${this.text(entry.project.info.type)} · ${this.text("projectDisabled")}`;
+        const consumers = entry.project.info.activity?.requiredBy.map(consumer => `${consumer.application}/${consumer.project}`).join(", ");
+        item.tooltip = consumers ? `${entry.label}\n${this.text("projectRequiredBy", consumers)}` : `${entry.label}\n${this.text("projectDisabled")}`;
+        item.command = { command: "eska.explorer.enableProject", title: this.text("enableProject"), arguments: [entry] };
+        return item;
+      }
       item.id = `${entry.parent && "key" in entry.parent ? entry.parent.key : "connection"}:${entry.project?.key ?? ""}:notice`;
       item.iconPath = new vscode.ThemeIcon(entry.loading ? "loading~spin" : "warning");
       if (entry.loading) return item;
@@ -934,6 +957,76 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
     return value;
   }
 
+  private visibleProjects(tree: MetadataTree): ProjectTree[] {
+    return tree.projects.filter(project => !tree.session.activity?.hideDisabled || projectEnabled(project.info));
+  }
+
+  private syncProjectWatchers(tree: MetadataTree): void {
+    for (const [project, watcher] of this.projectWatchers) {
+      if (!projectEnabled(project.info) || !tree.projects.includes(project)) { watcher.dispose(); this.projectWatchers.delete(project); }
+    }
+    for (const project of tree.projects) if (projectEnabled(project.info) && !this.projectWatchers.has(project)) {
+      this.projectWatchers.set(project, new ProjectWatcher(tree, project,
+        error => this.output.info(`watch_error code=${error instanceof ExplorerError ? error.code : "requestFailed"}`),
+        path => this.language.sourceChanged(path)));
+    }
+  }
+
+  private updateActivityContexts(): void {
+    void vscode.commands.executeCommand("setContext", "eska.explorer.workspaceActivity", !!this.tree?.session.activity);
+    void vscode.commands.executeCommand("setContext", "eska.explorer.hideDisabled", !!this.tree?.session.activity?.hideDisabled);
+  }
+
+  private activityChanged(): void {
+    const tree = this.tree;
+    if (!tree) return;
+    // MetadataTree receives the same ordered notification and retires its member's reads.
+    queueMicrotask(() => {
+      if (this.tree !== tree || this.disposed) return;
+      this.projectGroups?.update(this.visibleProjects(tree));
+      this.syncProjectWatchers(tree); this.files?.activityChanged();
+      this.support.invalidate(); this.updateActivityContexts(); this.updateKeyboardContext(); this.changed.fire(undefined);
+    });
+  }
+
+  private activityOperation(action: (tree: MetadataTree) => Promise<void>): Promise<void> {
+    const tree = this.tree;
+    const pending = this.activityQueue.then(async () => {
+      if (!tree || this.tree !== tree || !tree.session.activity) return;
+      try { await action(tree); } catch (error) { this.showError(error instanceof ExplorerError ? error : new ExplorerError("requestFailed")); }
+    });
+    this.activityQueue = pending;
+    return pending;
+  }
+
+  private setProjectActivity(entry: Element | undefined, enabled: boolean): Promise<void> {
+    return this.activityOperation(async tree => {
+      let project = entry && "project" in entry ? entry.project : undefined;
+      if (!project) {
+        const items = tree.projects.filter(project => projectEnabled(project.info) !== enabled).map(project => ({ label: project.info.scope.kind === "member" ? project.info.scope.name : project.info.displayName ?? "", project }));
+        project = (await vscode.window.showQuickPick(items, { placeHolder: this.text(enabled ? "enableProject" : "disableProject"), ignoreFocusOut: true }))?.project;
+      }
+      if (!project || !tree.projects.includes(project) || project.info.scope.kind !== "member") return;
+      if (projectEnabled(project.info) === enabled) return;
+      if (!enabled) tree.cancelProject(project);
+      this.language.prepareActivityChange();
+      try {
+        parseWorkspace(await this.connection.request(tree.session.sessionId, "workspace/activitySet", {
+          revision: tree.session.activity!.revision, projectId: project.info.projectId, enabled,
+        }));
+        await this.language.activityChanged();
+      } catch (error) { await this.language.activityChangeFailed(); throw error; }
+    });
+  }
+
+  private setActivityFilter(hideDisabled: boolean): Promise<void> {
+    return this.activityOperation(async tree => {
+      parseWorkspace(await this.connection.request(tree.session.sessionId, "workspace/activityFilter", {
+        revision: tree.session.activity!.revision, hideDisabled,
+      }));
+    });
+  }
+
   /** Process logs never become the view's labels or user-facing error text. */
   private update(state: ConnectionState): void {
     if (this.disposed) return;
@@ -950,6 +1043,7 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
     this.clearRootPublication();
     for (const watcher of this.watchers) watcher.dispose();
     this.watchers = [];
+    for (const watcher of this.projectWatchers.values()) watcher.dispose(); this.projectWatchers.clear();
     this.opening++;
     if (state.kind === "ready") {
       const tree = new MetadataTree(this.connection, state.session,
@@ -957,19 +1051,17 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
           this.protectedSources.refresh();
           void this.repaint(entries); }, (project, reopen) => this.recover(project, reopen), async () => {
           if (this.tree !== tree) return;
-          for (const watcher of this.watchers) if (watcher instanceof ProjectWatcher) await watcher.flush();
+          for (const watcher of this.projectWatchers.values()) await watcher.flush();
         });
       this.tree = tree;
       if (this.projectGroups?.workspace !== state.target.path) this.projectGroups = new ProjectGroups(state.target.path);
-      this.projectGroups.update(tree.projects);
+      this.projectGroups.update(this.visibleProjects(tree));
       this.files = new WorkspaceFiles(tree.projects, state.target.path, watchDirectory, entry => {
         if (this.tree !== tree) return;
         this.changed.fire(entry && ("fileKind" in entry ? entry : entry.root));
       });
       try {
-        for (const project of tree.projects) this.watchers.push(new ProjectWatcher(tree, project,
-          (error) => { this.output.info(`watch_error code=${error instanceof ExplorerError ? error.code : "requestFailed"}`); },
-          path => this.language.sourceChanged(path)));
+        this.syncProjectWatchers(tree);
         this.watchers.push(watchManifests(state.target.path, tree.projects, () => { void this.reconnectWorkspace(); }, () => this.language.manifestChanged()));
       } catch (error) { this.showError(error instanceof ExplorerError ? error : new ExplorerError("unsupportedPath")); }
     }
@@ -981,6 +1073,7 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
     this.decorations.setTree(this.tree);
     this.updateKeyboardContext();
     this.changed.fire(undefined);
+    this.updateActivityContexts();
     this.tooling.projectConnection(state);
     this.language.connectionChanged(state);
     if (state.kind === "ready") {
@@ -1033,6 +1126,7 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
       this.tree?.dispose();
       this.files?.dispose();
       for (const watcher of this.watchers) watcher.dispose();
+      for (const watcher of this.projectWatchers.values()) watcher.dispose(); this.projectWatchers.clear();
       this.view.dispose();
       this.changed.dispose();
       const other = Promise.allSettled([this.formatting.shutdown(), this.supportContexts.stop(), this.support.shutdown(), this.setup.shutdown(), this.tooling.shutdown()]);

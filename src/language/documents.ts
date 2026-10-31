@@ -14,7 +14,7 @@ export class LanguageDocuments {
   private readonly internal = new WeakSet<object>();
   private revision = 0;
 
-  constructor(private readonly send: Send, private readonly native: (uri: string) => TextDocument | undefined) {}
+  constructor(private readonly send: Send, private readonly native: (uri: string) => TextDocument | undefined, private readonly active: (uri: string) => boolean = () => true) {}
 
   /** Even a projection/restore round trip invalidates reads started against a previous server document model. */
   get epoch(): number { return this.revision; }
@@ -43,6 +43,7 @@ export class LanguageDocuments {
     if (this.owns(params) || !["textDocument/didOpen", "textDocument/didChange", "textDocument/didClose", "textDocument/didSave"].includes(method)
       || !isRecord(params) || !isRecord(params.textDocument) || typeof params.textDocument.uri !== "string") return forward(params);
     const uri = languageUri(params.textDocument.uri), textDocument = params.textDocument, stream = this.stream(uri);
+    if (!this.active(uri)) return this.enqueue(stream, () => this.suspend(uri, stream));
     // The client can flush a pending native open while sending this stream's projection. Suppression must not await itself.
     if (stream.owner) return;
     const document = this.native(uri), text = document?.getText();
@@ -62,6 +63,7 @@ export class LanguageDocuments {
   /** A projection is memory-only and never changes the native document or its dirty/save state. */
   async project(uri: string, text: string, owner: object): Promise<void> {
     uri = languageUri(uri);
+    if (!this.active(uri)) throw new Error("language_uri_inactive");
     const stream = this.stream(uri);
     if (stream.owner && stream.owner !== owner) throw new Error("language_uri_owned");
     stream.owner = owner; stream.poisoned = true; ++this.revision;
@@ -77,13 +79,31 @@ export class LanguageDocuments {
     ++this.revision;
     await this.enqueue(stream, async () => {
       const document = this.native(uri);
-      if (document && !document.isClosed) await this.body(uri, stream, document.getText(), { document, version: document.version });
+      if (!this.active(uri)) await this.suspend(uri, stream);
+      else if (document && !document.isClosed) await this.body(uri, stream, document.getText(), { document, version: document.version });
       else {
         if (stream.opened) await this.publish("textDocument/didClose", { textDocument: { uri } });
         stream.opened = false; stream.poisoned = false; stream.version = 0; delete stream.nativeSnapshot;
         if (this.streams.get(uri) === stream && !this.native(uri)) this.streams.delete(uri);
       }
     });
+  }
+
+  /** Activity closes only wire documents; native buffers, versions and private draft owners survive. */
+  async reconcileActivity(): Promise<void> {
+    for (const [uri, stream] of this.streams) await this.enqueue(stream, async () => {
+      if (!this.active(uri)) { await this.suspend(uri, stream); return; }
+      const document = this.native(uri);
+      if (document && !document.isClosed && !stream.owner
+        && (!stream.opened || stream.nativeSnapshot?.document !== document || stream.nativeSnapshot.version !== document.version)) {
+        await this.body(uri, stream, document.getText(), { document, version: document.version });
+      }
+    });
+  }
+
+  private async suspend(uri: string, stream: Stream): Promise<void> {
+    if (stream.opened) { ++this.revision; await this.publish("textDocument/didClose", { textDocument: { uri } }); }
+    stream.opened = false; delete stream.nativeSnapshot;
   }
 
   /** The per-URI tail recovers after an error so teardown can still restore or close its buffer. */

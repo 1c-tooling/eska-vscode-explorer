@@ -1,6 +1,14 @@
 import type { FailureCode } from "./protocol.js";
 
 const en = {
+  disableProject: "Disable project",
+  enableProject: "Enable project",
+  hideDisabledProjects: "Hide disabled projects",
+  showDisabledProjects: "Show disabled projects",
+  projectDisabled: "Disabled",
+  projectRequiredBy: "Required by active projects: {0}",
+  languageWorkspaceInactive: "No active projects in the application",
+
   projectExtensions: "Extensions",
   projectReports: "Reports",
   projectProcessors: "Data processors",
@@ -461,6 +469,14 @@ const en = {
 } as const;
 
 const ru: Record<keyof typeof en, string> = {
+  disableProject: "Отключить проект",
+  enableProject: "Включить проект",
+  hideDisabledProjects: "Скрыть отключенные",
+  showDisabledProjects: "Показать отключенные",
+  projectDisabled: "Отключён",
+  projectRequiredBy: "Нужен активным проектам: {0}",
+  languageWorkspaceInactive: "В приложении нет активных проектов",
+
   projectExtensions: "Расширения",
   projectReports: "Отчеты",
   projectProcessors: "Обработки",

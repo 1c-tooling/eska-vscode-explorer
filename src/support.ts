@@ -1,3 +1,4 @@
+import { projectEnabled } from "./protocol.js";
 import * as vscode from 'vscode';
 import { join, relative, isAbsolute } from 'node:path';
 import { createHash } from 'node:crypto';
@@ -293,6 +294,7 @@ export class SupportController implements vscode.FileDecorationProvider {
   /** Resolve source membership through native path boundaries, including additional workspace folders. */
   private locate(path: string): { tree: MetadataTree; project: ProjectTree; relative: string } | undefined {
     for (const tree of [this.tree, ...this.additional]) if (tree) for (const project of tree.projects) {
+      if (!projectEnabled(project.info)) continue;
       const local = relative(nativePath(project.info.sourcePath), path);
       if (local && !isAbsolute(local) && local !== '..' && !local.startsWith('..' + (process.platform === 'win32' ? '\\' : '/'))) return { tree, project, relative: local };
     }
@@ -416,10 +418,11 @@ export class SupportController implements vscode.FileDecorationProvider {
       await this.queryFiles(paths, epoch);
       return;
     }
-    const snapshots = new Map<ProjectTree, Snapshot>();
+    const snapshots = new Map<ProjectTree, Snapshot>([...this.snapshots].filter(([project]) => !projectEnabled(project.info)));
     const baselineRules = this.ownedRules();
     let published = false;
     for (const context of [tree, ...this.additional]) for (const project of context.projects) {
+      if (!projectEnabled(project.info)) continue;
       const objects = new Map<string, ObjectPolicy>();
       const files: FilePolicy[] = [];
       const diagnostics: string[] = [];

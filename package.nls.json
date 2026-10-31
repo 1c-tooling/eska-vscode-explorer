@@ -52,5 +52,9 @@
   "formatOnSave": "Format BSL/SDBL and query drafts through ESKA on save. Style is configured in eska.toml.",
   "checkFormatterUpdates": "Check for eska-fmt updates",
   "recoverFormatterInstallation": "Recover eska-fmt installation",
-  "checkForFormatterUpdates": "Check for eska-fmt updates independently."
+  "checkForFormatterUpdates": "Check for eska-fmt updates independently.",
+  "disableProject": "Disable project",
+  "enableProject": "Enable project",
+  "hideDisabledProjects": "Hide disabled projects",
+  "showDisabledProjects": "Show disabled projects"
 }

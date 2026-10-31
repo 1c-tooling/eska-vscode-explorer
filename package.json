@@ -253,6 +253,30 @@
         "command": "eska.explorer.recoverFormatterInstallation",
         "title": "%recoverFormatterInstallation%",
         "category": "ESKA Explorer"
+      },
+      {
+        "command": "eska.explorer.disableProject",
+        "title": "%disableProject%",
+        "category": "ESKA",
+        "icon": "$(circle-slash)"
+      },
+      {
+        "command": "eska.explorer.enableProject",
+        "title": "%enableProject%",
+        "category": "ESKA",
+        "icon": "$(play)"
+      },
+      {
+        "command": "eska.explorer.hideDisabledProjects",
+        "title": "%hideDisabledProjects%",
+        "category": "ESKA",
+        "icon": "$(eye-closed)"
+      },
+      {
+        "command": "eska.explorer.showDisabledProjects",
+        "title": "%showDisabledProjects%",
+        "category": "ESKA",
+        "icon": "$(eye)"
       }
     ],
     "views": {
@@ -328,6 +352,16 @@
           "command": "eska.explorer.checkUpdates",
           "when": "view == eska.explorer.projects",
           "group": "connection@4"
+        },
+        {
+          "command": "eska.explorer.hideDisabledProjects",
+          "when": "view == eska.explorer.projects && eska.explorer.workspaceActivity && !eska.explorer.hideDisabled",
+          "group": "navigation@3"
+        },
+        {
+          "command": "eska.explorer.showDisabledProjects",
+          "when": "view == eska.explorer.projects && eska.explorer.workspaceActivity && eska.explorer.hideDisabled",
+          "group": "navigation@3"
         }
       ],
       "view/item/context": [
@@ -370,6 +404,16 @@
           "command": "eska.explorer.resetSortOrder",
           "when": "view == eska.explorer.projects && viewItem =~ /^eskaRoot(Filtered|Unfiltered)?Sorted$/",
           "group": "inline@1"
+        },
+        {
+          "command": "eska.explorer.enableProject",
+          "when": "view == eska.explorer.projects && eska.explorer.workspaceActivity && viewItem == eskaInactiveProject",
+          "group": "activity@1"
+        },
+        {
+          "command": "eska.explorer.disableProject",
+          "when": "view == eska.explorer.projects && eska.explorer.workspaceActivity && viewItem =~ /^eskaRoot/",
+          "group": "activity@1"
         }
       ],
       "commandPalette": [
@@ -420,6 +464,22 @@
         {
           "command": "eska.explorer.resetSortOrder",
           "when": "false"
+        },
+        {
+          "command": "eska.explorer.hideDisabledProjects",
+          "when": "eska.explorer.workspaceActivity && !eska.explorer.hideDisabled"
+        },
+        {
+          "command": "eska.explorer.showDisabledProjects",
+          "when": "eska.explorer.workspaceActivity && eska.explorer.hideDisabled"
+        },
+        {
+          "command": "eska.explorer.enableProject",
+          "when": "eska.explorer.workspaceActivity"
+        },
+        {
+          "command": "eska.explorer.disableProject",
+          "when": "eska.explorer.workspaceActivity"
         }
       ],
       "editor/context": [

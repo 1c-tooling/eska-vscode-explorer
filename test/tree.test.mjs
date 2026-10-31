@@ -14,7 +14,7 @@ const executable = process.env.ESKA_TEST_BINARY;
 test("metadata requests drain queued file events before capturing generation without refresh recursion", async () => {
   const calls = [], project = { info: { projectId: "project", generation: "0", eventSequence: "0" } };
   const tree = Object.assign(Object.create(MetadataTree.prototype), {
-    session: { sessionId: "session" },
+    session: { sessionId: "session" }, scopes: new Map(),
     connection: { async request(_session, method, params) {
       calls.push([method, params.generation]);
       return { sessionId: "session", projectId: "project", generation: "1", eventSequence: "1" };

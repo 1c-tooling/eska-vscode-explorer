@@ -131,3 +131,36 @@ test("pending native open flushed by the client cannot wait on its own projectio
   assert.equal(sent.at(-1).contentChanges[0].text, "native");
   assert.equal(document.getText(), "native");
 });
+
+
+test("disabling closes only wire buffers, suppresses edits and reopens the latest dirty native body", async () => {
+  const sent = [], uri = "file:///project/Module.bsl";
+  let active = true;
+  const document = { uri: { toString: () => uri }, version: 4, isClosed: false, isDirty: true, text: "unsaved", getText() { return this.text; } };
+  const documents = new LanguageDocuments(async (method, params) => sent.push({method, ...params}), () => document, () => active);
+  const native = method => documents.notification("textDocument/"+method, {textDocument:{uri}}, async () => assert.fail("wire sync bypassed"));
+  await native("didOpen"); const before = documents.wireVersion(document);
+  active = false; await documents.reconcileActivity();
+  assert.equal(documents.wireVersion(document), undefined);
+  document.text += " edited while disabled"; document.version++;
+  await native("didChange"); await native("didSave");
+  assert.deepEqual(sent.map(value=>value.method), ["textDocument/didOpen","textDocument/didClose"]);
+  await assert.rejects(documents.project(uri,"private",{}), /language_uri_inactive/);
+  assert.equal(document.isDirty, true);
+  active = true; await documents.reconcileActivity();
+  assert.equal(sent.at(-1).method,"textDocument/didOpen");
+  assert.equal(sent.at(-1).textDocument.text,document.text);
+  assert.ok(documents.wireVersion(document)>before);
+  const count = sent.length; await documents.reconcileActivity(); assert.equal(sent.length,count,"unchanged active buffers are not resent");
+});
+
+test("releasing a disabled private projection never sends a native owner body until explicit activation", async () => {
+  const sent = [], uri = "file:///project/Owner.bsl", owner = {};
+  let active = true;
+  const document = {version:1,isClosed:false,getText:()=>"native remains dirty"};
+  const documents = new LanguageDocuments(async (method,params)=>sent.push({method,...params}),()=>document,()=>active);
+  await documents.project(uri,"private draft",owner);
+  active=false; await documents.reconcileActivity(); await documents.release(uri,owner);
+  assert.deepEqual(sent.map(value=>value.method),["textDocument/didOpen","textDocument/didClose"]);
+  active=true; await documents.reconcileActivity(); assert.equal(sent.at(-1).textDocument.text,document.getText());
+});

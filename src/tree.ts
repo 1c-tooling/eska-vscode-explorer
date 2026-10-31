@@ -1,6 +1,6 @@
 import { renameTransition, renamedIdentity, type RenameTransition } from "./metadata-rename.js";
 import { Connection } from "./connection.js";
-import { ExplorerError, isRecord, isToken, parseWorkspace, type ProjectInfo, type WorkspaceSession } from "./protocol.js";
+import { ExplorerError, isRecord, isToken, parseWorkspace, projectEnabled, type ProjectInfo, type WorkspaceSession } from "./protocol.js";
 
 export type NodeId = { kind: "object"; objectId: string }
   | { kind: "module"; owner: string; role: string }
@@ -77,6 +77,7 @@ function owner(id: NodeId): string { return id.kind === "object" ? id.objectId :
 export class MetadataTree {
   readonly projects: ProjectTree[];
   private disposed = false;
+  private readonly scopes = new Map<ProjectTree, AbortController>();
   private readonly subscription: { dispose(): void };
 
   constructor(readonly connection: Connection, readonly session: WorkspaceSession,
@@ -88,7 +89,32 @@ export class MetadataTree {
       nodes: new Map(), root: undefined, rootDirty: true, supportGeneration: info.generation, supportEventSequence: info.eventSequence }));
     this.subscription = connection.onNotification((method, params) => {
       if (method === "metadata/changed") this.invalidated(params);
+      if (method === "workspace/activityChanged") this.activityChanged(params);
     });
+  }
+
+  /** Retire only the member's reads; late responses cannot repopulate released nodes. */
+  cancelProject(project: ProjectTree): void {
+    this.scopes.get(project)?.abort(); this.scopes.delete(project);
+  }
+
+  private activityChanged(value: unknown): void {
+    const session = parseWorkspace(value);
+    if (this.disposed || session.sessionId !== this.session.sessionId) return;
+    const projects = new Map(session.projects.map(info => [info.projectId, info]));
+    for (const project of this.projects) {
+      const info = projects.get(project.info.projectId);
+      if (!info || JSON.stringify(info.rootPath) !== JSON.stringify(project.info.rootPath)
+        || JSON.stringify(info.sourcePath) !== JSON.stringify(project.info.sourcePath)) throw new ExplorerError("protocolInvalid");
+      const changed = projectEnabled(info) !== projectEnabled(project.info);
+      if (changed) {
+        this.cancelProject(project); project.nodes.clear(); project.root = undefined; project.rootDirty = true;
+        project.supportGeneration = info.generation; project.supportEventSequence = info.eventSequence;
+      }
+      Object.assign(project.info, info);
+    }
+    Object.assign(this.session, session);
+    this.changed(undefined);
   }
 
   /** Drain known native file events before binding a request to a metadata generation. */
@@ -100,7 +126,7 @@ export class MetadataTree {
 
   /** Resolve only root summaries, never descend into object descriptors. */
   async roots(): Promise<TreeEntry[]> {
-    return Promise.all(this.projects.map((project) => this.root(project)));
+    return Promise.all(this.projects.filter(project => projectEnabled(project.info)).map((project) => this.root(project)));
   }
 
   /** Keep a broken root independent from other workspace members. */
@@ -190,6 +216,10 @@ export class MetadataTree {
 
   /** Read requests may retry after an intervening change, but never loop indefinitely. */
   async request(project: ProjectTree, method: string, params: Record<string, unknown> = {}, signal?: AbortSignal): Promise<Record<string, unknown>> {
+    if (!projectEnabled(project.info)) throw new ExplorerError("requestFailed", "project_inactive");
+    let scope = this.scopes.get(project);
+    if (!scope) { scope = new AbortController(); this.scopes.set(project, scope); }
+    signal = signal ? AbortSignal.any([signal, scope.signal]) : scope.signal;
     // Watcher overflow itself performs refresh; synchronizing it again would await its own delivery.
     if (method !== "metadata/refresh") await this.synchronizeInputs();
     const mutation = method === "metadata/updateProperty" || method === "metadata/undoProperty" || method === "metadata/renameApply";
@@ -202,7 +232,7 @@ export class MetadataTree {
       try {
         const result = await this.connection.request(this.session.sessionId, method,
           { ...params, projectId: project.info.projectId, generation }, signal);
-        if (this.disposed) throw new ExplorerError("obsolete");
+        if (this.disposed || signal.aborted || !projectEnabled(project.info)) throw new ExplorerError("obsolete");
         if (!isRecord(result) || result.sessionId !== this.session.sessionId || result.projectId !== project.info.projectId
           || !isToken(result.generation) || !isToken(result.eventSequence)) throw new ExplorerError("protocolInvalid");
         if (BigInt(result.generation) < BigInt(project.info.generation)
@@ -343,5 +373,9 @@ export class MetadataTree {
   }
 
   /** Stop accepting events before the connection is replaced or the view is disposed. */
-  dispose(): void { this.disposed = true; this.subscription.dispose(); }
+  dispose(): void {
+    this.disposed = true;
+    for (const scope of this.scopes.values()) scope.abort();
+    this.scopes.clear(); this.subscription.dispose();
+  }
 }

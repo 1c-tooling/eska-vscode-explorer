@@ -1,5 +1,5 @@
 /** The public IDE API is versioned independently from the eska executable. */
-export const API_VERSION = { major: 1, minor: 34 } as const;
+export const API_VERSION = { major: 1, minor: 35 } as const;
 export const SOURCE_API_VERSION = { major: 1, minor: 17 } as const;
 export const SESSION_API_VERSION = { major: 1, minor: 16 } as const;
 export const RECOVERY_API_VERSION = { major: 1, minor: 14 } as const;
@@ -40,8 +40,11 @@ export interface ProjectInfo {
   eventSequence: string;
   requiresRefresh: boolean;
   requiresReopen: boolean;
+  displayName?: string;
+  activity?: { enabled: boolean; requiredBy: { application: string; project: string }[] };
 }
-export interface WorkspaceSession { sessionId: string; projects: ProjectInfo[] }
+export interface WorkspaceSession { sessionId: string; projects: ProjectInfo[]; activity?: { schemaVersion: 1; revision: string; hideDisabled: boolean } }
+export function projectEnabled(project: ProjectInfo): boolean { return project.activity?.enabled !== false; }
 
 /** Narrow untrusted JSON without treating arrays or null as records. */
 export function isRecord(value: unknown): value is Record<string, unknown> {
@@ -104,8 +107,16 @@ export function parseWorkspace(value: unknown): WorkspaceSession {
       || typeof project.requiresReopen !== "boolean") {
       throw new ExplorerError("protocolInvalid");
     }
+    if (project.activity !== undefined && (!isRecord(project.activity) || typeof project.activity.enabled !== "boolean"
+      || !Array.isArray(project.activity.requiredBy) || project.activity.requiredBy.length > 8192
+      || project.activity.requiredBy.some(consumer => !isRecord(consumer) || typeof consumer.application !== "string" || !consumer.application
+        || typeof consumer.project !== "string" || !consumer.project)
+      || typeof project.displayName !== "string" || !project.displayName)) throw new ExplorerError("protocolInvalid");
     ids.add(project.projectId);
   }
+  if (value.activity !== undefined && (!isRecord(value.activity) || value.activity.schemaVersion !== 1
+    || typeof value.activity.revision !== "string" || !/^[0-9a-f]{64}$/.test(value.activity.revision)
+    || typeof value.activity.hideDisabled !== "boolean" || value.projects.some(project => !isRecord(project) || project.activity === undefined))) throw new ExplorerError("protocolInvalid");
   return value as unknown as WorkspaceSession;
 }
 

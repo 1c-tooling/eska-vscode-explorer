@@ -1,3 +1,4 @@
+import { projectEnabled } from "./protocol.js";
 import { readdir, realpath, stat } from "node:fs/promises";
 import { basename, join, relative, resolve } from "node:path";
 import { relativeFile } from "./reveal.js";
@@ -75,6 +76,7 @@ export class WorkspaceFiles {
 
   /** Watch only directories requested by the user, avoiding recursive watchers over build and Git internals. */
   private listing(path: string, owner: WorkspaceEntry | ProjectTree | undefined): Promise<DirectorySnapshot> {
+    if (this.scopes.some(scope => scope.project && !projectEnabled(scope.project.info) && (relative(scope.path, path) === "" || relativeFile(scope.path, path) !== undefined))) return Promise.resolve({ entries: [], real: path });
     if (this.disposed) return Promise.reject(new Error("Disposed workspace files"));
     const cached = this.listings.get(path);
     if (cached) return cached;
@@ -150,6 +152,7 @@ export class WorkspaceFiles {
 
   /** Keep standalone files at view level and member files below their configuration; hide absent categories. */
   async groups(project?: ProjectTree): Promise<FileGroup[]> {
+    if (project && !projectEnabled(project.info)) return [];
     if (project?.info.scope.kind === "standalone") return [];
     const scope = this.scopes.find(scope => scope.project === project)
       ?? (!project ? this.scopes.find(scope => scope.project?.info.scope.kind === "standalone") : undefined);
@@ -199,6 +202,14 @@ export class WorkspaceFiles {
       }
     }
     return undefined;
+  }
+
+  activityChanged(): void {
+    for (const [path, watcher] of this.watchers) {
+      if (this.scopes.some(scope => scope.project && !projectEnabled(scope.project.info) && (relative(scope.path, path) === "" || relativeFile(scope.path, path) !== undefined))) {
+        watcher.dispose(); this.watchers.delete(path); this.listings.delete(path);
+      }
+    }
   }
 
   /** Refresh recovers stale or watcher-excluded folders without touching the metadata cache. */

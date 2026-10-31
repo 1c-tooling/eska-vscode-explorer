@@ -52,5 +52,9 @@
   "formatOnSave": "Форматировать BSL/SDBL и черновики запросов через ESKA при сохранении. Стиль задаётся в eska.toml.",
   "checkFormatterUpdates": "Проверить обновления eska-fmt",
   "recoverFormatterInstallation": "Восстановить установку eska-fmt",
-  "checkForFormatterUpdates": "Независимо проверять обновления eska-fmt."
+  "checkForFormatterUpdates": "Независимо проверять обновления eska-fmt.",
+  "disableProject": "Отключить проект",
+  "enableProject": "Включить проект",
+  "hideDisabledProjects": "Скрыть отключенные",
+  "showDisabledProjects": "Показать отключенные"
 }

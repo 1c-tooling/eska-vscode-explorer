@@ -1,3 +1,4 @@
+import { projectEnabled } from "./protocol.js";
 import { isAbsolute, relative, sep } from "node:path";
 import { ExplorerError, isRecord, isWirePath } from "./protocol.js";
 import { nativePath, directModuleRole, isForm, isFormPayload } from "./source.js";
@@ -13,6 +14,7 @@ export function relativeFile(root: string, file: string): string | undefined {
 /** ESKA resolves declared ownership and ancestry; the adapter selects only the corresponding UI row. */
 export async function revealFile(tree: MetadataTree, file: string): Promise<TreeEntry | FormSource | undefined> {
   for (const project of tree.projects) {
+    if (!projectEnabled(project.info)) continue;
     const path = relativeFile(nativePath(project.info.sourcePath), file);
     if (!path) continue;
     const state = tree.connection.state;

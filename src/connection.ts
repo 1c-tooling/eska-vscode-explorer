@@ -102,11 +102,11 @@ export class Connection {
 
   /** Analyzer RPCs use their own input schema and lease, without a metadata generation or injected sessionId. */
   async analyzerRequest(method: "analyzer/context" | "analyzer/configStatus" | "analyzer/configPrepare" | "analyzer/migrationPreview"
-    | "analyzer/migrationApply" | "analyzer/acquire" | "analyzer/release", params: Record<string, unknown>, signal?: AbortSignal): Promise<unknown> {
+    | "analyzer/migrationApply" | "analyzer/acquire" | "analyzer/release" | "analyzer/activityUpdate", params: Record<string, unknown>, signal?: AbortSignal): Promise<unknown> {
     const state = this.current;
     if (state.kind !== "ready" || !state.analyzerConfiguration) throw new ExplorerError("incompatible");
     const child = this.sessionChild(state.session.sessionId);
-    const timeout = ["analyzer/configPrepare", "analyzer/migrationPreview", "analyzer/migrationApply"].includes(method) ? 190_000 : 30_000;
+    const timeout = ["analyzer/configPrepare", "analyzer/migrationPreview", "analyzer/migrationApply", "analyzer/activityUpdate"].includes(method) ? 190_000 : 30_000;
     const result = await child.request(method, params, timeout, signal);
     if (child !== this.sessionChild(state.session.sessionId)) throw new ExplorerError("obsolete");
     return result;
@@ -147,7 +147,13 @@ export class Connection {
         const child = this.create({ executable: target.executable, cwd: target.path, log: this.log,
           args: backend === "legacy" ? ["ide", "--stdio"] : ["serve", "--stdio"],
           notification: (method, params) => {
-            if (revision === this.revision) for (const listener of this.listeners) listener(method, params);
+            if (revision !== this.revision) return;
+            if (method === "workspace/activityChanged" && this.current.kind === "ready") {
+              const session = parseWorkspace(params);
+              if (session.sessionId !== this.current.session.sessionId) return;
+              Object.assign(this.current.session, session);
+            }
+            for (const listener of this.listeners) listener(method, params);
           },
           failed: (error) => {
             if (negotiated && revision === this.revision) {

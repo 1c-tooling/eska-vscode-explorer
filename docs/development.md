@@ -549,3 +549,35 @@ Windows native в этой проверке не запускалась; пут�
 собственный workspace с семью подготовленными проектами; проверяет переходы
 1↔2, native labels, поиск, переход от файла, выбор и раскрытие после refresh
 и изменения manifest, включая workspace, в котором сгруппированы все корни.
+
+## Проверка активности workspace
+
+`activity.test.mjs` и `language-documents.test.mjs` проверяют отмену запросов
+отдельного проекта, запоздалые ответы и wire-документы при сохранении native-буфера.
+`language-conflict.test.mjs` проверяет отмену подготовки до команды активности,
+возврат диагностик при отказе сохранения, включение после отключённого reconnect
+и освобождение глобального наблюдателя последнего потребителя.
+
+Native-набор `project-activity-host.cjs` создаёт семь проектов в двух приложениях,
+свой каталог настроек и изолированный профиль. Проверяет общие definition,
+освобождение VFS/наблюдателей, dirty BSL и Undo/Redo, зависимости, фильтр и пороги
+T150, последнего потребителя, перезапуск backend и отдельный запуск IDE:
+
+```bash
+ESKA_TEST_ROOT="$(realpath ../eska-playground)" \
+ESKA_TEST_BINARY="$(realpath ../eska/target/debug/eska-project)" \
+ESKA_TEST_ANALYZER_BINARY=/path/to/bsl-analyzer-app \
+ESKA_TEST_LANGUAGE=1 ESKA_HOST_ACTIVITY_RESTART=1 ESKA_HOST_ACTIVITY_CANCEL=1 \
+ESKA_HOST_LOCALE=en VSCODE_EXECUTABLE=code \
+node test/run-host.mjs test/project-activity-host.cjs
+```
+
+На Unix приватный `activity-analyzer.py` только задерживает собственный
+`check-config` для проверки отмены, включает штатный `BSL_LOG_FILE` и затем
+заменяет себя настоящим бинарником с тем же PID. Нужен Python 3 только на
+тестовом стенде. Исходники анализатора не меняются. На Windows эта instrumentation
+не применяется. `ESKA_HOST_ACTIVITY_RESTART` выполняет два запуска test host
+с теми же настройками; test host не восстанавливает native hot-exit backups,
+поэтому dirty-буфер проверяется при отключении, включении и перезапуске backend.
+`ESKA_HOST_LOCALE=ru` и обычные параметры language pack runner повторяют приёмку
+на русском. Для нативного ввода на проверенном Linux использован XWayland.
