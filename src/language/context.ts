@@ -2,7 +2,8 @@ import { isAbsolute, join, relative, sep } from "node:path";
 import { ExplorerError, isRecord, isWirePath } from "../protocol.js";
 import { nativePath } from "../source.js";
 
-export interface AnalysisSource { root: string; source: string; descriptor: string; member: string | null; projectType: "configuration" | "extension" | "processing" | "report" }
+export interface LibraryReference { name: string; configuration: string }
+export interface AnalysisSource { root: string; source: string; descriptor: string; member: string | null; projectType: "configuration" | "extension" | "processing" | "report"; library?: LibraryReference }
 export interface AnalysisContext { root: string; name: string | null; limited: boolean; sources: AnalysisSource[] }
 export type ConfigStatus = "current" | "missing" | "stale" | "migration_required" | "managed_conflict" | "context_conflict";
 export interface AnalyzerConfiguration {
@@ -24,6 +25,14 @@ function name(value: unknown): string | null {
   return value;
 }
 
+/** Catalog coordinates come from ESKA; the editor never resolves local names itself. */
+function libraryReference(value: unknown): LibraryReference {
+  if (!isRecord(value)) throw new ExplorerError("protocolInvalid");
+  const selected = name(value.name);
+  if (selected === null) throw new ExplorerError("protocolInvalid");
+  return { name: selected, configuration: absolute(value.configuration) };
+}
+
 /** Parse only the versioned context DTO; topology, XML and manifest validation remain in eska-project. */
 export function analysisContext(value: unknown): AnalysisContext {
   if (!isRecord(value) || value.schema_version !== 1 || value.kind !== "project-context" || value.status !== "ready"
@@ -37,8 +46,12 @@ export function analysisContext(value: unknown): AnalysisContext {
     if (!isWirePath(item.descriptor)) throw new ExplorerError("protocolInvalid");
     const descriptor = nativePath(item.descriptor), local = relative(source, join(source, descriptor));
     if (!descriptor || isAbsolute(descriptor) || !local || local === ".." || local.startsWith(`..${sep}`)) throw new ExplorerError("protocolInvalid");
-    return { root: absolute(item.root), source, descriptor: join(source, descriptor), member: name(item.member), projectType: item.project_type as AnalysisSource["projectType"] };
+    const library = item.library === undefined ? undefined : libraryReference(item.library);
+    if (library && (item.role !== "configuration" || item.project_type !== "configuration" || item.member !== null)) throw new ExplorerError("protocolInvalid");
+    return { root: absolute(item.root), source, descriptor: join(source, descriptor), member: name(item.member), projectType: item.project_type as AnalysisSource["projectType"],
+      ...(library ? { library } : {}) };
   });
+  if (sources.filter(source => source.library !== undefined).length > 1) throw new ExplorerError("protocolInvalid");
   return { root: absolute(context.root), name: name(context.name), limited: context.limited_context as boolean, sources };
 }
 
@@ -66,4 +79,12 @@ export function analyzerConfiguration(value: unknown): AnalyzerConfiguration {
 export function analyzerFailure(error: unknown): string | undefined {
   return error instanceof ExplorerError && error.domain === "analyzer_configuration_failed" && typeof error.details?.code === "string"
     ? error.details.code : undefined;
+}
+
+/** A failed selected entry still supplies a checked location to observe for recovery. */
+export function libraryFailure(error: unknown): LibraryReference | undefined {
+  const data = error instanceof ExplorerError && analyzerFailure(error) === "context" ? error.details?.data : undefined;
+  if (!isRecord(data) || !["library_configuration", "library_source"].includes(data.reason as string)) return undefined;
+  try { return libraryReference({ name: data.library, configuration: data.configuration }); }
+  catch { return undefined; }
 }

@@ -6,7 +6,8 @@ import { once } from "node:events";
 import { join, resolve } from "node:path";
 import { LanguageProcess } from "../out/language/process.js";
 import { cancellableChoice } from "../out/tooling/choice.js";
-import { analysisContext, analyzerConfiguration } from "../out/language/context.js";
+import { analysisContext, analyzerConfiguration, libraryFailure } from "../out/language/context.js";
+import { ExplorerError } from "../out/protocol.js";
 
 /** Process fixtures stay in unique playground directories and never use a global temporary project. */
 async function fixture(t) {
@@ -73,4 +74,26 @@ test("spawn failure and an already cancelled startup cannot leave an owned child
   assert.throws(() => new LanguageProcess(missing, root, () => {}, () => {}, AbortSignal.abort()), { code: "cancelled" });
   const owner = new LanguageProcess(missing, root, () => {}, () => {});
   await owner.stop(); assert.equal(owner.child.pid, undefined);
+});
+
+
+test("only absolute catalog coordinates from named configuration references can become watchers", () => {
+  const root = resolve("../eska-playground/library-dto"), wire = value => ({ value, encoding: "utf-8" });
+  const reference = { name: "ssl_3_1", configuration: wire(join(root, "Настройки с пробелами/config.toml")) };
+  const source = { root: wire(root), source: wire(join(root, "src")), descriptor: wire("Configuration.xml"), member: null,
+    role: "configuration", project_type: "configuration", library: reference };
+  const dto = sources => ({ schema_version: 1, kind: "project-context", status: "ready", context: { root: wire(root), name: null, limited_context: false, sources } });
+  assert.deepEqual(analysisContext(dto([source])).sources[0].library, { name: reference.name, configuration: reference.configuration.value });
+  for (const library of [null, {}, { ...reference, name: "" }, { ...reference, name: "x\0" }, { ...reference, configuration: wire("relative") }]) {
+    assert.throws(() => analysisContext(dto([{ ...source, library }])), { code: "protocolInvalid" });
+  }
+  for (const invalid of [{ member: "owned" }, { role: "external_object" }, { project_type: "extension" }]) {
+    assert.throws(() => analysisContext(dto([{ ...source, ...invalid }])), { code: "protocolInvalid" });
+  }
+  assert.throws(() => analysisContext(dto([source, source])), { code: "protocolInvalid" });
+  const failure = data => new ExplorerError("requestFailed", "analyzer_configuration_failed", { code: "context", data });
+  assert.deepEqual(libraryFailure(failure({ reason: "library_source", library: reference.name, configuration: reference.configuration })),
+    { name: reference.name, configuration: reference.configuration.value });
+  assert.equal(libraryFailure(failure({ reason: "source", library: reference.name, configuration: reference.configuration })), undefined);
+  assert.equal(libraryFailure(failure({ reason: "library_configuration", library: reference.name, configuration: wire("relative") })), undefined);
 });

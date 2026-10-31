@@ -25,7 +25,7 @@ try {
   await writeFile(join(root, "profile", "User", "settings.json"), JSON.stringify({
     "workbench.startupEditor": "none", "onboarding.enabled": false,
   }));
-  const fixture = await createTreeProject(join(root, "project"), basename(suite) === "language-reference-host.cjs" ? "processing" : process.env.ESKA_HOST_PROJECT_TYPE ?? "configuration");
+  const fixture = await createTreeProject(join(root, "project"), ["language-reference-host.cjs", "language-library-host.cjs"].includes(basename(suite)) ? "processing" : process.env.ESKA_HOST_PROJECT_TYPE ?? "configuration");
   if (["query-layout-host.cjs", "query-compact-performance-host.cjs"].includes(basename(suite))) {
     fixture.query = await (await import("./query-fixture.mjs")).createQuerySource(fixture);
     const fields = Array.from({ length: 48 }, (_, index) => `${index} AS КолонкаРезультата${index}WithLongEnglishName`).join(',\r\n|');
@@ -43,6 +43,11 @@ try {
   }
   if (basename(suite) === "language-reference-host.cjs") {
     fixture.reference = await (await import("./language-fixture.mjs")).createReferenceSource(fixture, root);
+  }
+  if (basename(suite) === "language-library-host.cjs") {
+    fixture.library = await (await import("./language-fixture.mjs")).createLibrarySource(fixture, root);
+    if (process.env.ESKA_HOST_LIBRARY_MISSING === "1") await rm(fixture.library.config);
+    if (process.env.ESKA_HOST_LIBRARY_MISSING === "directory") await rm(fixture.library.configDir, { recursive: true });
   }
   if (["query-advanced-host.cjs", "query-package-host.cjs", "query-having-host.cjs", "query-total-sections-host.cjs", "query-dcs-host.cjs"].includes(basename(suite))) {
     await (await import("./query-advanced-fixture.mjs")).addQueryRegister(fixture);
@@ -229,6 +234,7 @@ exports.activate = async function () {
       ...(process.env.ESKA_BSL_DISABLED || process.env.ESKA_HOST_CONFLICT_RELOAD && run === 1 ? ["--disable-extension=elishevkirill.bsl-analyzer-lsp"] : []), "--disable-gpu", "--new-window", workspace],
     { env: { ...process.env, PATH: bin + (process.platform === "win32" ? ";" : ":") + (process.env.PATH ?? ""), ESKA_HOST_RUN: String(run),
       ...(conflictFixture ? { ESKA_HOST_CONFLICT_VSIX: conflictFixture.vsix } : {}),
+      ...(fixture.library ? { ESKA_CONFIG_DIR: fixture.library.configDir } : {}),
       ESKA_HOST_FIXTURE: JSON.stringify(fixture), ESKA_HOST_SECOND_FIXTURE: JSON.stringify(secondFixture) }, stdio: ["ignore", "pipe", "pipe"] });
     let output = "";
     const fullLog = process.env.ESKA_HOST_FULL_LOG ? createWriteStream(process.env.ESKA_HOST_FULL_LOG) : undefined;

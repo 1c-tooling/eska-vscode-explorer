@@ -5,6 +5,7 @@ import { readFileSync } from "node:fs";
 import { resolve, join } from "node:path";
 import { runInNewContext } from "node:vm";
 import { LSPErrorCodes, ResponseError } from "vscode-languageserver-protocol/node";
+import { ExplorerError } from "../out/protocol.js";
 
 const ID = "elishevkirill.bsl-analyzer-lsp";
 
@@ -12,7 +13,7 @@ const ID = "elishevkirill.bsl-analyzer-lsp";
 function barrier() { let release; const promise = new Promise(done => { release = done; }); return { promise, release }; }
 
 /** Only protocol/UI/process boundaries are mocked; production LanguageService owns all conflict and lease decisions. */
-function fixture({ available = false, enabled = true, hold, outside = false, status, changedLease = false } = {}) {
+function fixture({ available = false, enabled = true, hold, outside = false, status, changedLease = false, library = false, invalidLibrary = false } = {}) {
   const root = resolve(process.env.ESKA_TEST_ROOT ?? "../eska-playground", "conflict-dto"), wire = value => ({ value, encoding: "utf-8" });
   const calls = [], warnings = [], commands = [], owners = [], clients = [], watchers = [], listeners = new Set(), documents = new Set(), notifications = new Set();
   let conflict = available, feature = enabled, reached, held = false, leased = false, changed;
@@ -24,19 +25,29 @@ function fixture({ available = false, enabled = true, hold, outside = false, sta
   const dto = { schema_version: 1, kind: "analyzer-configuration", status: status ?? (hold === "analyzer/configPrepare" ? "missing" : "current"), path: wire(join(root, "bsl-analyzer.toml")),
     preview_token: "a".repeat(64), ownership: { schema_version: 1, generator_version: 1, analyzer_version: "0.4.0", context: outside ? "two" : null,
       input_fingerprint: "b".repeat(64), body_sha256: "c".repeat(64) } };
+  const configPath = join(root, "settings", "config.toml");
+  const contextDto = { schema_version: 1, kind: "project-context", status: "ready", context: {
+    root: wire(root), name: outside ? "two" : null, limited_context: false, sources: [{ root: wire(sourceRoot), source: wire(join(sourceRoot, "src")), descriptor: wire("Configuration.xml"), member: outside ? "other" : null, role: "configuration", project_type: "configuration" }] } };
+  if (library) {
+    Object.assign(contextDto.context.sources[0], { role: "external_object", project_type: "report", descriptor: wire("ExternalReport.xml") });
+    contextDto.context.sources.unshift({ root: wire(join(root, "БСП")), source: wire(join(root, "БСП/src")), descriptor: wire("Configuration.xml"), member: null,
+      role: "configuration", project_type: "configuration", library: { name: "ssl_3_1", configuration: wire(configPath) } });
+  }
+  let contextFailure = invalidLibrary ? { reason: "library_configuration", library: "ssl_3_1", configuration: wire(configPath), cause: "unknown_library" } : undefined;
   const connection = { state: ready, onNotification(listener) { notifications.add(listener); return { dispose() { notifications.delete(listener); } }; }, async analyzerRequest(method, _params, signal) {
     if (method === "analyzer/acquire") { assert.equal(signal, undefined); leased = true; }
     if (method === "analyzer/release") leased = false;
     await checkpoint(method);
+    if (contextFailure && ["analyzer/context", "analyzer/configStatus"].includes(method)) throw new ExplorerError("requestFailed", "analyzer_configuration_failed", { code: "context", data: contextFailure });
     if (method === "analyzer/configPrepare") dto.status = "current";
-    if (method === "analyzer/context") return { schema_version: 1, kind: "project-context", status: "ready", context: {
-      root: wire(root), name: outside ? "two" : null, limited_context: false, sources: [{ root: wire(sourceRoot), source: wire(join(sourceRoot, "src")), descriptor: wire("Configuration.xml"), member: outside ? "other" : null, role: "configuration", project_type: "configuration" }] } };
+    if (method === "analyzer/context") return contextDto;
     return method === "analyzer/acquire" ? { ...dto, leaseId: "d".repeat(64), ...(changedLease ? { preview_token: "e".repeat(64) } : {}) } : dto;
   } };
   const tooling = { states: { analyzer: { phase: "missing" } }, analyzerState(phase, detail) { this.states.analyzer.phase = phase; this.states.analyzer.detail = detail; },
     async ensureAnalyzer(_signal, offer) { await checkpoint(offer ? "ensureAnalyzer" : "inspect-only"); return { path: join(root, "analyzer"), version: "0.4.0" }; } };
   const vscode = {
-    env: { language: "en-US" }, CancellationError: class extends Error {}, RelativePattern: class {},
+    env: { language: "en-US" }, CancellationError: class extends Error {},
+    RelativePattern: class { constructor(baseUri, pattern) { this.baseUri = baseUri; this.pattern = pattern; } },
     CancellationTokenSource: class {
       controller = new AbortController();
       /** Model the public editor cancellation boundary, including listener disposal. */
@@ -53,7 +64,7 @@ function fixture({ available = false, enabled = true, hold, outside = false, sta
     workspace: { isTrusted: true, textDocuments: [{ languageId: "bsl", uri: { toString: () => "file:///same.bsl" }, version: 1, isClosed: false }], getConfiguration() { return { get() { return feature; } }; },
       onDidOpenTextDocument(callback) { documents.add(callback); return { dispose() { documents.delete(callback); } }; },
       onDidChangeTextDocument(callback) { changed = callback; return { dispose() { changed = undefined; } }; },
-      createFileSystemWatcher() { const callbacks = new Set(), watcher = {
+      createFileSystemWatcher(pattern) { const callbacks = new Set(), watcher = { pattern,
         onDidCreate(callback) { callbacks.add(callback); }, onDidChange(callback) { callbacks.add(callback); }, onDidDelete(callback) { callbacks.add(callback); },
         /** Native watcher callbacks always receive a URI and can also see virtual schemes. */
         fire(uri = {}) { for (const callback of callbacks) callback({ scheme: "file", ...uri }); },
@@ -80,8 +91,16 @@ function fixture({ available = false, enabled = true, hold, outside = false, sta
   const watching = { exports: {} }, watchRequire = createRequire(new URL("../out/watch.js", import.meta.url));
   runInNewContext(`(function(require,module,exports){${readFileSync(new URL("../out/watch.js", import.meta.url), "utf8")}\n})`, { process, setTimeout, clearTimeout })(
     name => name === "vscode" ? vscode : watchRequire(name), watching, watching.exports);
+  const catalogWatchers = new Map();
+  const catalogFiles = {
+    watchFile(path, _options, listener) {
+      const watcher = { pattern: { pattern: "config.toml" }, fire() { if (!this.disposed) listener(); }, dispose() { this.disposed = true; } };
+      watchers.push(watcher); catalogWatchers.set(listener, watcher);
+    },
+    unwatchFile(_path, listener) { catalogWatchers.get(listener)?.dispose(); catalogWatchers.delete(listener); },
+  };
   runInNewContext(`(function(require,module,exports){${readFileSync(new URL("../out/language/service.js", import.meta.url), "utf8")}\n})`, { AbortController, AbortSignal, process, setTimeout, clearTimeout })(
-    name => name === "vscode" ? vscode : name === "vscode-languageclient/node" ? { LanguageClient: FakeClient, CloseAction: {}, ErrorAction: {}, LSPErrorCodes, ResponseError }
+    name => name === "vscode" ? vscode : name === "node:fs" ? catalogFiles : name === "vscode-languageclient/node" ? { LanguageClient: FakeClient, CloseAction: {}, ErrorAction: {}, LSPErrorCodes, ResponseError }
       : name === "./process.js" ? { LanguageProcess: FakeOwner }
         : name === "./edits.js" ? { LanguageEdits: class { middleware() { return {}; } async shutdown() {} } }
           : name === "../watch.js" ? watching.exports : require(name), adapter, adapter.exports);
@@ -89,6 +108,10 @@ function fixture({ available = false, enabled = true, hold, outside = false, sta
   const policyRoots = [];
   const service = new adapter.exports.LanguageService(context, connection, tooling, {}, () => {}, undefined, roots => policyRoots.push([...roots]));
   return { root, sourceRoot, service, tooling, calls, warnings, commands, owners, clients, watchers, policyRoots, dto, pause, waiting, get reached() { return reached; }, get leased() { return leased; },
+    contextDto, configPath,
+    setContextFailure(value) { contextFailure = value; },
+    libraryWatcher() { return watchers.find(watcher => !watcher.disposed && watcher.pattern.pattern === "config.toml"); },
+    disconnect() { connection.state = { kind: "idle" }; service.connectionChanged(connection.state); },
     /** Give independent callers genuine cancellable subscriptions in the fake editor. */
     cancellation() { return new vscode.CancellationTokenSource(); },
     /** Exercise the actual metadata subscription without a second project parser. */
@@ -532,4 +555,89 @@ test("restored native symbols cannot share the in-flight result from a previous 
   const fresh = await middleware.sendRequest("textDocument/documentSymbol", params, undefined, async () => { calls++; return ["current symbols"]; });
   assert.deepEqual(Array.from(fresh), ["current symbols"]); assert.equal(calls, 2);
   held.release(["old symbols"]); await assert.rejects(old, error => error.code === LSPErrorCodes.RequestCancelled);
+});
+
+
+test("unrelated catalog edits retain the same language process and restore diagnostics", async t => {
+  const f = fixture({ library: true }); t.after(() => f.service.shutdown()); f.connect(); await settled(f.service);
+  const client = f.clients[0], uri = { toString: () => "file:///same.bsl" };
+  client.clientOptions.middleware.handleDiagnostics(uri, ["existing"], (uri, values) => client.diagnostics.set(uri, values));
+  const watcher = f.libraryWatcher(); assert.ok(watcher);
+  for (let n = 0; n < 30; n++) watcher.fire();
+  assert.equal(client.diagnostics.get(uri), undefined);
+  await configurationSettled(f.service);
+  assert.equal(f.owners.length, 1); assert.equal(f.leased, true);
+  assert.deepEqual(client.diagnostics.get(uri), ["existing"]);
+  assert.equal(f.calls.filter(value => value === "analyzer/configStatus").length, 2);
+  assert.equal(f.calls.filter(value => value === "analyzer/configPrepare").length, 0);
+});
+
+test("a changed selected path releases the old lease and selects the new library sources", async t => {
+  const f = fixture({ library: true }); t.after(() => f.service.shutdown()); f.connect(); await settled(f.service);
+  const next = join(f.root, "Другая БСП"), source = f.contextDto.context.sources[0];
+  source.root.value = next; source.source.value = join(next, "src");
+  f.dto.status = "stale"; f.dto.ownership.input_fingerprint = "e".repeat(64); f.dto.ownership.body_sha256 = "f".repeat(64);
+  const watcher = f.libraryWatcher(); watcher.fire(); await configurationSettled(f.service);
+  assert.equal(f.owners.length, 2); assert.equal(f.owners[0].stopped, true); assert.equal(watcher.disposed, true);
+  assert.equal(f.leased, true); assert.equal(f.service.session.context.sources[0].source, join(next, "src"));
+  assert.equal(f.calls.filter(value => value === "analyzer/release").length, 1);
+  assert.ok(f.calls.indexOf("analyzer/release") < f.calls.indexOf("analyzer/configPrepare"));
+});
+
+for (const initial of [true, false]) {
+  test(`a ${initial ? "startup" : "running"} catalog error retains its observer and recovers after correction`, async t => {
+    const f = fixture({ library: true, invalidLibrary: initial }); t.after(() => f.service.shutdown()); f.connect(); await settled(f.service);
+    if (!initial) {
+      f.setContextFailure({ reason: "library_source", library: "ssl_3_1", configuration: { value: f.configPath, encoding: "utf-8" }, cause: { reason: "source" } });
+      f.libraryWatcher().fire(); await configurationSettled(f.service);
+    }
+    assert.equal(f.tooling.states.analyzer.phase, "error"); assert.equal(f.service.session, undefined); assert.equal(f.leased, false);
+    assert.match(f.tooling.states.analyzer.detail, /ssl_3_1/); assert.ok(f.tooling.states.analyzer.detail.includes(f.configPath));
+    const watcher = f.libraryWatcher(); assert.ok(watcher);
+    f.setContextFailure(undefined); watcher.fire(); await configurationSettled(f.service);
+    assert.equal(f.tooling.states.analyzer.phase, "ready"); assert.equal(f.leased, true);
+    assert.equal(f.owners.length, initial ? 1 : 2); assert.equal(watcher.disposed, true);
+  });
+}
+
+test("a catalog change during startup cannot launch a process with the earlier source selection", async t => {
+  const f = fixture({ library: true, hold: "analyzer/configStatus" }); t.after(() => f.service.shutdown()); f.connect(); await f.waiting.promise;
+  const next = join(f.root, "next/src"); f.contextDto.context.sources[0].source.value = next;
+  f.dto.ownership.input_fingerprint = "e".repeat(64); f.dto.ownership.body_sha256 = "f".repeat(64);
+  f.libraryWatcher().fire(); f.pause.release(); await settled(f.service); await configurationSettled(f.service);
+  assert.equal(f.owners.length, 1); assert.equal(f.service.session.context.sources[0].source, next);
+  assert.equal(f.calls.filter(value => value === "analyzer/acquire").length, 1);
+});
+
+for (const action of ["stop", "disconnect", "disable", "dispose"]) {
+  test(`${action} retires catalog recovery without reviving a discarded language session`, async t => {
+    const f = fixture({ library: true, invalidLibrary: true }); t.after(() => f.service.shutdown()); f.connect(); await settled(f.service);
+    const watcher = f.libraryWatcher(), calls = f.calls.length;
+    if (action === "stop") await f.service.stop();
+    if (action === "disconnect") { f.disconnect(); await settled(f.service); }
+    if (action === "disable") { f.setEnabled(false); await f.service.restart(false); }
+    if (action === "dispose") await f.service.shutdown();
+    const after = f.calls.length; assert.ok(after >= calls); assert.equal(watcher.disposed, true);
+    watcher.fire(); await configurationSettled(f.service);
+    assert.equal(f.calls.length, after); assert.equal(f.owners.length, 0); assert.equal(f.libraryWatcher(), undefined);
+  });
+}
+
+
+test("a catalog write before the first observer event cannot bind new ownership to old source selectors", async t => {
+  const f = fixture({ library: true, hold: "ensureAnalyzer" }); t.after(() => f.service.shutdown()); f.connect(); await f.waiting.promise;
+  const next = join(f.root, "updated/src"); f.contextDto.context.sources[0].source.value = next;
+  f.dto.ownership.input_fingerprint = "e".repeat(64); f.dto.ownership.body_sha256 = "f".repeat(64);
+  f.pause.release(); await settled(f.service); await configurationSettled(f.service);
+  assert.equal(f.owners.length, 1); assert.equal(f.service.session.context.sources[0].source, next);
+  assert.equal(f.calls.filter(value => value === "analyzer/release").length, 1);
+});
+
+test("an unchanged startup error performs one recovery read without restarting or repeating its notification", async t => {
+  const f = fixture({ library: true, invalidLibrary: true }); t.after(() => f.service.shutdown()); f.connect(); await settled(f.service);
+  await configurationSettled(f.service);
+  assert.equal(f.calls.filter(value => value === "analyzer/context").length, 1);
+  assert.equal(f.calls.filter(value => value === "analyzer/configStatus").length, 1);
+  assert.equal(f.calls.filter(value => value.startsWith("error:")).length, 1);
+  assert.equal(f.owners.length, 0); assert.ok(f.libraryWatcher());
 });

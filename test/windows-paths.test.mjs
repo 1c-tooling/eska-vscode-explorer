@@ -33,9 +33,10 @@ test("verbatim Windows roots, descriptors and analyzer configs become ordinary f
     assert.equal(nativePath(wire(raw)), plain);
     const context = analysisContext({ schema_version: 1, kind: "project-context", status: "ready", context: {
       root: wire(raw), name: null, limited_context: false, sources: [{ root: wire(raw), source: wire(`${raw}\\src`),
-        descriptor: wire("Configuration.xml"), member: null, role: "configuration", project_type: "configuration" }],
+        descriptor: wire("Configuration.xml"), member: null, role: "configuration", project_type: "configuration", library: { name: "ssl_3_1", configuration: wire(win32.join(raw, "config.toml")) } }],
     } });
     assert.equal(context.root, plain);
+    assert.equal(context.sources[0].library.configuration, win32.join(plain, "config.toml"));
     assert.equal(context.sources[0].descriptor, win32.join(plain, "src", "Configuration.xml"));
     const uri = pathToFileURL(context.root, { windows: true });
     assert.notEqual(uri.hostname, "?");

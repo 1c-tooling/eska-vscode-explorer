@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { watchFile, unwatchFile } from "node:fs";
 import { basename, isAbsolute, join, relative, sep } from "node:path";
 import { CloseAction, ErrorAction, LanguageClient, LSPErrorCodes, ResponseError, type Middleware } from "vscode-languageclient/node";
 import type { Connection, ConnectionState } from "../connection.js";
@@ -7,7 +8,7 @@ import { message, type MessageKey } from "../messages.js";
 import type { DiagnosticLog } from "../diagnostics.js";
 import { ToolFailure } from "../tooling/contracts.js";
 import type { ToolingSetup } from "../tooling/setup.js";
-import { analysisContext, analyzerConfiguration, analyzerFailure, type AnalysisContext, type AnalyzerConfiguration } from "./context.js";
+import { analysisContext, analyzerConfiguration, analyzerFailure, libraryFailure, type AnalysisContext, type AnalyzerConfiguration, type LibraryReference } from "./context.js";
 import { LanguageProcess } from "./process.js";
 import { LanguageProgress } from "./progress.js";
 import { InFlightReads } from "./inflight.js";
@@ -22,6 +23,9 @@ import { languageUri } from "./uri.js";
 import type { QueryLanguage } from "../query/language.js";
 
 type Ready = Extract<ConnectionState, { kind: "ready" }>;
+interface LibraryObservation {
+  state: Ready; application: string | undefined; watcher: vscode.Disposable; version: number;
+}
 interface Session {
   context: AnalysisContext; configuration: AnalyzerConfiguration; lease: string; state: Ready;
   client?: LanguageClient; owner?: LanguageProcess; edits?: LanguageEdits; progress?: LanguageProgress; documents?: LanguageDocuments; configurationWatcher?: vscode.FileSystemWatcher;
@@ -42,6 +46,7 @@ class EskaLanguageClient extends LanguageClient {
 export class LanguageService implements vscode.Disposable {
   private target: Ready | undefined;
   private session: Session | undefined;
+  private libraryObservation: LibraryObservation | undefined;
   private queue = Promise.resolve();
   private revision = 0;
   private scope: AbortController | undefined;
@@ -111,6 +116,30 @@ export class LanguageService implements vscode.Disposable {
     if (!/\.bsl$/i.test(path)) this.scheduleConfigurationCheck();
   }
 
+  /** Retain catalog observation through a rejected entry so correcting it can recover the language session. */
+  private observeLibrary(reference: LibraryReference | undefined, state: Ready, application: string | undefined): LibraryObservation | undefined {
+    this.clearLibraryObservation();
+    if (!reference) return undefined;
+    const changed = (): void => {
+      if (this.libraryObservation !== observation || this.target !== state || this.disposed
+        || !vscode.workspace.isTrusted || !this.wanted || !this.enabled() || this.refreshConflict()) return;
+      ++observation.version;
+      this.invalidateModel(); this.holdConfiguration(); this.scheduleConfigurationCheck();
+    };
+    const watcher = { dispose: () => unwatchFile(reference.configuration, changed) };
+    const observation = { state, application, watcher, version: 0 };
+    this.libraryObservation = observation;
+    // One small file is polled independently of workspace exclusions and absent parent directories.
+    watchFile(reference.configuration, { persistent: false, interval: 1000 }, changed);
+    return observation;
+  }
+
+  /** Disconnect, manual stop and context selection release even a recovery-only watcher. */
+  private clearLibraryObservation(): void {
+    this.libraryObservation?.watcher.dispose();
+    this.libraryObservation = undefined;
+  }
+
   /** Discovery will replace the metadata session after its debounce; invalidate language results immediately. */
   manifestChanged(): void { this.invalidateModel(); this.holdConfiguration(); }
 
@@ -155,7 +184,7 @@ export class LanguageService implements vscode.Disposable {
 
   /** Coalesce checks of manifests and root descriptors without scanning modules or starting another index. */
   private scheduleConfigurationCheck(): void {
-    if (this.disposed || !this.session) return;
+    if (this.disposed || (!this.session && !this.libraryObservation)) return;
     this.checkRequested = true;
     if (this.configurationTimer || this.configurationCheck) return;
     this.configurationTimer = setTimeout(() => {
@@ -175,7 +204,21 @@ export class LanguageService implements vscode.Disposable {
   private async inspectConfiguration(): Promise<void> {
     await this.queue;
     const session = this.session, revision = this.revision, signal = this.scope?.signal, model = this.modelRevision;
-    if (!session || !signal || !this.current(revision, signal)) return;
+    if (!session) {
+      const observation = this.libraryObservation;
+      if (!observation || this.target !== observation.state || this.disposed || !vscode.workspace.isTrusted
+        || !this.wanted || !this.enabled() || this.refreshConflict()) return;
+      try {
+        analyzerConfiguration(await this.connection.analyzerRequest("analyzer/configStatus", {
+          start: { value: observation.state.target.path, encoding: "utf-8" },
+          ...(observation.application ? { application: observation.application } : {}),
+        }, signal));
+        if (this.libraryObservation === observation && this.target === observation.state && !this.disposed
+          && vscode.workspace.isTrusted && this.wanted && this.enabled() && !this.refreshConflict()) await this.restart(false, observation.application);
+      } catch { /* An unchanged rejected entry stays observed without a retry loop or repeated notifications. */ }
+      return;
+    }
+    if (!signal || !this.current(revision, signal)) return;
     try {
       const status = analyzerConfiguration(await this.connection.analyzerRequest("analyzer/configStatus", {
         start: { value: session.context.root, encoding: "utf-8" },
@@ -196,7 +239,7 @@ export class LanguageService implements vscode.Disposable {
       }
     } catch (error) {
       if (this.session !== session || !this.current(revision, signal)) return;
-      const stopping = this.stop(), stoppingRevision = this.revision;
+      const stopping = this.stop(undefined, libraryFailure(error) !== undefined), stoppingRevision = this.revision;
       await stopping;
       if (!this.disposed && this.revision === stoppingRevision && this.target === session.state) this.failure(error);
     }
@@ -204,7 +247,9 @@ export class LanguageService implements vscode.Disposable {
 
   /** A metadata connection supplies context authority and owns the lease; its loss invalidates language results. */
   connectionChanged(state: ConnectionState): void {
-    this.target = state.kind === "ready" ? state : undefined;
+    const target = state.kind === "ready" ? state : undefined;
+    if (target !== this.target) this.clearLibraryObservation();
+    this.target = target;
     if (this.target) void this.restart(false);
     else if (this.session || this.scope) void this.stop(this.text("languageNoContext"));
   }
@@ -212,6 +257,7 @@ export class LanguageService implements vscode.Disposable {
   /** A manual restart can start analysis before a BSL document opens; ordinary tree activation stays lazy. */
   restart(manual = true, application?: string, switchContext = false): Promise<void> {
     if (this.disposed) return this.queue;
+    this.clearLibraryObservation();
     if (manual) this.wanted = true;
     this.refreshConflict(false);
     const revision = ++this.revision;
@@ -248,7 +294,8 @@ export class LanguageService implements vscode.Disposable {
   }
 
   /** Stop the child before releasing its config lease; replacing the metadata connection must await this method. */
-  stop(detail?: string): Promise<void> {
+  stop(detail?: string, retainLibraryObservation = false): Promise<void> {
+    if (!retainLibraryObservation) this.clearLibraryObservation();
     ++this.revision; this.scope?.abort(); this.scope = undefined;
     this.invalidateModel(); this.releaseConfiguration(); this.delayedDiagnostics.clear();
     clearTimeout(this.configurationTimer); this.configurationTimer = undefined; this.checkRequested = false;
@@ -275,8 +322,20 @@ export class LanguageService implements vscode.Disposable {
     let application = selected || undefined;
     const parameters = (): Record<string, unknown> => ({ start: { value: state.target.path, encoding: "utf-8" }, ...(application ? { application } : {}) });
     this.tooling.analyzerState("starting", this.text("languagePreparing"));
+    const resolveContext = async (): Promise<unknown> => {
+      try { return await this.connection.analyzerRequest("analyzer/context", parameters(), signal); }
+      catch (error) {
+        const reference = libraryFailure(error);
+        if (reference && this.current(revision, signal)) {
+          this.observeLibrary(reference, state, application);
+          // Close the read/observe startup gap even if the file appeared before the first stat sample.
+          this.scheduleConfigurationCheck();
+        }
+        throw error;
+      }
+    };
     let resolved: unknown;
-    try { resolved = await this.connection.analyzerRequest("analyzer/context", parameters(), signal); }
+    try { resolved = await resolveContext(); }
     catch (error) {
       const data = error instanceof ExplorerError && isRecord(error.details?.data) ? error.details.data : undefined;
       if (analyzerFailure(error) !== "context" || !Array.isArray(data?.available)
@@ -284,17 +343,18 @@ export class LanguageService implements vscode.Disposable {
       const choice = await cancellableChoice(vscode.window.showQuickPick(data.available as string[], { placeHolder: this.text("languageChoose"), ignoreFocusOut: true }), signal);
       if (!choice || !this.current(revision, signal)) { if (this.current(revision, signal)) this.tooling.analyzerState("suspended", this.text("languageStopped")); return; }
       application = choice;
-      resolved = await this.connection.analyzerRequest("analyzer/context", parameters(), signal);
+      resolved = await resolveContext();
     }
     if (!this.current(revision, signal)) return;
     const context = analysisContext(resolved);
+    const observation = this.observeLibrary(context.sources.find(source => source.library)?.library, state, application);
     // These read-only checks share no mutable state. Await both even on failure so
     // an interrupted startup cannot abandon its binary probe or pending RPC.
     const [binary, configuration] = await Promise.allSettled([
       this.tooling.ensureAnalyzer(signal, true),
       this.connection.analyzerRequest("analyzer/configStatus", parameters(), signal),
     ]);
-    if (!this.current(revision, signal)) return;
+    if (!this.current(revision, signal) || (observation && observation.version !== 0)) return;
     if (binary.status === "rejected") throw binary.reason;
     const info = binary.value;
     if (!info) return;
@@ -319,10 +379,15 @@ export class LanguageService implements vscode.Disposable {
     const session: Session = { context, configuration: lease, lease: lease.lease, state, observers: [] }; this.session = session;
     let started = false;
     try {
-      if (!this.current(revision, signal)) return;
+      if (!this.current(revision, signal) || (observation && observation.version !== 0)) return;
       if (prepared.status !== "current" || lease.status !== "current" || prepared.path !== join(context.root, "bsl-analyzer.toml")
         || prepared.path !== lease.path || prepared.context !== context.name || lease.context !== context.name
         || prepared.fingerprint !== lease.fingerprint || prepared.body !== lease.body || prepared.token !== lease.token) throw new ExplorerError("obsolete");
+      if (observation) {
+        const renewed = analysisContext(await resolveContext());
+        if (!this.current(revision, signal)) return;
+        if (JSON.stringify(renewed) !== JSON.stringify(context)) { this.scheduleConfigurationCheck(); return; }
+      }
       const middleware = this.readingMiddleware(revision, signal);
       session.progress = new LanguageProgress(() => this.current(revision, signal), () => this.queryLanguage?.changed());
       middleware.handleWorkDoneProgress = session.progress.handle;
@@ -371,7 +436,7 @@ export class LanguageService implements vscode.Disposable {
         .map(source => source.root));
       if (!this.current(revision, signal)) return;
       await client.start();
-      if (!this.current(revision, signal)) return;
+      if (!this.current(revision, signal) || (observation && observation.version !== 0)) return;
       if (client.initializeResult?.serverInfo?.name !== "bsl-analyzer" || client.initializeResult.serverInfo.version !== info.version) throw new ToolFailure("incompatible", "lsp-server-info");
       await this.context.workspaceState.update(this.selectionKey(state), context.name ?? undefined);
       if (!this.current(revision, signal)) return;
@@ -554,7 +619,9 @@ export class LanguageService implements vscode.Disposable {
     const code = analyzerFailure(error) ?? (error instanceof ToolFailure ? error.detail || error.code : error instanceof ExplorerError ? error.code : "language");
     this.log(JSON.stringify({ event: "language_failed", code }), "error");
     if (this.refreshConflict()) { this.showConflictState(); return; }
-    const detail = code === "migration_required" ? this.text("languageMigrationRequired") : code === "managed_conflict" ? this.text("languageManagedConflict") : this.text("languageFailed", code);
+    const library = libraryFailure(error);
+    const detail = library ? this.text("languageLibraryFailed", library.name, library.configuration)
+      : code === "migration_required" ? this.text("languageMigrationRequired") : code === "managed_conflict" ? this.text("languageManagedConflict") : this.text("languageFailed", code);
     this.tooling.analyzerState("error", detail);
     void vscode.window.showErrorMessage(detail);
   }
@@ -563,5 +630,5 @@ export class LanguageService implements vscode.Disposable {
   async shutdown(): Promise<void> { this.dispose(); await this.stop(); }
 
   /** The synchronous hook invalidates late work immediately; shutdown owns the awaited teardown. */
-  dispose(): void { if (!this.disposed) { this.disposed = true; ++this.revision; this.scope?.abort(); for (const value of this.subscriptions) value.dispose(); } }
+  dispose(): void { if (!this.disposed) { this.disposed = true; this.clearLibraryObservation(); ++this.revision; this.scope?.abort(); for (const value of this.subscriptions) value.dispose(); } }
 }
