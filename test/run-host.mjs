@@ -25,7 +25,7 @@ try {
   await writeFile(join(root, "profile", "User", "settings.json"), JSON.stringify({
     "workbench.startupEditor": "none", "onboarding.enabled": false,
   }));
-  const fixture = await createTreeProject(join(root, "project"), ["language-reference-host.cjs", "language-library-host.cjs"].includes(basename(suite)) ? "processing" : process.env.ESKA_HOST_PROJECT_TYPE ?? "configuration");
+  const fixture = await createTreeProject(join(root, "project"), ["language-reference-host.cjs", "language-library-host.cjs", "language-add-host.cjs"].includes(basename(suite)) ? "processing" : process.env.ESKA_HOST_PROJECT_TYPE ?? "configuration");
   if (["query-layout-host.cjs", "query-compact-performance-host.cjs"].includes(basename(suite))) {
     fixture.query = await (await import("./query-fixture.mjs")).createQuerySource(fixture);
     const fields = Array.from({ length: 48 }, (_, index) => `${index} AS КолонкаРезультата${index}WithLongEnglishName`).join(',\r\n|');
@@ -44,8 +44,11 @@ try {
   if (basename(suite) === "language-reference-host.cjs") {
     fixture.reference = await (await import("./language-fixture.mjs")).createReferenceSource(fixture, root);
   }
-  if (basename(suite) === "language-library-host.cjs") {
+  if (["language-library-host.cjs", "language-add-host.cjs"].includes(basename(suite))) {
     fixture.library = await (await import("./language-fixture.mjs")).createLibrarySource(fixture, root);
+    if (basename(suite) === "language-add-host.cjs") {
+      await writeFile(join(fixture.root, "eska.toml"), "[project]\ntype='processing'\n[tools.bsl-analyzer.diagnostics.parameters]\nLineLength=false\n");
+    }
     if (process.env.ESKA_HOST_LIBRARY_MISSING === "1") await rm(fixture.library.config);
     if (process.env.ESKA_HOST_LIBRARY_MISSING === "directory") await rm(fixture.library.configDir, { recursive: true });
   }

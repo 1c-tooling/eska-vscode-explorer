@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
-import { dirname, isAbsolute, relative, sep } from "node:path";
+import { dirname, isAbsolute, join, relative, sep } from "node:path";
+import { watchFile, unwatchFile, type Stats } from "node:fs";
 import { MetadataTree, type ProjectTree } from "./tree.js";
 import { nativePath } from "./source.js";
 
@@ -110,17 +111,20 @@ export function watchManifests(start: string, projects: readonly ProjectTree[], 
     if (dirname(folder) === folder) break;
   }
   let timer: NodeJS.Timeout | undefined;
-  const watchers = [...folders].map((path) => {
-    const watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(vscode.Uri.file(path), "eska.toml"));
-    /** Replace the discovery session once after a burst of manifest changes. */
-    const update = (uri: vscode.Uri): void => {
-      if (uri.scheme !== "file") return;
+  let disposed = false;
+  const watchers = [...folders].map(folder => {
+    const path = join(folder, "eska.toml");
+    // Workspace-native watchers can miss an edit during startup or below an excluded parent.
+    // Poll only these exact small manifest files, including initially absent ancestors.
+    const update = (current: Stats, previous: Stats): void => {
+      if (disposed || current.mtimeMs === previous.mtimeMs && current.ctimeMs === previous.ctimeMs
+        && current.size === previous.size && current.ino === previous.ino && current.nlink === previous.nlink) return;
       observed(); clearTimeout(timer); timer = setTimeout(changed, 150);
     };
-    watcher.onDidCreate(update); watcher.onDidChange(update); watcher.onDidDelete(update);
-    return watcher;
+    watchFile(path, { persistent: false, interval: 1000 }, update);
+    return { dispose: () => unwatchFile(path, update) };
   });
-  return { dispose: () => { clearTimeout(timer); for (const watcher of watchers) watcher.dispose(); } };
+  return { dispose: () => { disposed = true; clearTimeout(timer); for (const watcher of watchers) watcher.dispose(); } };
 }
 
 /** Observe one expanded filesystem directory and coalesce changes without traversing descendants. */
