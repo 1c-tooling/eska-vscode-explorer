@@ -20,7 +20,7 @@ import { message, type MessageKey } from "./messages.js";
 import { ExplorerError, type BackendKind } from "./protocol.js";
 import type { PropertyChoice } from "./properties.js";
 import { PropertyTabs } from "./properties-view.js";
-import { MetadataTree, type TreeEntry, type ProjectTree } from "./tree.js";
+import { MetadataTree, nodeKey, type TreeEntry, type ProjectTree } from "./tree.js";
 import { ProjectSorting, type SortOrder } from "./sorting.js";
 import { ProjectFilters, isHiddenSection, supportsRootFilter } from "./filter.js";
 import { nativePath, isCommonModule, directModuleRole, isModuleLeaf, isForm, resolveSource, resolveTreeSource, resolvePropertySource, type SourceTarget } from "./source.js";
@@ -32,9 +32,10 @@ import { queryBranches, queryLabel, queryLeaf, type QueryEntry } from "./query/t
 import { WorkspaceFiles, fileName, type WorkspaceEntry } from "./workspace-files.js";
 import { ProjectWatcher, watchManifests, watchDirectory } from "./watch.js";
 import { basename } from "node:path";
+import { ProjectGroups, type ProjectGroup } from "./project-groups.js";
 
 interface Notice { label: string; loading?: boolean; supportFailure?: boolean; project?: ProjectTree; parent?: Element }
-type Element = TreeEntry | Notice | FormSource | WorkspaceEntry | QueryEntry;
+type Element = TreeEntry | Notice | FormSource | WorkspaceEntry | QueryEntry | ProjectGroup;
 
 let active: Explorer | undefined;
 
@@ -76,6 +77,7 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
       domain: error instanceof ExplorerError ? error.domain : undefined })));
   private readonly supportContexts: SupportContexts;
   private tree: MetadataTree | undefined;
+  private projectGroups: ProjectGroups | undefined;
   private files: WorkspaceFiles | undefined;
   private searchView: SearchView | undefined;
   private watchers: vscode.Disposable[] = [];
@@ -280,7 +282,7 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
     this.treeReads.add(reading);
     void reading.finally(() => { this.treeReads.delete(reading); }).catch(() => {});
     void reading.then(children => {
-      if (!entry && tree && tree === this.tree && children.some(child => "node" in child && !child.node.parent)) {
+      if (!entry && tree && tree === this.tree && children.some(child => "projectGroup" in child || ("node" in child && !child.node.parent))) {
         this.publishedTree = tree;
         for (const resolve of this.rootWaiters) resolve();
         this.rootWaiters.clear();
@@ -294,6 +296,10 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
     const tree = this.tree;
     if (tree) {
       try {
+        if (entry && "projectGroup" in entry) {
+          if (!this.projectGroups?.contains(entry)) return [];
+          return Promise.all(entry.projects.map(project => this.projectRoot(tree, project, entry)));
+        }
         if (entry && "queryKind" in entry) return entry.queryKind === "branch" ? [queryLeaf(entry)] : [];
         if (entry && "fileKind" in entry) {
           const children = await this.files?.children(entry) ?? [];
@@ -314,9 +320,8 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
             && !(directModuleRole(entry) && child.node.id.kind === "collection" && child.node.id.collection.kind === "modules")));
           children.push(...await this.queryRows(tree, entry));
         }
-        else for (const project of tree.projects) {
-          try { children.push(await tree.root(project)); }
-          catch (error) { children.push({ label: this.text(error instanceof ExplorerError ? error.code : "branchInvalid"), project }); }
+        else for (const row of this.projectGroups?.roots ?? tree.projects) {
+          children.push("projectGroup" in row ? row : await this.projectRoot(tree, row));
         }
         if (!entry || !entry.node.parent) children.push(...await this.files?.groups(entry?.project) ?? []);
         return tree === this.tree ? children : [];
@@ -331,7 +336,13 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
       }
     }
     const state = this.connection.state;
-    return [{ label: this.text(state.kind === "error" ? state.error.code : state.kind === "ready" ? "connecting" : state.kind) }];
+    return entry ? [] : [{ label: this.text(state.kind === "error" ? state.error.code : state.kind === "ready" ? "connecting" : state.kind) }];
+  }
+
+  /** A broken member remains beside its own group, without hiding healthy siblings. */
+  private async projectRoot(tree: MetadataTree, project: ProjectTree, parent?: ProjectGroup): Promise<TreeEntry | Notice> {
+    try { return await tree.root(project); }
+    catch (error) { return { label: this.text(error instanceof ExplorerError ? error.code : "branchInvalid"), project, ...(parent ? { parent } : {}) }; }
   }
 
   /** Discover persisted query identities through the backend while leaving unsupported template payloads alone. */
@@ -346,6 +357,13 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
 
   /** Native TreeItems inherit zoom, keyboard navigation, themes and accessible text from VS Code. */
   getTreeItem(entry: Element): vscode.TreeItem {
+    if ("projectGroup" in entry) {
+      const keys = { extension: "projectExtensions", report: "projectReports", processing: "projectProcessors" } as const;
+      const item = new vscode.TreeItem(message(this.treeLanguage, keys[entry.projectGroup]), this.expanded.get(entry.key)
+        ? vscode.TreeItemCollapsibleState.Expanded : vscode.TreeItemCollapsibleState.Collapsed);
+      item.id = entry.key; item.contextValue = "eskaProjectGroup"; item.iconPath = vscode.ThemeIcon.Folder;
+      return item;
+    }
     if ("queryKind" in entry) {
       const item = new vscode.TreeItem(entry.queryKind === "branch" ? queryLabel(entry.header.identity) : this.text("queryText"),
         entry.queryKind === "branch" ? vscode.TreeItemCollapsibleState.Collapsed : vscode.TreeItemCollapsibleState.None);
@@ -444,6 +462,7 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
 
   /** Native reveal uses backend-provided ancestry already present in the lazy tree. */
   getParent(entry: Element): Element | undefined {
+    if ("projectGroup" in entry) return undefined;
     if ("queryKind" in entry) return entry.queryKind === "query" ? entry.parent : entry.owner;
     if ("fileKind" in entry) {
       if (entry.fileKind === "entry") return entry.parent;
@@ -451,7 +470,7 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
     }
     if ("owner" in entry) return entry.owner;
     if (!("node" in entry)) return entry.parent;
-    return this.tree?.parent(entry);
+    return entry.node.parent ? this.tree?.parent(entry) : this.projectGroups?.parent(entry.project);
   }
 
   /** Limit shortcut overrides to files in the connected projects, including multi-root workspaces. */
@@ -503,6 +522,11 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
     for (;;) {
       if (this.tree !== tree || this.disposed) throw new ExplorerError("obsolete");
       try {
+        const group = this.projectGroups?.parent(project);
+        if (group) {
+          await this.getChildren(group);
+          this.expanded.set(group.key, true);
+        }
         await this.view.reveal(root, { expand: true, select: false, focus: false });
         return;
       } catch (error) {
@@ -683,7 +707,7 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
     const node = entry && "owner" in entry ? entry.owner : entry && "node" in entry ? entry
       : parent && "node" in parent ? parent : undefined;
     const project = node?.project ?? (entry && "project" in entry ? entry.project : undefined);
-    const projects = project ? [project] : tree.projects;
+    const projects = entry && "projectGroup" in entry ? entry.projects : project ? [project] : tree.projects;
     for (const project of projects) {
       this.recovering.add(project);
       try { await tree.refresh(project, project.info.requiresRefresh ? undefined : node); }
@@ -691,6 +715,30 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
         if (tree === this.tree) this.showError(error instanceof ExplorerError ? error : new ExplorerError("branchInvalid"));
       } finally { this.recovering.delete(project); }
     }
+  }
+
+  /** Manifest membership changes can move a surviving node into or out of a virtual group. */
+  private async reconnectWorkspace(): Promise<void> {
+    const selected = this.view.selection[0], previous = this.tree;
+    const path: TreeEntry[] = [];
+    if (previous && selected && "node" in selected) {
+      for (let entry: TreeEntry | undefined = selected; entry; entry = previous.parent(entry)) path.unshift(entry);
+    }
+    await this.connect(false);
+    const tree = this.tree, saved = path[0];
+    if (!tree || !saved || this.disposed) return;
+    const project = tree.projects.find(candidate => candidate.key === saved.project.key);
+    if (!project) return;
+    try {
+      await this.expandRootForReveal(tree, project);
+      let target = await tree.root(project);
+      for (const old of path.slice(1)) {
+        const child = (await tree.children(target)).find(entry => nodeKey(entry.node.id) === nodeKey(old.node.id));
+        if (!child) break;
+        target = child;
+      }
+      if (this.tree === tree && !this.disposed) await this.view.reveal(target, { select: true, focus: false });
+    } catch (error) { this.output.info(`group_selection_error code=${error instanceof ExplorerError ? error.code : "requestFailed"}`); }
   }
 
   /** Automatic recovery is bounded to one attempt; a failed XML stays visible until corrected. */
@@ -898,6 +946,7 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
     this.files?.dispose();
     this.files = undefined;
     this.tree = undefined;
+    this.projectGroups?.update([]);
     this.clearRootPublication();
     for (const watcher of this.watchers) watcher.dispose();
     this.watchers = [];
@@ -911,6 +960,8 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
           for (const watcher of this.watchers) if (watcher instanceof ProjectWatcher) await watcher.flush();
         });
       this.tree = tree;
+      if (this.projectGroups?.workspace !== state.target.path) this.projectGroups = new ProjectGroups(state.target.path);
+      this.projectGroups.update(tree.projects);
       this.files = new WorkspaceFiles(tree.projects, state.target.path, watchDirectory, entry => {
         if (this.tree !== tree) return;
         this.changed.fire(entry && ("fileKind" in entry ? entry : entry.root));
@@ -919,7 +970,7 @@ class Explorer implements vscode.TreeDataProvider<Element>, vscode.Disposable {
         for (const project of tree.projects) this.watchers.push(new ProjectWatcher(tree, project,
           (error) => { this.output.info(`watch_error code=${error instanceof ExplorerError ? error.code : "requestFailed"}`); },
           path => this.language.sourceChanged(path)));
-        this.watchers.push(watchManifests(state.target.path, tree.projects, () => { void this.connect(false); }, () => this.language.manifestChanged()));
+        this.watchers.push(watchManifests(state.target.path, tree.projects, () => { void this.reconnectWorkspace(); }, () => this.language.manifestChanged()));
       } catch (error) { this.showError(error instanceof ExplorerError ? error : new ExplorerError("unsupportedPath")); }
     }
     this.support.setTree(this.tree, state.kind === "ready" && state.supportPolicy, state.kind === "disconnected" || state.kind === "stopping", state.kind === "ready" && state.supportFiles);

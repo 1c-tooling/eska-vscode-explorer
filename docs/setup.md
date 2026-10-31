@@ -48,3 +48,11 @@ calls keep their native hints. This changes neither source text nor font setting
 Alignment requires `editor.inlayHints.enabled = "on"`. Conditional modifier-key
 modes, explicit accessibility support, and actionable/resolvable hints retain
 native rendering without alignment. [Details](language-service.md).
+
+## Workspace project groups
+
+Two or more visible extensions, reports or data processors of the same type
+form a virtual group. The threshold is independent for each type. A single member
+and configuration projects stay at the original level. Labels follow the tree
+language. Search and reveal-from-file expand the right group; membership changes
+retain surviving metadata selections and expansion without rewriting sources.

@@ -50,3 +50,21 @@ export async function addCommonModules(fixture) {
     await writeFile(join(fixture.source, "CommonModules", name, "Ext", name === "Обмен" ? "Module.bsl" : "Module.bin"), "// Common module\r\n");
   }
 }
+
+/** Prepare every member before activation; tests change only their own workspace membership. */
+export async function createProjectGroupingSource(fixture) {
+  const members = {};
+  for (const [name,type] of [["base","configuration"],["extension-one","extension"],["extension-two","extension"],
+    ["report-one","report"],["report-two","report"],["processing-one","processing"],["processing-two","processing"]]) {
+    const project = await createTreeProject(join(fixture.root,"members",name),type);
+    await writeFile(join(project.root,"eska.toml"),`[project]\nname='${name}'\ntype='${type}'\n`);
+    if (type === "configuration" || type === "extension") {
+      await mkdir(join(project.source,"Ext"),{recursive:true});
+      await writeFile(join(project.source,"Ext","ParentConfigurations.bin"),"{6,0,0,0,0,0}");
+    }
+    members[name] = {...project,type};
+  }
+  const manifest = "[workspace]\n[workspace.members.app]\nconfiguration='members/base'\nextensions=[{path='members/extension-one'}]\nexternal_objects=['members/report-one','members/processing-one']\n";
+  await writeFile(join(fixture.root,"eska.toml"),manifest);
+  return {members,manifest};
+}

@@ -1,6 +1,9 @@
 import type { FailureCode } from "./protocol.js";
 
 const en = {
+  projectExtensions: "Extensions",
+  projectReports: "Reports",
+  projectProcessors: "Data processors",
   formatMissing: "eska-fmt is not installed. Install the formatter component or set its executable path.",
   formatIncompatible: "Formatting requires compatible eska-project and eska-fmt components. Update them or check the configured paths.",
   formatReadonly: "ESKA cannot format this document while it is read-only or owned by another editing session.",
@@ -458,6 +461,9 @@ const en = {
 } as const;
 
 const ru: Record<keyof typeof en, string> = {
+  projectExtensions: "Расширения",
+  projectReports: "Отчеты",
+  projectProcessors: "Обработки",
   formatMissing: "eska-fmt не установлен. Установите компонент форматтера или укажите путь к нему.",
   formatIncompatible: "Для форматирования нужны совместимые eska-project и eska-fmt. Обновите компоненты или проверьте указанные пути.",
   formatReadonly: "ESKA не может форматировать документ, пока он доступен только для чтения или принадлежит другой сессии редактирования.",
